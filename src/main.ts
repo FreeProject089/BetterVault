@@ -5,6 +5,7 @@ import { generateTOTP } from './crypto/totpEngine';
 import { calculatePasswordEntropy, generateStrongPassword, generatePassphrase, hashVaultPassword, auditVaultSecurity, checkPasswordPwnedHIBP } from './crypto/vaultCrypto';
 import { parseImportFile, exportVaultAsJson, exportVaultAsCsv, downloadExportFile } from './import_export/importEngine';
 import { isBiometricsAvailable, verifyBiometrics } from './crypto/webauthn';
+import { syncEngine } from './sync/syncEngine';
 import { i18n } from './i18n';
 
 type ActiveView = 'all-credentials' | '2fa-tokens' | 'tasks';
@@ -23,6 +24,7 @@ class AppController {
   private clipboardClearTimer: number | null = null;
 
   constructor() {
+    this.initTheme();
     this.initEventListeners();
     this.initMobileControls();
     this.initI18n();
@@ -43,6 +45,39 @@ class AppController {
       this.renderCounts();
       if (this.selectedItemId) this.renderDetail(this.selectedItemId);
     });
+  }
+
+  /* ── Theme Toggle (Dark / Light) ──────────────────────────────────────── */
+  private initTheme(): void {
+    const saved = localStorage.getItem('bum-theme');
+    if (saved === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+    this.updateThemeIcons();
+
+    document.getElementById('btn-theme-toggle')?.addEventListener('click', () => {
+      const current = document.documentElement.getAttribute('data-theme');
+      const next = current === 'light' ? 'dark' : 'light';
+      if (next === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+      } else {
+        document.documentElement.removeAttribute('data-theme');
+      }
+      localStorage.setItem('bum-theme', next);
+      // Update meta theme-color
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute('content', next === 'light' ? '#f6f8fa' : '#161b22');
+      this.updateThemeIcons();
+      this.showToast(next === 'light' ? 'Light mode' : 'Dark mode', 'info', 1500);
+    });
+  }
+
+  private updateThemeIcons(): void {
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    const moon = document.getElementById('theme-icon-moon');
+    const sun = document.getElementById('theme-icon-sun');
+    if (moon) moon.style.display = isLight ? 'none' : 'block';
+    if (sun) sun.style.display = isLight ? 'block' : 'none';
   }
 
   /* ── Internationalisation (i18n & i10n) ─────────────────────────────────── */
@@ -267,6 +302,16 @@ class AppController {
         this.openShortcutsModal();
         return;
       }
+
+      // Touche 'Escape' : Fermer la modale ouverte
+      if (e.key === 'Escape') {
+        const overlay = document.getElementById('modal-overlay');
+        if (overlay) {
+          e.preventDefault();
+          this.closeModal();
+          return;
+        }
+      }
     });
 
     const btnAdd = document.getElementById('btn-add-item');
@@ -290,6 +335,14 @@ class AppController {
 
     document.getElementById('btn-open-import')?.addEventListener('click', () => {
       this.openImportModal();
+    });
+
+    document.getElementById('btn-open-sync')?.addEventListener('click', () => {
+      this.openSyncModal();
+    });
+
+    document.getElementById('btn-open-shortcuts')?.addEventListener('click', () => {
+      this.openShortcutsModal();
     });
 
     document.getElementById('btn-add-vault')?.addEventListener('click', () => {
@@ -711,6 +764,8 @@ class AppController {
           <div class="record-sub">${cred.username || cred.domain || 'Sans login'}</div>
         </div>
         <div class="record-badges">
+          ${cred.expiresAt && cred.expiresAt < Date.now() ? '<span class="badge" style="color:var(--accent-red);border-color:rgba(218,54,51,0.4);">EXP</span>' : ''}
+          ${cred.expiresAt && cred.expiresAt >= Date.now() && cred.expiresAt - Date.now() <= 14 * 86400000 ? '<span class="badge" style="color:var(--accent-orange);border-color:rgba(210,153,34,0.4);">EXP</span>' : ''}
           ${cred.totpSecret ? '<span class="badge" style="color:var(--accent-blue);border-color:rgba(88,166,255,0.3);">2FA</span>' : ''}
           ${cred.passkeys && cred.passkeys.length > 0 ? '<span class="badge" style="color:var(--accent-purple);">PK</span>' : ''}
         </div>
@@ -1026,6 +1081,36 @@ class AppController {
     const favColor = cred.isFavorite ? 'var(--accent-orange)' : 'var(--text-muted)';
     const favTitle = cred.isFavorite ? 'Retirer des favoris' : 'Ajouter aux favoris';
 
+    // Calcul de l'état d'expiration
+    let expiryAlertHTML = '';
+    if (cred.expiresAt) {
+      const now = Date.now();
+      const diffDays = Math.ceil((cred.expiresAt - now) / (1000 * 60 * 60 * 24));
+      const formattedDate = new Date(cred.expiresAt).toLocaleDateString(i18n.getLocale() === 'fr' ? 'fr-FR' : 'en-US');
+      if (diffDays < 0) {
+        expiryAlertHTML = `
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(218,54,51,0.12);border:1px solid rgba(218,54,51,0.3);border-radius:var(--radius-md);color:var(--accent-red);font-size:12px;margin-bottom:12px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+            <span>${i18n.getLocale() === 'fr' ? `Mot de passe expiré le ${formattedDate}. Renouvellement urgent conseillé.` : `Password expired on ${formattedDate}. Renewal recommended.`}</span>
+          </div>
+        `;
+      } else if (diffDays <= 14) {
+        expiryAlertHTML = `
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(210,153,34,0.12);border:1px solid rgba(210,153,34,0.3);border-radius:var(--radius-md);color:var(--accent-orange);font-size:12px;margin-bottom:12px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+            <span>${i18n.getLocale() === 'fr' ? `Expire dans ${diffDays} jour(s) (${formattedDate}).` : `Expires in ${diffDays} day(s) (${formattedDate}).`}</span>
+          </div>
+        `;
+      } else {
+        expiryAlertHTML = `
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 12px;background:var(--bg-tertiary);border:1px solid var(--border-subtle);border-radius:var(--radius-md);color:var(--text-secondary);font-size:11px;margin-bottom:12px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+            <span>${i18n.getLocale() === 'fr' ? `Renouvellement prévu le ${formattedDate}` : `Renewal scheduled on ${formattedDate}`}</span>
+          </div>
+        `;
+      }
+    }
+
     container.innerHTML = `
       <div class="detail-header">
         <div class="detail-header-left">
@@ -1061,6 +1146,7 @@ class AppController {
       </div>
 
       <div class="detail-content">
+        ${expiryAlertHTML}
         ${totpHTML}
 
         <div class="field-group">
@@ -1432,6 +1518,10 @@ class AppController {
           <input class="form-input" id="field-totp" type="text" placeholder="JBSWY3DPEHPK3PXP" value="${existing?.totpSecret || ''}" autocomplete="off">
         </div>
         <div class="form-field">
+          <label class="form-label">Date d'expiration / Renouvellement — optionnel</label>
+          <input class="form-input" id="field-expires-at" type="date" value="${existing?.expiresAt ? new Date(existing.expiresAt).toISOString().split('T')[0] : ''}">
+        </div>
+        <div class="form-field">
           <label class="form-label">Notes</label>
           <textarea class="note-editor" id="field-notes" placeholder="Codes de récupération, informations supplémentaires...">${existing?.notes || ''}</textarea>
         </div>
@@ -1461,6 +1551,8 @@ class AppController {
       const username = (box.querySelector('#field-username') as HTMLInputElement)?.value.trim();
       const totpSecret = (box.querySelector('#field-totp') as HTMLInputElement)?.value.trim();
       const notes = (box.querySelector('#field-notes') as HTMLTextAreaElement)?.value;
+      const expiresVal = (box.querySelector('#field-expires-at') as HTMLInputElement)?.value;
+      const expiresAt = expiresVal ? new Date(expiresVal).getTime() : undefined;
 
       if (isEdit && existing) {
         vaultStore.updateCredential(existing.id, {
@@ -1470,7 +1562,8 @@ class AppController {
           password,
           domain: website ? (website.replace(/^https?:\/\//, '').split('/')[0]) : '',
           totpSecret: totpSecret || undefined,
-          notes: notes || ''
+          notes: notes || '',
+          expiresAt
         });
         this.closeModal();
         this.showToast('Identifiant mis à jour (historique conservé)', 'success');
@@ -1486,7 +1579,8 @@ class AppController {
           totpSecret: totpSecret || undefined,
           notes: notes || '',
           tags: [],
-          isFavorite: false
+          isFavorite: false,
+          expiresAt
         });
         this.closeModal();
         this.showToast('Identifiant créé', 'success');
@@ -1914,6 +2008,13 @@ class AppController {
                 <div style="font-size:11px;color:var(--text-muted);">Compatible avec Bitwarden, 1Password, Excel et navigateurs</div>
               </div>
             </button>
+            <button class="btn-primary" id="btn-export-extension" style="justify-content:flex-start;padding:12px 16px;gap:12px;background-color:var(--bg-tertiary);border-color:var(--border-subtle);color:var(--text-primary);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-purple)" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+              <div style="text-align:left;">
+                <div style="font-size:13px;font-weight:600;">Synchroniser avec l'Extension Navigateur</div>
+                <div style="font-size:11px;color:var(--text-muted);">Transférer les identifiants vers l'extension BUM locale pour remplissage auto</div>
+              </div>
+            </button>
           </div>
         </div>
       </div>
@@ -1964,6 +2065,30 @@ class AppController {
       this.showToast(i18n.getLocale() === 'fr' ? 'Export CSV téléchargé' : 'CSV export downloaded', 'success');
     });
 
+    box.querySelector('#btn-export-extension')?.addEventListener('click', () => {
+      const extensionPayload = creds.map(c => ({
+        id: c.id,
+        title: c.title,
+        username: c.username,
+        password: c.password,
+        website: c.website
+      }));
+      try {
+        if (typeof (window as any).chrome !== 'undefined' && (window as any).chrome?.storage?.local) {
+          (window as any).chrome.storage.local.set({ bum_credentials: extensionPayload }, () => {
+            this.showToast(i18n.getLocale() === 'fr' ? 'Synchronisé avec l\'extension locale' : 'Synced with local extension', 'success');
+          });
+        } else {
+          // Si ouvert en dehors du contexte d'extension, téléchargement du manifest JSON pour l'extension
+          const jsonStr = JSON.stringify(extensionPayload, null, 2);
+          downloadExportFile(jsonStr, 'bum-extension-credentials.json', 'application/json');
+          this.showToast(i18n.getLocale() === 'fr' ? 'Fichier pour extension téléchargé' : 'Extension file downloaded', 'success');
+        }
+      } catch {
+        this.showToast('Erreur lors de la synchronisation extension', 'error');
+      }
+    });
+
     // Actions Import
     let parsedResult: { credentials: any[]; tasks: any[]; sourceFormat: string; count: number } = { credentials: [], tasks: [], sourceFormat: 'unknown', count: 0 };
     const statusEl = box.querySelector('#import-status') as HTMLElement;
@@ -2004,6 +2129,127 @@ class AppController {
       this.closeModal();
       const importedLabel = i18n.getLocale() === 'fr' ? `${parsedResult.count} identifiant(s) importé(s)` : `${parsedResult.count} item(s) imported`;
       this.showToast(importedLabel, 'success');
+    });
+  }
+
+  /* ── Synchronisation Chiffrée E2EE ─────────────────────────────────────── */
+  private openSyncModal(): void {
+    const config = syncEngine.getConfig();
+    const lastSyncFormatted = config.lastSyncTimestamp
+      ? new Date(config.lastSyncTimestamp).toLocaleString(i18n.getLocale() === 'fr' ? 'fr-FR' : 'en-US')
+      : i18n.t.syncModal.neverSynced;
+
+    const statusBadge = config.status === 'success'
+      ? `<span class="badge" style="color:var(--accent-green);border-color:rgba(35,134,54,0.4);">${i18n.t.syncModal.statusSuccess}</span>`
+      : config.status === 'syncing'
+      ? `<span class="badge" style="color:var(--accent-blue);border-color:rgba(88,166,255,0.4);">${i18n.t.syncModal.statusSyncing}</span>`
+      : config.status === 'error'
+      ? `<span class="badge" style="color:var(--accent-red);border-color:rgba(218,54,51,0.4);">${i18n.t.syncModal.statusError}</span>`
+      : `<span class="badge" style="color:var(--text-muted);border-color:var(--border-subtle);">${i18n.t.syncModal.statusIdle}</span>`;
+
+    const box = this.openModal(`
+      <div class="modal-header">
+        <div class="modal-title" style="display:flex;align-items:center;gap:8px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+          </svg>
+          ${i18n.t.syncModal.title}
+        </div>
+        <button class="modal-close" id="modal-close-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;line-height:1.5;">${i18n.t.syncModal.description}</p>
+        
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:var(--radius-md);margin-bottom:16px;">
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--text-primary);">${i18n.t.syncModal.enableSync}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${i18n.t.syncModal.lastSynced} ${lastSyncFormatted}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            ${statusBadge}
+            <input type="checkbox" id="sync-enabled" ${config.enabled ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--accent-blue);cursor:pointer;">
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label class="form-label">${i18n.t.syncModal.serverUrlLabel}</label>
+          <input class="form-input" id="sync-url" type="url" placeholder="https://sync.votre-serveur.com/api/v1/relay" value="${config.endpointUrl || ''}" autocomplete="off">
+        </div>
+
+        <div class="form-field">
+          <label class="form-label">${i18n.t.syncModal.passphraseLabel}</label>
+          <input class="form-input" id="sync-passphrase" type="password" placeholder="${i18n.t.syncModal.passphrasePlaceholder}" autocomplete="off">
+        </div>
+
+        <div id="sync-message-box" style="display:none;margin-top:12px;padding:10px 12px;border-radius:var(--radius-md);font-size:12px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-primary" id="modal-close-sync" style="color:var(--text-muted);">${i18n.t.common.close}</button>
+        <button class="btn-primary" id="btn-trigger-sync" style="background-color:var(--accent-blue);color:#fff;">${i18n.t.syncModal.syncNowButton}</button>
+      </div>
+    `);
+
+    box.querySelector('#modal-close-btn')?.addEventListener('click', () => this.closeModal());
+    box.querySelector('#modal-close-sync')?.addEventListener('click', () => this.closeModal());
+
+    const enabledCheck = box.querySelector('#sync-enabled') as HTMLInputElement;
+    const urlInput = box.querySelector('#sync-url') as HTMLInputElement;
+    const pwdInput = box.querySelector('#sync-passphrase') as HTMLInputElement;
+    const msgBox = box.querySelector('#sync-message-box') as HTMLElement;
+    const btnSync = box.querySelector('#btn-trigger-sync') as HTMLButtonElement;
+
+    enabledCheck?.addEventListener('change', () => {
+      syncEngine.updateConfig({ enabled: enabledCheck.checked });
+    });
+
+    urlInput?.addEventListener('change', () => {
+      syncEngine.updateConfig({ endpointUrl: urlInput.value.trim() });
+    });
+
+    btnSync?.addEventListener('click', async () => {
+      const endpoint = urlInput.value.trim();
+      const pass = pwdInput.value;
+      if (!endpoint) {
+        msgBox.style.display = 'block';
+        msgBox.style.background = 'rgba(218,54,51,0.1)';
+        msgBox.style.color = 'var(--accent-red)';
+        msgBox.textContent = i18n.getLocale() === 'fr' ? 'Veuillez saisir l’URL du relais distant' : 'Please provide the remote relay URL';
+        return;
+      }
+      if (!pass) {
+        msgBox.style.display = 'block';
+        msgBox.style.background = 'rgba(218,54,51,0.1)';
+        msgBox.style.color = 'var(--accent-red)';
+        msgBox.textContent = i18n.getLocale() === 'fr' ? 'Clé secrète E2EE requise' : 'E2EE secret passphrase required';
+        return;
+      }
+
+      syncEngine.updateConfig({ enabled: true, endpointUrl: endpoint });
+      btnSync.disabled = true;
+      btnSync.textContent = i18n.t.syncModal.statusSyncing;
+
+      const data = vaultStore.getData();
+      const res = await syncEngine.syncWithRemote(data, pass);
+
+      btnSync.disabled = false;
+      btnSync.textContent = i18n.t.syncModal.syncNowButton;
+
+      msgBox.style.display = 'block';
+      if (res.success) {
+        msgBox.style.background = 'rgba(35,134,54,0.1)';
+        msgBox.style.color = 'var(--accent-green)';
+        msgBox.textContent = res.message;
+        this.showToast(res.message, 'success');
+      } else {
+        msgBox.style.background = 'rgba(218,54,51,0.1)';
+        msgBox.style.color = 'var(--accent-red)';
+        msgBox.textContent = res.message;
+        this.showToast(res.message, 'error');
+      }
     });
   }
 

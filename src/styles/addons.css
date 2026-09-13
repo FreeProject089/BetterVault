@@ -686,4 +686,35 @@
   color: var(--text-primary);
 }
 
+/* ── Light Theme Tweaks ──────────────────────────────────────────────── */
+:root[data-theme="light"] .brand-icon {
+  background: linear-gradient(135deg, #0969da, #8250df);
+  color: #fff;
+}
 
+:root[data-theme="light"] .vault-locked-icon {
+  background-color: rgba(207, 34, 46, 0.08);
+  border-color: rgba(207, 34, 46, 0.2);
+}
+
+:root[data-theme="light"] .toast {
+  background-color: #ffffff;
+  border-color: var(--border-subtle);
+  box-shadow: 0 8px 24px rgba(31, 35, 40, 0.12);
+}
+
+:root[data-theme="light"] .modal-box {
+  background-color: #ffffff;
+}
+
+:root[data-theme="light"] .kanban-card:hover {
+  box-shadow: 0 4px 10px rgba(31, 35, 40, 0.1);
+}
+
+:root[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: #c1c8cf;
+}
+
+:root[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: #8b949e;
+}

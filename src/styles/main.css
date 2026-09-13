@@ -34,6 +34,34 @@
   --shadow-modal: 0 16px 32px rgba(0, 0, 0, 0.8), 0 0 0 1px var(--border-subtle);
 }
 
+/* ── Light Theme Override ──────────────────────────────────────────────── */
+:root[data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f6f8fa;
+  --bg-tertiary: #eaeef2;
+  --bg-hover: #d8dee4;
+  --bg-active: #2da44e;
+
+  --border-subtle: #d0d7de;
+  --border-muted: #e1e4e8;
+  --border-focus: #0969da;
+
+  --text-primary: #1f2328;
+  --text-secondary: #656d76;
+  --text-muted: #8b949e;
+
+  --accent-blue: #0969da;
+  --accent-green: #1a7f37;
+  --accent-green-bright: #2da44e;
+  --accent-red: #cf222e;
+  --accent-orange: #bf8700;
+  --accent-purple: #8250df;
+
+  --shadow-sm: 0 1px 2px rgba(31, 35, 40, 0.08);
+  --shadow-md: 0 4px 12px rgba(31, 35, 40, 0.12);
+  --shadow-modal: 0 16px 32px rgba(31, 35, 40, 0.2), 0 0 0 1px var(--border-subtle);
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -48,6 +76,7 @@ body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* Layout 3 Colonnes */
@@ -66,6 +95,7 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
+  transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
 .sidebar-header {

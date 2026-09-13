@@ -56,6 +56,7 @@ export interface CredentialItem {
   passwordHistory?: { password: string; changedAt: number }[];
   isFavorite?: boolean;
   tags: string[];
+  expiresAt?: number; // Timestamp d'expiration ou de rappel de renouvellement
   createdAt: number;
   updatedAt: number;
 }

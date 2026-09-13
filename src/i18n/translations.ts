@@ -42,6 +42,8 @@ export interface Translations {
     generator: string;
     audit: string;
     importExport: string;
+    shortcuts: string;
+    sync: string;
     newVaultTitle: string;
   };
   vault: {
@@ -160,6 +162,31 @@ export interface Translations {
     exportCsvButton: string;
     exportWarning: string;
   };
+  shortcutsModal: {
+    title: string;
+    description: string;
+    search: string;
+    newItem: string;
+    lockVault: string;
+    generator: string;
+    help: string;
+    escape: string;
+  };
+  syncModal: {
+    title: string;
+    description: string;
+    enableSync: string;
+    serverUrlLabel: string;
+    passphraseLabel: string;
+    passphrasePlaceholder: string;
+    syncNowButton: string;
+    statusIdle: string;
+    statusSyncing: string;
+    statusSuccess: string;
+    statusError: string;
+    neverSynced: string;
+    lastSynced: string;
+  };
 }
 
 export const fr: Translations = {
@@ -204,6 +231,8 @@ export const fr: Translations = {
     generator: 'Générateur Sécurisé',
     audit: 'Audit de Sécurité',
     importExport: 'Importer / Exporter',
+    shortcuts: 'Raccourcis Clavier',
+    sync: 'Synchronisation Chiffrée',
     newVaultTitle: 'Nouveau coffre fort'
   },
   vault: {
@@ -321,6 +350,31 @@ export const fr: Translations = {
     exportJsonButton: 'Exporter en JSON BUM (Complet avec métadonnées)',
     exportCsvButton: 'Exporter en CSV Universel',
     exportWarning: 'Attention : Les exports en clair ne sont pas chiffrés. Stockez-les dans un endroit sécurisé ou supprimez-les après usage.'
+  },
+  shortcutsModal: {
+    title: 'Raccourcis Clavier Rapides',
+    description: 'Accélérez votre flux de travail et naviguez dans BUM sans toucher la souris.',
+    search: 'Recherche globale',
+    newItem: 'Nouvel identifiant ou tâche',
+    lockVault: 'Verrouillage immédiat du coffre',
+    generator: 'Générateur de mot de passe',
+    help: 'Ouvrir cette aide clavier',
+    escape: 'Fermer la boîte de dialogue'
+  },
+  syncModal: {
+    title: 'Synchronisation Chiffrée (E2EE)',
+    description: 'Synchronisez vos coffres-forts avec un relais distant sécurisé en Zero-Knowledge.',
+    enableSync: 'Activer la synchronisation automatique',
+    serverUrlLabel: 'URL du relais distant (WebDAV / API)',
+    passphraseLabel: 'Clé secrète de synchronisation (E2EE)',
+    passphrasePlaceholder: 'Clé secrète partagée...',
+    syncNowButton: 'Synchroniser maintenant',
+    statusIdle: 'En attente',
+    statusSyncing: 'Synchronisation chiffrée en cours...',
+    statusSuccess: 'Dernière synchronisation réussie',
+    statusError: 'Erreur de synchronisation',
+    neverSynced: 'Jamais synchronisé',
+    lastSynced: 'Dernière synchro :'
   }
 };
 
@@ -366,6 +420,8 @@ export const en: Translations = {
     generator: 'Secure Generator',
     audit: 'Security Audit',
     importExport: 'Import / Export',
+    shortcuts: 'Keyboard Shortcuts',
+    sync: 'Encrypted Sync',
     newVaultTitle: 'New Vault'
   },
   vault: {
@@ -483,5 +539,30 @@ export const en: Translations = {
     exportJsonButton: 'Export as BUM JSON (Full with metadata)',
     exportCsvButton: 'Export as Universal CSV',
     exportWarning: 'Caution: Unencrypted exports are in plain text. Store securely or delete after use.'
+  },
+  shortcutsModal: {
+    title: 'Keyboard Shortcuts',
+    description: 'Boost your productivity and navigate BUM swiftly without a mouse.',
+    search: 'Global search',
+    newItem: 'New credential or task',
+    lockVault: 'Lock active vault instantly',
+    generator: 'Open password generator',
+    help: 'Open this keyboard shortcuts help',
+    escape: 'Close active modal'
+  },
+  syncModal: {
+    title: 'End-to-End Encrypted Sync (E2EE)',
+    description: 'Synchronize your vaults with a secure remote relay in zero-knowledge.',
+    enableSync: 'Enable automatic background sync',
+    serverUrlLabel: 'Remote relay URL (WebDAV / API)',
+    passphraseLabel: 'Sync secret passphrase (E2EE)',
+    passphrasePlaceholder: 'Shared secret passphrase...',
+    syncNowButton: 'Sync Now',
+    statusIdle: 'Idle',
+    statusSyncing: 'Encrypted sync in progress...',
+    statusSuccess: 'Last sync succeeded',
+    statusError: 'Sync failed',
+    neverSynced: 'Never synced',
+    lastSynced: 'Last synced:'
   }
 };

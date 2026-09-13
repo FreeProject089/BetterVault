@@ -44,7 +44,7 @@ export function generateTOTP(secretOrUri: string): TOTPTokenResult | null {
       progressPercent
     };
   } catch (err) {
-    console.error('Erreur génération TOTP:', err);
+    console.debug('Erreur génération TOTP:', err);
     return null;
   }
 }

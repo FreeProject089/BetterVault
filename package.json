@@ -22,7 +22,6 @@
   },
   "dependencies": {
     "lucide": "^1.45.0",
-    "otpauth": "^9.5.2",
-    "simple-icons": "^16.31.0"
+    "otpauth": "^9.5.2"
   }
 }

@@ -11,9 +11,6 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes('simple-icons')) {
-            return 'icons-vendor';
-          }
           if (id.includes('node_modules')) {
             return 'vendor';
           }
