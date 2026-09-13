@@ -193,22 +193,57 @@ export function generateStrongPassword(options: {
   symbols: boolean;
   avoidAmbiguous: boolean;
 }): string {
-  let chars = '';
-  if (options.lowercase) chars += options.avoidAmbiguous ? 'abcdefghijkmnpqrstuvwxyz' : 'abcdefghijklmnopqrstuvwxyz';
-  if (options.uppercase) chars += options.avoidAmbiguous ? 'ABCDEFGHJKLMNPQRSTUVWXYZ' : 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  if (options.numbers) chars += options.avoidAmbiguous ? '23456789' : '0123456789';
-  if (options.symbols) chars += '!@#$%^&*()-_=+[]{}|;:,.<>?';
+  const lower = options.avoidAmbiguous ? 'abcdefghijkmnpqrstuvwxyz' : 'abcdefghijklmnopqrstuvwxyz';
+  const upper = options.avoidAmbiguous ? 'ABCDEFGHJKLMNPQRSTUVWXYZ' : 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const digits = options.avoidAmbiguous ? '23456789' : '0123456789';
+  const syms = '!@#$%^&*()-_=+[]{}|;:,.<>?';
 
-  if (!chars) chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const requiredChars: string[] = [];
+  let allChars = '';
 
-  const array = new Uint32Array(options.length);
-  crypto.getRandomValues(array);
+  const pickRandom = (set: string) => {
+    const buf = new Uint32Array(1);
+    crypto.getRandomValues(buf);
+    return set[buf[0] % set.length];
+  };
 
-  let result = '';
-  for (let i = 0; i < options.length; i++) {
-    result += chars[array[i] % chars.length];
+  if (options.lowercase) {
+    allChars += lower;
+    requiredChars.push(pickRandom(lower));
   }
-  return result;
+  if (options.uppercase) {
+    allChars += upper;
+    requiredChars.push(pickRandom(upper));
+  }
+  if (options.numbers) {
+    allChars += digits;
+    requiredChars.push(pickRandom(digits));
+  }
+  if (options.symbols) {
+    allChars += syms;
+    requiredChars.push(pickRandom(syms));
+  }
+
+  if (!allChars) allChars = lower + upper + digits;
+
+  const remainingLength = Math.max(0, options.length - requiredChars.length);
+  const randomArray = new Uint32Array(remainingLength);
+  crypto.getRandomValues(randomArray);
+
+  const resultList = [...requiredChars];
+  for (let i = 0; i < remainingLength; i++) {
+    resultList.push(allChars[randomArray[i] % allChars.length]);
+  }
+
+  // Mélange cryptographique (Fisher-Yates)
+  const shuffleBuf = new Uint32Array(resultList.length);
+  crypto.getRandomValues(shuffleBuf);
+  for (let i = resultList.length - 1; i > 0; i--) {
+    const j = shuffleBuf[i] % (i + 1);
+    [resultList[i], resultList[j]] = [resultList[j], resultList[i]];
+  }
+
+  return resultList.slice(0, options.length).join('');
 }
 
 /**

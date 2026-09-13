@@ -87,11 +87,11 @@ export function parseImportFile(fileContent: string, fileName = ''): ImportResul
     const delimiter = header.includes(';') ? ';' : ',';
     const headerCols = header.split(delimiter).map(c => c.replace(/"/g, '').trim());
 
-    // Détection des index de colonnes
-    const titleIdx = headerCols.findIndex(c => c.includes('name') || c.includes('title'));
-    const urlIdx = headerCols.findIndex(c => c.includes('url') || c.includes('website') || c.includes('uri'));
-    const userIdx = headerCols.findIndex(c => c.includes('username') || c.includes('login') || c.includes('user') || c.includes('email'));
-    const passIdx = headerCols.findIndex(c => c.includes('password') || c.includes('pass'));
+    // Détection des index de colonnes avec précision
+    const titleIdx = headerCols.findIndex(c => c === 'name' || c === 'title' || c.includes('name') || c.includes('title'));
+    const urlIdx = headerCols.findIndex(c => c.includes('uri') || c.includes('url') || c.includes('website'));
+    const userIdx = headerCols.findIndex(c => c === 'login_username' || c === 'username' || c === 'email' || c.includes('username') || c.includes('email') || (c.includes('user') && !c.includes('uri')));
+    const passIdx = headerCols.findIndex(c => c === 'login_password' || c === 'password' || c.includes('password') || c.includes('pass'));
     const totpIdx = headerCols.findIndex(c => c.includes('totp') || c.includes('otp') || c.includes('2fa'));
     const notesIdx = headerCols.findIndex(c => c.includes('note') || c.includes('comment'));
 
