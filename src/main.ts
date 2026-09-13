@@ -20,6 +20,7 @@ class AppController {
   public totpInterval: number | null = null;
   private autoLockTimeout: number | null = null;
   private readonly AUTO_LOCK_DELAY_MS = 5 * 60 * 1000; // 5 minutes d'inactivité
+  private clipboardClearTimer: number | null = null;
 
   constructor() {
     this.initEventListeners();
@@ -144,6 +145,34 @@ class AppController {
       toast.style.transition = 'all 0.25s ease';
       setTimeout(() => toast.remove(), 300);
     }, durationMs);
+  }
+
+  /* ── Clipboard Auto-Clear (Zero-Knowledge Hygiene) ────────────────────── */
+  public async copyToClipboardWithAutoClear(text: string, label: string, isSensitive = false): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text);
+      if (isSensitive) {
+        if (this.clipboardClearTimer) window.clearTimeout(this.clipboardClearTimer);
+        const clearNotice = i18n.getLocale() === 'fr' ? `${label} (effacé dans 30s)` : `${label} (cleared in 30s)`;
+        this.showToast(clearNotice, 'success');
+
+        this.clipboardClearTimer = window.setTimeout(async () => {
+          try {
+            const currentClip = await navigator.clipboard.readText().catch(() => '');
+            if (currentClip === text) {
+              await navigator.clipboard.writeText('');
+              this.showToast(i18n.getLocale() === 'fr' ? 'Presse-papiers vidé par sécurité' : 'Clipboard cleared for security', 'info', 2000);
+            }
+          } catch {
+            // Ignorer si permission non accordée
+          }
+        }, 30000);
+      } else {
+        this.showToast(label, 'success');
+      }
+    } catch (err) {
+      this.showToast('Erreur copie presse-papiers', 'error');
+    }
   }
 
   /* ── Auto-Lock Timer (Zero-Knowledge Inactivity Protection) ────────────── */
@@ -1149,8 +1178,7 @@ class AppController {
 
     document.getElementById('btn-copy-username')?.addEventListener('click', async (e) => {
       if (cred.username) {
-        await navigator.clipboard.writeText(cred.username);
-        this.showToast('Identifiant copié', 'success');
+        await this.copyToClipboardWithAutoClear(cred.username, i18n.getLocale() === 'fr' ? 'Identifiant copié' : 'Username copied', false);
         (e.currentTarget as HTMLElement).classList.add('copied');
         setTimeout(() => (e.currentTarget as HTMLElement).classList.remove('copied'), 500);
       }
@@ -1158,8 +1186,7 @@ class AppController {
 
     document.getElementById('btn-copy-url')?.addEventListener('click', async () => {
       if (cred.website) {
-        await navigator.clipboard.writeText(cred.website);
-        this.showToast('URL copiée', 'success');
+        await this.copyToClipboardWithAutoClear(cred.website, i18n.getLocale() === 'fr' ? 'URL copiée' : 'URL copied', false);
       }
     });
 
@@ -1174,18 +1201,19 @@ class AppController {
     });
 
     document.getElementById('btn-copy-password')?.addEventListener('click', async (e) => {
-      await navigator.clipboard.writeText(cred.password);
-      this.showToast('Mot de passe copié', 'success', 2000);
+      await this.copyToClipboardWithAutoClear(cred.password, i18n.getLocale() === 'fr' ? 'Mot de passe copié' : 'Password copied', true);
       (e.currentTarget as HTMLElement).classList.add('copied');
       setTimeout(() => (e.currentTarget as HTMLElement).classList.remove('copied'), 500);
     });
 
-    document.getElementById('detail-totp-container')?.addEventListener('click', () => {
+    document.getElementById('detail-totp-container')?.addEventListener('click', async () => {
       if (cred.totpSecret) {
         const res = generateTOTP(cred.totpSecret);
         if (res) {
-          navigator.clipboard.writeText(res.token);
-          this.showToast(`Code 2FA copié : ${res.token.slice(0, 3)} ${res.token.slice(3)}`, 'success');
+          const label = i18n.getLocale() === 'fr' 
+            ? `Code 2FA copié : ${res.token.slice(0, 3)} ${res.token.slice(3)}` 
+            : `2FA code copied: ${res.token.slice(0, 3)} ${res.token.slice(3)}`;
+          await this.copyToClipboardWithAutoClear(res.token, label, true);
         }
       }
     });
