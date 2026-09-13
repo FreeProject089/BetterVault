@@ -58,7 +58,7 @@ export async function encryptVault(data: UnlockedVaultData, masterKey: CryptoKey
 
   const encryptedBuffer = await crypto.subtle.encrypt(
     {
-      name: 'AES-256-GCM',
+      name: 'AES-GCM',
       iv
     },
     masterKey,
@@ -86,7 +86,7 @@ export async function decryptVault(payload: EncryptedVaultPayload, masterKey: Cr
 
   const decryptedBuffer = await crypto.subtle.decrypt(
     {
-      name: 'AES-256-GCM',
+      name: 'AES-GCM',
       iv
     },
     masterKey,
