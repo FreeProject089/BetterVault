@@ -25,3 +25,10 @@ dist-ssr
 
 # Tauri build artifacts
 src-tauri/target
+
+# Android build artifacts
+.gradle
+build/
+**/build/
+*.lock
+
