@@ -1,4 +1,5 @@
 import { EncryptedVaultPayload, UnlockedVaultData } from '../types/vault';
+import { EFF_LARGE_WORDLIST } from './effWordlist';
 
 // Conversion helpers
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
@@ -132,18 +133,25 @@ export function calculatePasswordEntropy(password: string): { score: number; bit
   return { score, bits, label, color };
 }
 
-// Liste de mots soignée pour la génération de passphrase sécurisée (Diceware style)
-export const PASSPHRASE_WORDLIST = [
-  'alpha', 'anchor', 'orbit', 'cobalt', 'matrix', 'falcon', 'summit', 'aurora',
-  'cipher', 'vortex', 'quasar', 'zenith', 'pulse', 'shadow', 'timber', 'breeze',
-  'glacier', 'meteor', 'harbor', 'beacon', 'canyon', 'phoenix', 'granite', 'nebula',
-  'quantum', 'solstice', 'strata', 'thunder', 'voyage', 'whisper', 'cascade', 'dynamo',
-  'eclipse', 'frost', 'horizon', 'island', 'jupiter', 'kinetic', 'lunar', 'monolith',
-  'nucleus', 'onyx', 'plasma', 'radius', 'safari', 'titan', 'umbra', 'vector'
-];
+// Liste Diceware officielle de l'EFF : 7 776 mots, ≈ 12,9 bits d'entropie par mot
+export const PASSPHRASE_WORDLIST: readonly string[] = EFF_LARGE_WORDLIST;
 
 /**
- * Générateur de Passphrase (style Diceware mémorisable à haute entropie)
+ * Entier aléatoire uniforme dans [0, max) par échantillonnage par rejet :
+ * un simple modulo favoriserait les premiers indices quand 2^32 n'est pas multiple de max.
+ */
+export function secureRandomIndex(max: number): number {
+  if (!Number.isInteger(max) || max <= 0 || max > 0x100000000) throw new RangeError('Borne aléatoire invalide');
+  const limit = Math.floor(0x100000000 / max) * max;
+  const buffer = new Uint32Array(1);
+  do {
+    crypto.getRandomValues(buffer);
+  } while (buffer[0] >= limit);
+  return buffer[0] % max;
+}
+
+/**
+ * Générateur de Passphrase Diceware (liste EFF, tirage cryptographique non biaisé)
  */
 export function generatePassphrase(options: {
   wordCount: number;
@@ -152,11 +160,8 @@ export function generatePassphrase(options: {
   includeNumber: boolean;
 }): string {
   const words: string[] = [];
-  const randomArray = new Uint32Array(options.wordCount);
-  crypto.getRandomValues(randomArray);
-
   for (let i = 0; i < options.wordCount; i++) {
-    let word = PASSPHRASE_WORDLIST[randomArray[i] % PASSPHRASE_WORDLIST.length];
+    let word = PASSPHRASE_WORDLIST[secureRandomIndex(PASSPHRASE_WORDLIST.length)];
     if (options.capitalize) {
       word = word.charAt(0).toUpperCase() + word.slice(1);
     }
@@ -165,8 +170,7 @@ export function generatePassphrase(options: {
 
   let result = words.join(options.separator);
   if (options.includeNumber) {
-    const num = Math.floor(Math.random() * 90 + 10);
-    result += options.separator + num;
+    result += options.separator + (10 + secureRandomIndex(90));
   }
   return result;
 }
@@ -246,10 +250,20 @@ export function generateStrongPassword(options: {
   return resultList.slice(0, options.length).join('');
 }
 
+/** Le service HIBP n'a pas pu être interrogé : le résultat est inconnu, PAS « non compromis » */
+export class HibpUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'HibpUnavailableError';
+  }
+}
+
 /**
  * Vérification k-anonymity Have I Been Pwned (HIBP)
  * Hache le mot de passe en SHA-1, envoie uniquement les 5 premiers caractères hex
  * et compare les suffixes retournés sans jamais divulguer le mot de passe réel.
+ * Retourne le nombre d'apparitions dans des fuites (0 = absent).
+ * @throws HibpUnavailableError si le service est injoignable ou répond en erreur
  */
 export async function checkPasswordPwnedHIBP(password: string): Promise<number> {
   if (!password) return 0;
@@ -263,24 +277,28 @@ export async function checkPasswordPwnedHIBP(password: string): Promise<number> 
   const prefix = hex.slice(0, 5);
   const suffix = hex.slice(5);
 
+  let res: Response;
+  let text: string;
   try {
-    const res = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`, {
+    res = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`, {
       headers: { 'Add-Padding': 'true' }
     });
-    if (!res.ok) return 0;
-    const text = await res.text();
-    const lines = text.split('\n');
-    for (const line of lines) {
-      const [hashSuffix, countStr] = line.trim().split(':');
-      if (hashSuffix === suffix) {
-        return parseInt(countStr, 10) || 0;
-      }
-    }
-    return 0;
+    text = await res.text();
   } catch {
-    // Mode hors-ligne ou bloqué par le réseau
-    return 0;
+    throw new HibpUnavailableError('Service Have I Been Pwned injoignable (hors ligne ou bloqué par le réseau)');
   }
+  if (!res.ok) {
+    throw new HibpUnavailableError(`Have I Been Pwned a répondu une erreur HTTP ${res.status}`);
+  }
+
+  for (const line of text.split('\n')) {
+    const [hashSuffix, countStr] = line.trim().split(':');
+    if (hashSuffix === suffix) {
+      // Les lignes de remplissage (Add-Padding) ont un compteur à 0
+      return parseInt(countStr, 10) || 0;
+    }
+  }
+  return 0;
 }
 
 export interface PasswordAuditReport {

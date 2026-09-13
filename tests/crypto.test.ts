@@ -1,9 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   calculatePasswordEntropy,
   generateStrongPassword,
   generatePassphrase,
-  auditVaultSecurity
+  auditVaultSecurity,
+  checkPasswordPwnedHIBP,
+  HibpUnavailableError,
+  PASSPHRASE_WORDLIST,
+  secureRandomIndex
 } from '../src/crypto/vaultCrypto';
 
 describe('Vault Cryptography & Entropy Engine', () => {
@@ -56,6 +60,30 @@ describe('Vault Cryptography & Entropy Engine', () => {
     });
   });
 
+  it('uses the full EFF large wordlist (7 776 words) for passphrases', () => {
+    expect(PASSPHRASE_WORDLIST).toHaveLength(7776);
+    expect(new Set(PASSPHRASE_WORDLIST).size).toBe(7776);
+    expect(PASSPHRASE_WORDLIST[0]).toBe('abacus');
+    expect(PASSPHRASE_WORDLIST[7775]).toBe('zoom');
+
+    const phrase = generatePassphrase({ wordCount: 6, separator: ' ', capitalize: false, includeNumber: true });
+    const parts = phrase.split(' ');
+    expect(parts).toHaveLength(7);
+    parts.slice(0, 6).forEach(word => expect(PASSPHRASE_WORDLIST).toContain(word));
+    expect(Number(parts[6])).toBeGreaterThanOrEqual(10);
+    expect(Number(parts[6])).toBeLessThan(100);
+  });
+
+  it('draws unbiased random indexes within bounds', () => {
+    const counts = new Array(6).fill(0);
+    for (let i = 0; i < 6000; i++) counts[secureRandomIndex(6)]++;
+    counts.forEach(c => {
+      expect(c).toBeGreaterThan(800);
+      expect(c).toBeLessThan(1200);
+    });
+    expect(() => secureRandomIndex(0)).toThrow(RangeError);
+  });
+
   it('should accurately audit credentials for weak passwords, reuse, and 2FA coverage', () => {
     const testCreds = [
       {
@@ -85,5 +113,35 @@ describe('Vault Cryptography & Entropy Engine', () => {
     expect(report.reused).toBe(2);
     expect(report.missing2fa).toBe(2);
     expect(report.score).toBeLessThan(70);
+  });
+});
+
+describe('Have I Been Pwned (k-anonymity)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // SHA-1("password") = 5BAA61E4C9B93F3F0682250B6CF8331B7EE68FD8
+  it('sends only the 5-char hash prefix and returns the breach count', async () => {
+    const fetchMock = vi.fn(async () => new Response('0018A45C4D1DEF81644B54AB7F969B88D65:0\r\n1E4C9B93F3F0682250B6CF8331B7EE68FD8:3861493\r\n'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(checkPasswordPwnedHIBP('password')).resolves.toBe(3861493);
+    expect(fetchMock).toHaveBeenCalledWith('https://api.pwnedpasswords.com/range/5BAA6', expect.anything());
+  });
+
+  it('returns 0 when the suffix is absent', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('0018A45C4D1DEF81644B54AB7F969B88D65:2\r\n')));
+    await expect(checkPasswordPwnedHIBP('password')).resolves.toBe(0);
+  });
+
+  it('throws instead of reporting "safe" when offline', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+    await expect(checkPasswordPwnedHIBP('password')).rejects.toBeInstanceOf(HibpUnavailableError);
+  });
+
+  it('throws on HTTP errors (rate limit, outage)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('Too many requests', { status: 429 })));
+    await expect(checkPasswordPwnedHIBP('password')).rejects.toThrow('429');
   });
 });

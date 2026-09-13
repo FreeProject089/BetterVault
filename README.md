@@ -13,7 +13,10 @@
 - **Audit de Sécurité & Fuites HIBP** :
   - Calcul d'entropie mathématique en temps réel (bits & score).
   - Détection automatique des mots de passe faibles et dupliqués.
-  - Vérification de compromission mondiale via l'API **Have I Been Pwned** en mode **k-Anonymity** (seuls 5 caractères hexadécimaux de SHA-1 sont transmis).
+  - Vérification de compromission mondiale via l'API **Have I Been Pwned** en mode **k-Anonymity** (seuls 5 caractères hexadécimaux de SHA-1 sont transmis). Si le service est injoignable, l'audit l'indique comme « résultat inconnu » au lieu de conclure à l'absence de fuite.
+- **Phrases secrètes Diceware** : liste officielle EFF de 7 776 mots (≈ 12,9 bits par mot, ≈ 65 bits pour 5 mots), tirage cryptographique sans biais.
+
+> Liste de mots : [EFF Large Wordlist for Passphrases](https://www.eff.org/deeplinks/2016/07/new-wordlists-random-passphrases) — Electronic Frontier Foundation, licence [CC BY 3.0 US](https://creativecommons.org/licenses/by/3.0/us/).
 
 ### 2. Gestion des Identifiants & 2FA
 - **Champs complets** : Nom, URL de site, Identifiant/Email, Mot de passe avec historique des versions précédentes, Notes chiffrées, Passkeys (FIDO2 / WebAuthn).

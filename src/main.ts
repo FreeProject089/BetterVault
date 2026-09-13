@@ -2,7 +2,7 @@ import { vaultStore } from './store/vaultStore';
 import { Task } from './types/vault';
 import { getServiceIconSvg } from './icons/serviceIcons';
 import { generateTOTP } from './crypto/totpEngine';
-import { calculatePasswordEntropy, generateStrongPassword, generatePassphrase, hashVaultPassword, auditVaultSecurity, checkPasswordPwnedHIBP, PASSPHRASE_WORDLIST } from './crypto/vaultCrypto';
+import { calculatePasswordEntropy, generateStrongPassword, generatePassphrase, hashVaultPassword, auditVaultSecurity, checkPasswordPwnedHIBP, HibpUnavailableError, PASSPHRASE_WORDLIST } from './crypto/vaultCrypto';
 import { exportVaultAsJson, exportVaultAsCsv, downloadExportFile } from './import_export/importEngine';
 import { parseImportData, PasswordRequiredError, ImportSecrets } from './import_export/importRouter';
 import { encryptExport, MIN_EXPORT_PASSWORD_LENGTH } from './import_export/encryptedExport';
@@ -2680,9 +2680,17 @@ class AppController {
 
       const toScan = creds.filter(c => c.password);
       let scanned = 0;
+      let serviceError: string | null = null;
       for (const c of toScan) {
         if (!btnHibp.isConnected) return; // Modale fermée pendant l'analyse
-        const pwnedHits = await checkPasswordPwnedHIBP(c.password);
+        let pwnedHits: number;
+        try {
+          pwnedHits = await checkPasswordPwnedHIBP(c.password);
+        } catch (err) {
+          // Service injoignable : on s'arrête, les éléments restants ne sont PAS vérifiés
+          serviceError = err instanceof HibpUnavailableError ? err.message : String(err);
+          break;
+        }
         scanned++;
         btnHibp.textContent = `${i18n.t.audit.scanningHibp} ${scanned}/${toScan.length}`;
         if (pwnedHits > 0) {
@@ -2694,7 +2702,26 @@ class AppController {
       btnHibp.disabled = false;
       btnHibp.textContent = this.tr('Relancer l’analyse', 'Run scan again');
 
-      if (compromisedCount > 0) {
+      if (serviceError !== null) {
+        const unchecked = toScan.length - scanned;
+        hibpResults.innerHTML = `
+          <div style="padding:10px;background:rgba(210,153,34,0.1);border:1px solid rgba(210,153,34,0.35);border-radius:var(--radius-md);color:var(--accent-orange);">
+            <strong>${this.tr('Analyse incomplète — résultat inconnu', 'Scan incomplete — result unknown')}</strong>
+            <div style="margin-top:4px;">
+              ${this.escapeHtml(serviceError)}.
+              ${this.tr(
+                `${scanned} vérifié(s), ${unchecked} non vérifié(s). Vérifiez votre connexion puis relancez.`,
+                `${scanned} checked, ${unchecked} not checked. Check your connection and try again.`
+              )}
+            </div>
+            ${compromisedList.length ? `
+              <div style="margin-top:8px;color:var(--accent-red);">
+                <strong>${this.tr('Déjà détectés comme compromis :', 'Already found compromised:')}</strong>
+                <ul style="margin-top:4px;padding-left:18px;">${compromisedList.map(item => `<li>${item}</li>`).join('')}</ul>
+              </div>` : ''}
+          </div>
+        `;
+      } else if (compromisedCount > 0) {
         const warnLabel = i18n.getLocale() === 'fr'
           ? `${compromisedCount} identifiant(s) compromis détecté(s) dans des bases de fuites mondiales :`
           : `${compromisedCount} credential(s) found in global data breaches:`;
