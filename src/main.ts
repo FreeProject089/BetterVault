@@ -4,6 +4,7 @@ import { getServiceIconSvg } from './icons/serviceIcons';
 import { generateTOTP } from './crypto/totpEngine';
 import { calculatePasswordEntropy, generateStrongPassword, generatePassphrase, hashVaultPassword, auditVaultSecurity, checkPasswordPwnedHIBP } from './crypto/vaultCrypto';
 import { parseImportFile, exportVaultAsJson, exportVaultAsCsv, downloadExportFile } from './import_export/importEngine';
+import { isBiometricsAvailable, verifyBiometrics } from './crypto/webauthn';
 import { i18n } from './i18n';
 
 type ActiveView = 'all-credentials' | '2fa-tokens' | 'tasks';
@@ -1596,13 +1597,13 @@ class AppController {
         generatedValue = generatePassphrase({ wordCount: count, separator: sep, capitalize: true, includeNumber: false });
       } else {
         generatedValue = generateStrongPassword({
-            length: parseInt(lenInput.value),
-            uppercase: (box.querySelector('#opt-upper') as HTMLInputElement)?.checked ?? true,
-            lowercase: (box.querySelector('#opt-lower') as HTMLInputElement)?.checked ?? true,
-            numbers: (box.querySelector('#opt-digits') as HTMLInputElement)?.checked ?? true,
-            symbols: (box.querySelector('#opt-symbols') as HTMLInputElement)?.checked ?? false,
-            avoidAmbiguous: false
-          });
+          length: parseInt(lenInput.value),
+          uppercase: (box.querySelector('#opt-upper') as HTMLInputElement)?.checked ?? true,
+          lowercase: (box.querySelector('#opt-lower') as HTMLInputElement)?.checked ?? true,
+          numbers: (box.querySelector('#opt-digits') as HTMLInputElement)?.checked ?? true,
+          symbols: (box.querySelector('#opt-symbols') as HTMLInputElement)?.checked ?? false,
+          avoidAmbiguous: false
+        });
       }
       genOutput.textContent = generatedValue;
     });
@@ -1610,7 +1611,7 @@ class AppController {
     box.querySelector('#btn-gen-copy')?.addEventListener('click', async () => {
       if (generatedValue) {
         await navigator.clipboard.writeText(generatedValue);
-        this.showToast('Copié dans le presse-papiers', 'success');
+        this.showToast(i18n.t.common.copied, 'success');
       }
     });
   }
@@ -1628,7 +1629,7 @@ class AppController {
       reusedDetailsHTML += `
         <div class="audit-issue-row">
           <div style="font-size:12px;font-weight:600;color:var(--text-primary);">${titles.join(' & ')}</div>
-          <span class="badge" style="color:var(--accent-red);border-color:rgba(218,54,51,0.3);">Réutilisé (${titles.length})</span>
+          <span class="badge" style="color:var(--accent-red);border-color:rgba(218,54,51,0.3);">${i18n.t.audit.reusedCount} (${titles.length})</span>
         </div>
       `;
     });
@@ -1639,7 +1640,7 @@ class AppController {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
           </svg>
-          Audit de Sécurité du Coffre
+          ${i18n.t.audit.title}
         </div>
         <button class="modal-close" id="modal-close-btn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1650,9 +1651,9 @@ class AppController {
       <div class="modal-body" style="max-height:70vh;overflow-y:auto;">
         <div class="audit-score-card">
           <div>
-            <div style="font-size:16px;font-weight:700;margin-bottom:4px;">Score de Santé Global</div>
+            <div style="font-size:16px;font-weight:700;margin-bottom:4px;">${i18n.t.audit.scoreTitle}</div>
             <div style="font-size:12px;color:var(--text-secondary);max-width:280px;line-height:1.4;">
-              Mesure l'entropie, la non-réutilisation des mots de passe et l'activation du 2FA.
+              ${i18n.getLocale() === 'fr' ? 'Mesure l&#x27;entropie, la non-réutilisation des mots de passe et l&#x27;activation du 2FA.' : 'Measures entropy, password reuse, and 2FA activation rate.'}
             </div>
           </div>
           <div class="audit-score-circle" style="border-color:${scoreColor};color:${scoreColor};">
@@ -1663,25 +1664,25 @@ class AppController {
         <div class="audit-metric-grid">
           <div class="audit-metric-box">
             <div class="audit-metric-num" style="color:${report.weak > 0 ? 'var(--accent-red)' : 'var(--accent-green)'};">${report.weak}</div>
-            <div class="audit-metric-label">Faibles</div>
+            <div class="audit-metric-label">${i18n.t.audit.weakCount}</div>
           </div>
           <div class="audit-metric-box">
             <div class="audit-metric-num" style="color:${report.reused > 0 ? 'var(--accent-orange)' : 'var(--accent-green)'};">${report.reused}</div>
-            <div class="audit-metric-label">Réutilisés</div>
+            <div class="audit-metric-label">${i18n.t.audit.reusedCount}</div>
           </div>
           <div class="audit-metric-box">
             <div class="audit-metric-num" style="color:${report.missing2fa > 0 ? 'var(--accent-blue)' : 'var(--accent-green)'};">${report.missing2fa}</div>
-            <div class="audit-metric-label">Sans 2FA</div>
+            <div class="audit-metric-label">${i18n.getLocale() === 'fr' ? 'Sans 2FA' : 'No 2FA'}</div>
           </div>
         </div>
 
         <div style="margin-bottom:16px;">
           <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;letter-spacing:0.5px;">
-            Vérification de Fuites (Have I Been Pwned - k-anonymity)
+            ${i18n.getLocale() === 'fr' ? 'Vérification de Fuites (Have I Been Pwned - k-anonymity)' : 'Breach Check (Have I Been Pwned - k-anonymity)'}
           </div>
           <div style="display:flex;gap:8px;">
             <button class="btn-primary" id="btn-run-hibp" style="font-size:12px;padding:8px 16px;background-color:var(--bg-tertiary);border-color:var(--border-subtle);color:var(--text-primary);width:100%;">
-              🔍 Lancer l'analyse k-Anonymity HIBP sur les ${creds.length} mots de passe
+              ${i18n.t.audit.hibpScanButton} (${creds.length})
             </button>
           </div>
           <div id="hibp-results" style="margin-top:10px;font-size:12px;line-height:1.5;"></div>
@@ -1690,14 +1691,14 @@ class AppController {
         ${report.reusedMap.size > 0 ? `
           <div>
             <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;letter-spacing:0.5px;">
-              Mots de passe dupliqués détectés
+              ${i18n.t.audit.reusedSectionTitle}
             </div>
             ${reusedDetailsHTML}
           </div>
         ` : ''}
       </div>
       <div class="modal-footer">
-        <button class="btn-primary" id="modal-close-audit">Fermer</button>
+        <button class="btn-primary" id="modal-close-audit">${i18n.t.common.close}</button>
       </div>
     `);
 
@@ -1709,37 +1710,45 @@ class AppController {
 
     btnHibp?.addEventListener('click', async () => {
       btnHibp.disabled = true;
-      btnHibp.textContent = 'Vérification en cours via WebCrypto SHA-1 k-Anonymity...';
-      hibpResults.innerHTML = '<span style="color:var(--text-muted);">Connexion sécurisée aux préfixes HIBP...</span>';
+      btnHibp.textContent = i18n.t.audit.scanningHibp;
+      hibpResults.innerHTML = `<span style="color:var(--text-muted);">${i18n.t.audit.scanningHibp}</span>`;
 
       let compromisedCount = 0;
       const compromisedList: string[] = [];
+      const breachesLabel = i18n.getLocale() === 'fr' ? 'fuites publiques connues' : 'known public breaches';
 
       for (const c of creds) {
         if (!c.password) continue;
         const pwnedHits = await checkPasswordPwnedHIBP(c.password);
         if (pwnedHits > 0) {
           compromisedCount++;
-          compromisedList.push(`<strong>${c.title}</strong> (${pwnedHits.toLocaleString()} fuites publiques connues)`);
+          compromisedList.push(`<strong>${c.title}</strong> (${i18n.formatNumber(pwnedHits)} ${breachesLabel})`);
         }
       }
 
       btnHibp.disabled = false;
-      btnHibp.textContent = '✓ Analyse terminée';
+      const doneLabel = i18n.getLocale() === 'fr' ? 'Analyse terminée' : 'Scan complete';
+      btnHibp.textContent = `✓ ${doneLabel}`;
 
       if (compromisedCount > 0) {
+        const warnLabel = i18n.getLocale() === 'fr'
+          ? `${compromisedCount} identifiant(s) compromis détecté(s) dans des bases de fuites mondiales :`
+          : `${compromisedCount} credential(s) found in global data breaches:`;
         hibpResults.innerHTML = `
           <div style="padding:10px;background:rgba(218,54,51,0.1);border:1px solid rgba(218,54,51,0.3);border-radius:var(--radius-md);color:var(--accent-red);">
-            ⚠️ <strong>${compromisedCount} identifiant(s) compromis détecté(s) dans des bases de fuites mondiales :</strong>
+            <strong>${warnLabel}</strong>
             <ul style="margin-top:6px;padding-left:18px;">
               ${compromisedList.map(item => `<li>${item}</li>`).join('')}
             </ul>
           </div>
         `;
       } else {
+        const okLabel = i18n.getLocale() === 'fr'
+          ? 'Aucun mot de passe compromis trouvé dans les bases publiques de fuites de données.'
+          : 'No compromised passwords found in public breach databases.';
         hibpResults.innerHTML = `
           <div style="padding:10px;background:rgba(35,134,54,0.1);border:1px solid rgba(35,134,54,0.3);border-radius:var(--radius-md);color:var(--accent-green);">
-            ✓ Aucun mot de passe compromis trouvé dans les bases publiques de fuites de données.
+            ${okLabel}
           </div>
         `;
       }
@@ -1754,7 +1763,7 @@ class AppController {
 
     const box = this.openModal(`
       <div class="modal-header">
-        <div class="modal-title">Importer & Exporter</div>
+        <div class="modal-title">${i18n.t.importExport.title}</div>
         <button class="modal-close" id="modal-close-btn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
@@ -1763,14 +1772,14 @@ class AppController {
       </div>
       <div class="modal-body">
         <div class="import-export-tabs">
-          <button class="import-export-tab active" id="tab-btn-import">Importer</button>
-          <button class="import-export-tab" id="tab-btn-export">Exporter (${creds.length})</button>
+          <button class="import-export-tab active" id="tab-btn-import">${i18n.t.importExport.importTab}</button>
+          <button class="import-export-tab" id="tab-btn-export">${i18n.t.importExport.exportTab} (${creds.length})</button>
         </div>
 
         <!-- Section Import -->
         <div id="section-import">
           <p style="font-size:13px;color:var(--text-secondary);margin-bottom:14px;line-height:1.5;">
-            Importez depuis 1Password (.1pux, .csv), Bitwarden (.json, .csv), LastPass, Dashlane, Passky ou Chrome/Firefox.
+            ${i18n.t.importExport.supportedFormats}
           </p>
           <div style="border:2px dashed var(--border-subtle);border-radius:var(--radius-lg);padding:28px;text-align:center;cursor:pointer;transition:border-color 0.2s;" id="drop-zone">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5" style="margin:0 auto 10px;">
@@ -1778,8 +1787,8 @@ class AppController {
               <polyline points="17 8 12 3 7 8"></polyline>
               <line x1="12" y1="3" x2="12" y2="15"></line>
             </svg>
-            <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Glissez votre fichier de coffre ici</div>
-            <div style="font-size:11px;color:var(--text-muted);">Prise en charge .json et .csv</div>
+            <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">${i18n.t.importExport.dragDropLabel}</div>
+            <div style="font-size:11px;color:var(--text-muted);">JSON / CSV</div>
             <input type="file" id="import-file-input" accept=".json,.csv" style="position:absolute;opacity:0;inset:0;cursor:pointer;">
           </div>
           <div id="import-status" style="margin-top:10px;font-size:12px;color:var(--text-secondary);min-height:20px;"></div>
@@ -1809,8 +1818,8 @@ class AppController {
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn-primary" id="modal-cancel" style="color:var(--text-muted);">Fermer</button>
-        <button class="btn-primary" id="modal-import-confirm" disabled>Importer</button>
+        <button class="btn-primary" id="modal-cancel" style="color:var(--text-muted);">${i18n.t.common.close}</button>
+        <button class="btn-primary" id="modal-import-confirm" disabled>${i18n.t.importExport.importTab}</button>
       </div>
     `);
 
@@ -1845,14 +1854,14 @@ class AppController {
       const jsonContent = exportVaultAsJson(creds, tasks);
       const filename = `bum-vault-export-${new Date().toISOString().slice(0, 10)}.json`;
       downloadExportFile(jsonContent, filename, 'application/json');
-      this.showToast('Export JSON téléchargé avec succès', 'success');
+      this.showToast(i18n.getLocale() === 'fr' ? 'Export JSON téléchargé' : 'JSON export downloaded', 'success');
     });
 
     box.querySelector('#btn-export-csv')?.addEventListener('click', () => {
       const csvContent = exportVaultAsCsv(creds);
       const filename = `bum-credentials-${new Date().toISOString().slice(0, 10)}.csv`;
       downloadExportFile(csvContent, filename, 'text/csv;charset=utf-8;');
-      this.showToast('Export CSV téléchargé avec succès', 'success');
+      this.showToast(i18n.getLocale() === 'fr' ? 'Export CSV téléchargé' : 'CSV export downloaded', 'success');
     });
 
     // Actions Import
@@ -1863,11 +1872,13 @@ class AppController {
       try {
         const text = await file.text();
         parsedResult = parseImportFile(text, file.name);
-        statusEl.textContent = `${parsedResult.count} identifiant(s) trouvé(s) dans "${file.name}" [${parsedResult.sourceFormat}]`;
+        const foundLabel = i18n.getLocale() === 'fr' ? 'identifiant(s) trouvé(s)' : 'item(s) found';
+        statusEl.textContent = `${parsedResult.count} ${foundLabel} — "${file.name}" [${parsedResult.sourceFormat}]`;
         statusEl.style.color = 'var(--accent-green)';
         confirmBtn.disabled = parsedResult.count === 0;
       } catch (err) {
-        statusEl.textContent = `Erreur de lecture : ${err}`;
+        const errLabel = i18n.getLocale() === 'fr' ? 'Erreur de lecture' : 'Read error';
+        statusEl.textContent = `${errLabel}: ${err}`;
         statusEl.style.color = 'var(--accent-red)';
         confirmBtn.disabled = true;
       }
@@ -1891,7 +1902,8 @@ class AppController {
     confirmBtn?.addEventListener('click', () => {
       vaultStore.importBulk(parsedResult.credentials, parsedResult.tasks);
       this.closeModal();
-      this.showToast(`${parsedResult.count} identifiant(s) importé(s)`, 'success');
+      const importedLabel = i18n.getLocale() === 'fr' ? `${parsedResult.count} identifiant(s) importé(s)` : `${parsedResult.count} item(s) imported`;
+      this.showToast(importedLabel, 'success');
     });
   }
 
@@ -1899,7 +1911,7 @@ class AppController {
   private openCreateVaultModal(): void {
     const box = this.openModal(`
       <div class="modal-header">
-        <div class="modal-title">Nouveau coffre-fort</div>
+        <div class="modal-title">${i18n.t.vault.newVaultModalTitle}</div>
         <button class="modal-close" id="modal-close-btn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
@@ -1908,26 +1920,26 @@ class AppController {
       </div>
       <div class="modal-body">
         <div class="form-field">
-          <label class="form-label">Nom du coffre *</label>
+          <label class="form-label">${i18n.t.vault.vaultNameLabel} *</label>
           <input class="form-input" id="vault-name" type="text" placeholder="Personnel, Travail, Famille..." autocomplete="off">
         </div>
         <div class="form-field">
-          <label class="form-label">Type</label>
+          <label class="form-label">${i18n.t.vault.vaultTypeLabel}</label>
           <select class="form-input" id="vault-type">
-            <option value="personal">Personnel</option>
-            <option value="work">Professionnel</option>
-            <option value="team">Équipe</option>
+            <option value="personal">${i18n.t.common.personal}</option>
+            <option value="work">${i18n.t.common.work}</option>
+            <option value="team">${i18n.t.common.team}</option>
           </select>
         </div>
         <div class="form-field">
           <label class="form-label" style="display:flex;align-items:center;gap:8px;">
             <input type="checkbox" id="vault-protected">
-            Protéger par un mot de passe dédié
+            ${i18n.t.vault.passwordProtectLabel}
           </label>
         </div>
         <div id="vault-pwd-section" style="display:none;">
           <div class="form-field">
-            <label class="form-label">Mot de passe du coffre</label>
+            <label class="form-label">${i18n.t.vault.passwordOptionalLabel}</label>
             <input class="form-input" id="vault-pwd" type="password" placeholder="Mot de passe fort..." autocomplete="new-password">
           </div>
           <div class="form-field">
@@ -1937,8 +1949,8 @@ class AppController {
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn-primary" id="modal-cancel" style="color:var(--text-muted);">Annuler</button>
-        <button class="btn-primary" id="modal-confirm">Créer le coffre</button>
+        <button class="btn-primary" id="modal-cancel" style="color:var(--text-muted);">${i18n.t.common.cancel}</button>
+        <button class="btn-primary" id="modal-confirm">${i18n.t.vault.createVaultButton}</button>
       </div>
     `);
 
@@ -1954,19 +1966,19 @@ class AppController {
     box.querySelector('#modal-confirm')?.addEventListener('click', async () => {
       const name = (box.querySelector('#vault-name') as HTMLInputElement)?.value.trim();
       const type = (box.querySelector('#vault-type') as HTMLSelectElement)?.value;
-      if (!name) { this.showToast('Le nom du coffre est requis', 'error'); return; }
+      if (!name) { this.showToast(i18n.getLocale() === 'fr' ? 'Le nom du coffre est requis' : 'Vault name is required', 'error'); return; }
 
       let passwordHash: string | undefined;
       if (protectedCheck?.checked) {
         const pwd = (box.querySelector('#vault-pwd') as HTMLInputElement)?.value;
         const confirm = (box.querySelector('#vault-pwd-confirm') as HTMLInputElement)?.value;
-        if (!pwd || pwd !== confirm) { this.showToast('Les mots de passe ne correspondent pas', 'error'); return; }
+        if (!pwd || pwd !== confirm) { this.showToast(i18n.getLocale() === 'fr' ? 'Les mots de passe ne correspondent pas' : 'Passwords do not match', 'error'); return; }
         passwordHash = await hashVaultPassword(pwd);
       }
 
       vaultStore.addVault(name, type as 'personal' | 'work' | 'team', passwordHash);
       this.closeModal();
-      this.showToast('Coffre créé', 'success');
+      this.showToast(i18n.t.vault.vaultCreatedToast, 'success');
     });
   }
 
@@ -1978,7 +1990,7 @@ class AppController {
 
     const box = this.openModal(`
       <div class="modal-header">
-        <div class="modal-title">Déverrouiller "${vault.name}"</div>
+        <div class="modal-title">${i18n.t.vault.unlockModalTitle} "${vault.name}"</div>
         <button class="modal-close" id="modal-close-btn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
@@ -1993,22 +2005,53 @@ class AppController {
               <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
             </svg>
           </div>
-          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;">Entrez le mot de passe dédié pour déverrouiller ce coffre.</p>
+          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;">${i18n.t.vault.unlockModalSub}</p>
         </div>
         <div class="form-field">
-          <label class="form-label">Mot de passe du coffre</label>
-          <input class="form-input" id="unlock-pwd" type="password" placeholder="Mot de passe..." autocomplete="current-password">
+          <label class="form-label">${i18n.t.vault.masterPasswordPlaceholder}</label>
+          <input class="form-input" id="unlock-pwd" type="password" placeholder="${i18n.t.vault.masterPasswordPlaceholder}" autocomplete="current-password">
         </div>
-        <div id="unlock-error" style="font-size:12px;color:var(--accent-red);margin-top:8px;display:none;">Mot de passe incorrect.</div>
+        <div id="unlock-error" style="font-size:12px;color:var(--accent-red);margin-top:8px;display:none;">${i18n.t.vault.invalidPasswordToast}</div>
+        <div id="bio-unlock-container" style="margin-top:14px;display:none;">
+          <button class="btn-primary" id="btn-bio-unlock" style="width:100%;gap:8px;background:rgba(88,166,255,0.08);border-color:rgba(88,166,255,0.25);color:var(--accent-blue);padding:10px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 004 11m0 0a8.003 8.003 0 0115.357-2m1.51 15c-.056-.4-.117-.8-.184-1.196"></path>
+            </svg>
+            ${i18n.getLocale() === 'fr' ? 'Déverrouiller avec Biométrie (TouchID / Hello)' : 'Unlock with Biometrics (TouchID / Hello)'}
+          </button>
+        </div>
       </div>
       <div class="modal-footer">
-        <button class="btn-primary" id="modal-cancel" style="color:var(--text-muted);">Annuler</button>
-        <button class="btn-primary" id="modal-confirm" style="background-color:var(--accent-blue);color:#fff;border-color:var(--accent-blue);">Déverrouiller</button>
+        <button class="btn-primary" id="modal-cancel" style="color:var(--text-muted);">${i18n.t.common.cancel}</button>
+        <button class="btn-primary" id="modal-confirm" style="background-color:var(--accent-blue);color:#fff;border-color:var(--accent-blue);">${i18n.t.vault.unlockAction}</button>
       </div>
     `);
 
     const pwdInput = box.querySelector('#unlock-pwd') as HTMLInputElement;
     const errorEl = box.querySelector('#unlock-error') as HTMLElement;
+    const bioContainer = box.querySelector('#bio-unlock-container') as HTMLElement;
+    const btnBioUnlock = box.querySelector('#btn-bio-unlock') as HTMLButtonElement;
+
+    // Détection disponibilité WebAuthn Biométrie
+    isBiometricsAvailable().then((available) => {
+      if (available && bioContainer) {
+        bioContainer.style.display = 'block';
+      }
+    });
+
+    btnBioUnlock?.addEventListener('click', async () => {
+      const verified = await verifyBiometrics();
+      if (verified) {
+        // En mode biométrique vérifié, le coffre s'ouvre directement
+        vault.isLocked = false;
+        vaultStore.subscribe(() => {})(); // Trigger store update
+        this.closeModal();
+        this.showToast(`${i18n.t.vault.vaultUnlockedToast} ("${vault.name}")`, 'success');
+      } else {
+        errorEl.textContent = i18n.getLocale() === 'fr' ? 'Échec d&#x27;authentification biométrique.' : 'Biometric authentication failed.';
+        errorEl.style.display = 'block';
+      }
+    });
 
     box.querySelector('#modal-close-btn')?.addEventListener('click', () => this.closeModal());
     box.querySelector('#modal-cancel')?.addEventListener('click', () => this.closeModal());
@@ -2019,11 +2062,11 @@ class AppController {
 
     box.querySelector('#modal-confirm')?.addEventListener('click', async () => {
       const pwd = pwdInput?.value;
-      if (!pwd) { this.showToast('Entrez le mot de passe', 'error'); return; }
+      if (!pwd) { this.showToast(i18n.getLocale() === 'fr' ? 'Entrez le mot de passe' : 'Enter the password', 'error'); return; }
       const success = await vaultStore.unlockVault(vaultId, await hashVaultPassword(pwd));
       if (success) {
         this.closeModal();
-        this.showToast(`Coffre "${vault.name}" déverrouillé`, 'success');
+        this.showToast(`${i18n.t.vault.vaultUnlockedToast} ("${vault.name}")`, 'success');
       } else {
         errorEl.style.display = 'block';
         pwdInput.value = '';
@@ -2046,3 +2089,13 @@ setInterval(() => {
     // TOTP géré par updateLiveTOTP
   }
 }, 1000);
+
+// Enregistrement PWA Service Worker
+if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      // Ignorer si non servi sous HTTP/HTTPS (ex: tauri:// ou file://)
+    });
+  });
+}
+

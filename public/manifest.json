@@ -1,0 +1,17 @@
+{
+  "name": "BUM Vault Studio Pro",
+  "short_name": "BUM",
+  "description": "Zero-Knowledge Password, 2FA & Tasks Suite",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d1117",
+  "theme_color": "#161b22",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
