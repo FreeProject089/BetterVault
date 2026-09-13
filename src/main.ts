@@ -29,6 +29,12 @@ import { i18n } from './i18n';
 type ActiveView = 'all-credentials' | '2fa-tokens' | 'tasks';
 type TaskViewMode = 'list' | 'kanban' | 'matrix' | 'calendar';
 
+const ACTION_ICONS = {
+  edit: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>',
+  trash: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14H6L5 6"></path><path d="M10 11v6M14 11v6"></path><path d="M9 6V4h6v2"></path></svg>',
+  task: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>'
+};
+
 const SYNC_KEYCHAIN_ACCOUNT = 'sync-passphrase';
 const REMINDER_CHECK_INTERVAL_MS = 30_000;
 
@@ -535,6 +541,10 @@ class AppController {
 
     container.innerHTML = '';
 
+    // La colonne centrale s'élargit pour les vues tâches en tableau ; la navigation reflète la vue active
+    document.getElementById('app')?.classList.toggle('tasks-board', this.activeView === 'tasks' && this.taskViewMode !== 'list');
+    document.querySelectorAll<HTMLElement>('[data-view]').forEach(item => item.classList.toggle('active', item.dataset.view === this.activeView));
+
     // Coffre verrouillé → bannière
     const activeVault = data.vaults.find(v => v.id === data.activeVaultId);
     if (activeVault?.isLocked) {
@@ -623,7 +633,7 @@ class AppController {
             card.className = `kanban-card ${this.selectedItemId === task.id ? 'selected' : ''}`;
             const prioLabel = (i18n.t.common as any)[task.priority] || task.priority;
             card.innerHTML = `
-              <div class="kanban-card-title">${task.title}</div>
+              <div class="kanban-card-title" title="${this.escapeHtml(task.title)}">${this.escapeHtml(task.title)}</div>
               <div class="kanban-card-meta">
                 <span class="badge priority-${task.priority}">${prioLabel.toUpperCase()}</span>
                 <span>${i18n.formatRelativeDate(task.dueDate || '')}</span>
@@ -680,7 +690,7 @@ class AppController {
             const card = document.createElement('div');
             card.className = `kanban-card ${this.selectedItemId === task.id ? 'selected' : ''}`;
             card.innerHTML = `
-              <div class="kanban-card-title">${this.escapeHtml(task.title)}</div>
+              <div class="kanban-card-title" title="${this.escapeHtml(task.title)}">${this.escapeHtml(task.title)}</div>
               <div class="kanban-card-meta">
                 <span class="badge priority-${task.priority}">${task.priority.toUpperCase()}</span>
                 ${task.status === 'blocked' ? `<span class="badge" style="color:var(--accent-red);">${this.tr('BLOQUÉE', 'BLOCKED')}</span>` : ''}
@@ -816,7 +826,7 @@ class AppController {
             </svg>
           </div>
           <div class="record-info">
-            <div class="record-title" style="${isDone ? 'text-decoration:line-through;opacity:0.5;' : ''}">${task.title}</div>
+            <div class="record-title" title="${this.escapeHtml(task.title)}" style="${isDone ? 'text-decoration:line-through;opacity:0.5;' : ''}">${this.escapeHtml(task.title)}</div>
             <div class="record-sub">${task.dueDate ? i18n.formatRelativeDate(task.dueDate) : statusSub}</div>
           </div>
           <div class="record-badges">
@@ -1008,12 +1018,15 @@ class AppController {
               <div class="detail-meta">Créée le ${new Date(task.createdAt).toLocaleDateString('fr-FR')}</div>
             </div>
           </div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
-            <button class="btn-primary" id="btn-toggle-task-status" style="font-size:11px;padding:6px 14px;">
-              ${task.status === 'completed' ? 'Rouvrir' : 'Terminer'}
+          <div class="detail-actions">
+            <button class="btn-primary ${task.status === 'completed' ? '' : 'btn-accent'}" id="btn-toggle-task-status">
+              ${task.status === 'completed' ? this.tr('Rouvrir', 'Reopen') : this.tr('Terminer', 'Complete')}
             </button>
-            <button class="btn-primary" id="btn-edit-task" style="font-size:11px;padding:6px 12px;background-color:var(--bg-tertiary);border-color:var(--border-subtle);color:var(--text-primary);">Modifier</button>
-            <button class="btn-primary" id="btn-delete-task" style="font-size:11px;padding:6px 12px;color:var(--accent-red);border-color:rgba(218,54,51,0.4);">Supprimer</button>
+            ${this.renderActionMenu([
+              { id: 'btn-edit-task', label: this.tr('Modifier', 'Edit'), icon: ACTION_ICONS.edit },
+              'separator',
+              { id: 'btn-delete-task', label: this.tr('Supprimer', 'Delete'), icon: ACTION_ICONS.trash, danger: true }
+            ])}
           </div>
         </div>
 
@@ -1089,6 +1102,8 @@ class AppController {
         </div>
       `;
 
+      this.bindActionMenus(container);
+
       document.getElementById('btn-detail-back')?.addEventListener('click', () => {
         document.getElementById('detail-container')?.classList.remove('mobile-active');
       });
@@ -1141,8 +1156,14 @@ class AppController {
         this.openCreateTaskModal(undefined, task.id);
       });
 
-      document.getElementById('btn-delete-task')?.addEventListener('click', () => {
-        if (confirm(`Supprimer définitivement la tâche "${task.title}" ?`)) {
+      document.getElementById('btn-delete-task')?.addEventListener('click', async () => {
+        const confirmed = await this.confirmDialog({
+          title: this.tr('Supprimer la tâche ?', 'Delete task?'),
+          message: this.tr(`« ${task.title} » sera définitivement supprimée.`, `"${task.title}" will be permanently deleted.`),
+          confirmLabel: this.tr('Supprimer', 'Delete'),
+          danger: true
+        });
+        if (confirmed) {
           vaultStore.deleteTask(task.id);
           this.selectedItemId = null;
           this.renderDetail(null);
@@ -1334,16 +1355,19 @@ class AppController {
             ` : ''}
           </div>
         </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
-          <button class="icon-btn" id="btn-toggle-fav" title="${favTitle}"
-            style="color:${favColor};border:1px solid var(--border-subtle);padding:6px 10px;border-radius:var(--radius-md);">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="${favFill}" stroke="currentColor" stroke-width="2">
+        <div class="detail-actions">
+          <button class="icon-btn" id="btn-toggle-fav" title="${favTitle}" aria-pressed="${!!cred.isFavorite}"
+            style="color:${favColor};border:1px solid var(--border-subtle);padding:6px;border-radius:var(--radius-md);">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="${favFill}" stroke="currentColor" stroke-width="2">
               <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
             </svg>
           </button>
-          <button class="btn-primary" id="btn-edit-cred" style="font-size:11px;padding:6px 12px;background-color:var(--bg-tertiary);border-color:var(--border-subtle);color:var(--text-primary);">Modifier</button>
-          <button class="btn-primary" id="btn-add-task-for-cred" style="font-size:11px;padding:6px 12px;">+ Tâche</button>
-          <button class="btn-primary" id="btn-delete-cred" style="font-size:11px;padding:6px 12px;color:var(--accent-red);border-color:rgba(218,54,51,0.4);">Supprimer</button>
+          <button class="btn-primary" id="btn-edit-cred">${ACTION_ICONS.edit}<span>${this.tr('Modifier', 'Edit')}</span></button>
+          ${this.renderActionMenu([
+            { id: 'btn-add-task-for-cred', label: this.tr('Créer une tâche liée', 'Create linked task'), icon: ACTION_ICONS.task },
+            'separator',
+            { id: 'btn-delete-cred', label: this.tr('Supprimer', 'Delete'), icon: ACTION_ICONS.trash, danger: true }
+          ])}
         </div>
       </div>
 
@@ -1441,13 +1465,21 @@ class AppController {
               </div>
             `).join('')}
           </div>
-          <div style="display:flex;gap:6px;margin-top:8px;">
-            <input class="form-input" id="input-cf-label" placeholder="Libellé (ex: PIN, Question secrète...)" style="flex:1;font-size:12px;padding:6px 10px;">
-            <input class="form-input" id="input-cf-val" placeholder="Valeur..." style="flex:1;font-size:12px;padding:6px 10px;">
-            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted);cursor:pointer;">
-              <input type="checkbox" id="input-cf-masked"> Masqué
-            </label>
-            <button class="btn-primary" id="btn-add-cf" style="font-size:11px;padding:6px 12px;">Ajouter</button>
+          <button class="btn-primary btn-ghost" id="btn-show-cf-form" style="align-self:flex-start;margin-top:4px;">+ ${this.tr('Ajouter un champ', 'Add a field')}</button>
+          <div id="cf-form" hidden>
+            <div class="form-row" style="margin-top:8px;">
+              <input class="form-input" id="input-cf-label" placeholder="${this.tr('Libellé (ex : PIN, question secrète)', 'Label (e.g. PIN, security question)')}">
+              <input class="form-input" id="input-cf-val" placeholder="${this.tr('Valeur', 'Value')}">
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;flex-wrap:wrap;">
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);cursor:pointer;">
+                <input type="checkbox" id="input-cf-masked"> ${this.tr('Masquer la valeur', 'Hide value')}
+              </label>
+              <div style="display:flex;gap:6px;">
+                <button class="btn-primary btn-ghost" id="btn-cancel-cf">${this.tr('Annuler', 'Cancel')}</button>
+                <button class="btn-primary btn-accent" id="btn-add-cf">${this.tr('Ajouter', 'Add')}</button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1467,6 +1499,7 @@ class AppController {
     `;
 
     // Events après rendu DOM
+    this.bindActionMenus(container);
     this.updateLiveTOTP();
 
     document.getElementById('btn-copy-username')?.addEventListener('click', async (e) => {
@@ -1536,8 +1569,17 @@ class AppController {
       });
     });
 
-    document.getElementById('btn-delete-cred')?.addEventListener('click', () => {
-      if (confirm(`Supprimer définitivement l'identifiant "${cred.title}" ?`)) {
+    document.getElementById('btn-delete-cred')?.addEventListener('click', async () => {
+      const confirmed = await this.confirmDialog({
+        title: this.tr('Supprimer l’identifiant ?', 'Delete credential?'),
+        message: this.tr(
+          `« ${cred.title} », son historique et ses passkeys seront définitivement supprimés. Les tâches liées sont conservées.`,
+          `"${cred.title}", its history and passkeys will be permanently deleted. Linked tasks are kept.`
+        ),
+        confirmLabel: this.tr('Supprimer', 'Delete'),
+        danger: true
+      });
+      if (confirmed) {
         vaultStore.deleteCredential(cred.id);
         this.selectedItemId = null;
         this.renderDetail(null);
@@ -1562,6 +1604,15 @@ class AppController {
 
     // Gestion des Champs Personnalisés
     const currentFields = [...(cred.fields || [])];
+    const cfForm = document.getElementById('cf-form');
+    const cfShowButton = document.getElementById('btn-show-cf-form');
+    const toggleCustomFieldForm = (open: boolean) => {
+      if (cfForm) cfForm.hidden = !open;
+      if (cfShowButton) cfShowButton.hidden = open;
+      if (open) (document.getElementById('input-cf-label') as HTMLInputElement | null)?.focus();
+    };
+    cfShowButton?.addEventListener('click', () => toggleCustomFieldForm(true));
+    document.getElementById('btn-cancel-cf')?.addEventListener('click', () => toggleCustomFieldForm(false));
 
     document.getElementById('btn-add-cf')?.addEventListener('click', () => {
       const labelInput = document.getElementById('input-cf-label') as HTMLInputElement;
@@ -1580,6 +1631,8 @@ class AppController {
         vaultStore.updateCredential(cred.id, { fields: [...currentFields, newField] });
         this.renderDetail(cred.id);
         this.showToast('Champ personnalisé ajouté', 'success');
+      } else {
+        this.showToast(this.tr('Le libellé et la valeur sont requis', 'Label and value are required'), 'error');
       }
     });
 
@@ -1678,6 +1731,115 @@ class AppController {
   private closeModal(): void {
     const container = document.getElementById('modal-container');
     if (container) container.innerHTML = '';
+  }
+
+  /** Boîte de confirmation stylée, empilée au-dessus d'une éventuelle modale ouverte */
+  private confirmDialog(options: { title: string; message: string; confirmLabel: string; danger?: boolean }): Promise<boolean> {
+    return new Promise(resolve => {
+      const layer = document.createElement('div');
+      layer.className = 'modal-overlay dialog-layer';
+      layer.innerHTML = `
+        <div class="modal-box modal-sm" role="alertdialog" aria-modal="true">
+          <div class="modal-header"><div class="modal-title"></div></div>
+          <div class="modal-body"><p class="modal-text"></p></div>
+          <div class="modal-footer">
+            <button class="btn-primary btn-ghost" data-answer="no">${this.tr('Annuler', 'Cancel')}</button>
+            <button class="btn-primary ${options.danger ? 'btn-danger' : 'btn-accent'}" data-answer="yes"></button>
+          </div>
+        </div>`;
+      (layer.querySelector('.modal-title') as HTMLElement).textContent = options.title;
+      (layer.querySelector('.modal-text') as HTMLElement).textContent = options.message;
+      const confirmButton = layer.querySelector('[data-answer="yes"]') as HTMLButtonElement;
+      confirmButton.textContent = options.confirmLabel;
+
+      const finish = (answer: boolean) => {
+        document.removeEventListener('keydown', onKey, true);
+        layer.remove();
+        resolve(answer);
+      };
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          // Capture : n'atteint pas le raccourci global qui fermerait la modale sous-jacente
+          e.preventDefault();
+          e.stopPropagation();
+          finish(false);
+        }
+      };
+      layer.addEventListener('click', e => {
+        const target = e.target as HTMLElement;
+        if (target === layer) return finish(false);
+        const answer = target.closest<HTMLElement>('[data-answer]')?.dataset.answer;
+        if (answer) finish(answer === 'yes');
+      });
+
+      document.addEventListener('keydown', onKey, true);
+      document.body.appendChild(layer);
+      confirmButton.focus();
+    });
+  }
+
+  /** Menu « … » regroupant les actions secondaires d'une fiche */
+  private renderActionMenu(items: Array<{ id: string; label: string; icon: string; danger?: boolean } | 'separator'>): string {
+    return `
+      <div class="action-menu">
+        <button class="icon-btn action-menu-trigger" aria-haspopup="menu" aria-expanded="false" title="${this.tr('Plus d’actions', 'More actions')}"
+          style="border:1px solid var(--border-subtle);padding:6px;border-radius:var(--radius-md);">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="19" cy="12" r="1.8"></circle></svg>
+        </button>
+        <div class="action-menu-list" role="menu" hidden>
+          ${items.map(item => item === 'separator'
+            ? '<div class="action-menu-separator"></div>'
+            : `<button class="action-menu-item ${item.danger ? 'danger' : ''}" role="menuitem" id="${item.id}">${item.icon}<span>${item.label}</span></button>`
+          ).join('')}
+        </div>
+      </div>`;
+  }
+
+  private bindActionMenus(root: HTMLElement): void {
+    root.querySelectorAll<HTMLElement>('.action-menu').forEach(menu => {
+      const trigger = menu.querySelector('.action-menu-trigger') as HTMLButtonElement;
+      const list = menu.querySelector('.action-menu-list') as HTMLElement;
+
+      const close = () => {
+        list.hidden = true;
+        trigger.setAttribute('aria-expanded', 'false');
+        document.removeEventListener('click', onDocumentClick, true);
+      };
+      const onDocumentClick = (e: MouseEvent) => {
+        const target = e.target as HTMLElement;
+        if (trigger.contains(target)) return;
+        if (!menu.contains(target) || target.closest('.action-menu-item')) close();
+      };
+
+      trigger.addEventListener('click', () => {
+        if (!list.hidden) return close();
+        list.hidden = false;
+        // Retourne le menu s'il déborderait du panneau (actions passées à la ligne)
+        list.style.left = '';
+        list.style.right = '';
+        const bounds = (menu.closest('.detail-pane') ?? document.body).getBoundingClientRect();
+        if (list.getBoundingClientRect().left < bounds.left + 8) {
+          list.style.left = '0';
+          list.style.right = 'auto';
+        }
+        trigger.setAttribute('aria-expanded', 'true');
+        document.addEventListener('click', onDocumentClick, true);
+        list.querySelector<HTMLElement>('.action-menu-item')?.focus();
+      });
+      list.addEventListener('keydown', e => {
+        const items = Array.from(list.querySelectorAll<HTMLElement>('.action-menu-item'));
+        const index = items.indexOf(document.activeElement as HTMLElement);
+        if (e.key === 'Escape') {
+          e.stopPropagation();
+          close();
+          trigger.focus();
+        } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          const next = (index + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
+          items[next]?.focus();
+        }
+      });
+    });
   }
 
   /* ── Créer ou Modifier un Identifiant ────────────────────────────────── */
@@ -2060,9 +2222,9 @@ class AppController {
         </button>
       </div>
       <div class="modal-body">
-        <div style="display:flex;gap:8px;margin-bottom:12px;">
-          <button class="btn-primary active" id="mode-pwd" style="flex:1;">Mot de passe</button>
-          <button class="btn-primary" id="mode-phrase" style="flex:1;color:var(--text-secondary);">Phrase secrète</button>
+        <div class="tab-btn-group" role="tablist">
+          <button class="tab-btn active" id="mode-pwd" role="tab">${this.tr('Mot de passe', 'Password')}</button>
+          <button class="tab-btn" id="mode-phrase" role="tab">${this.tr('Phrase secrète', 'Passphrase')}</button>
         </div>
 
         <div id="section-pwd">
@@ -2107,8 +2269,8 @@ class AppController {
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn-primary" id="btn-gen-new" style="flex:1;">Générer</button>
-        <button class="btn-primary" id="btn-gen-copy" style="flex:1;">Copier</button>
+        <button class="btn-primary btn-ghost" id="btn-gen-new">${this.tr('Régénérer', 'Regenerate')}</button>
+        <button class="btn-primary" id="btn-gen-copy">${this.tr('Copier', 'Copy')}</button>
       </div>
     `);
 
@@ -2128,23 +2290,17 @@ class AppController {
 
     box.querySelector('#modal-close-btn')?.addEventListener('click', () => this.closeModal());
 
-    box.querySelector('#mode-pwd')?.addEventListener('click', (e) => {
-      isPhrase = false;
-      sectionPwd.style.display = 'block';
-      sectionPhrase.style.display = 'none';
-      (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)';
-      (box.querySelector('#mode-phrase') as HTMLElement).style.color = 'var(--text-secondary)';
-    });
+    const setMode = (phrase: boolean) => {
+      isPhrase = phrase;
+      sectionPwd.style.display = phrase ? 'none' : 'block';
+      sectionPhrase.style.display = phrase ? 'block' : 'none';
+      box.querySelector('#mode-pwd')?.classList.toggle('active', !phrase);
+      box.querySelector('#mode-phrase')?.classList.toggle('active', phrase);
+      generate();
+    };
 
-    box.querySelector('#mode-phrase')?.addEventListener('click', (e) => {
-      isPhrase = true;
-      sectionPwd.style.display = 'none';
-      sectionPhrase.style.display = 'block';
-      (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)';
-      (box.querySelector('#mode-pwd') as HTMLElement).style.color = 'var(--text-secondary)';
-    });
-
-    box.querySelector('#btn-gen-new')?.addEventListener('click', () => {
+    // Génération immédiate et à chaque changement d'option : plus besoin de cliquer « Générer »
+    const generate = () => {
       if (isPhrase) {
         const count = parseInt(wordsInput.value);
         const sep = (box.querySelector('#phrase-sep') as HTMLSelectElement)?.value ?? '-';
@@ -2160,7 +2316,16 @@ class AppController {
         });
       }
       genOutput.textContent = generatedValue;
+    };
+
+    box.querySelector('#mode-pwd')?.addEventListener('click', () => setMode(false));
+    box.querySelector('#mode-phrase')?.addEventListener('click', () => setMode(true));
+    box.querySelector('#btn-gen-new')?.addEventListener('click', generate);
+    box.querySelectorAll('#section-pwd input, #section-phrase input, #phrase-sep').forEach(el => {
+      el.addEventListener('input', generate);
+      el.addEventListener('change', generate);
     });
+    generate();
 
     box.querySelector('#btn-gen-copy')?.addEventListener('click', async () => {
       if (generatedValue) {
@@ -2459,10 +2624,15 @@ class AppController {
     });
 
     // Actions Export
-    const confirmPlaintextExport = () => confirm(this.tr(
-      'Cet export n’est PAS chiffré : mots de passe, secrets 2FA et clés de passkeys seront lisibles par quiconque accède au fichier. Continuer ?',
-      'This export is NOT encrypted: passwords, 2FA secrets and passkey keys will be readable by anyone with the file. Continue?'
-    ));
+    const confirmPlaintextExport = () => this.confirmDialog({
+      title: this.tr('Export non chiffré', 'Unencrypted export'),
+      message: this.tr(
+        'Mots de passe, secrets 2FA et clés de passkeys seront lisibles par quiconque accède au fichier. Préférez l’export chiffré ou KeePass.',
+        'Passwords, 2FA secrets and passkey keys will be readable by anyone with the file. Prefer the encrypted or KeePass export.'
+      ),
+      confirmLabel: this.tr('Exporter en clair', 'Export anyway'),
+      danger: true
+    });
     const exportDate = new Date().toISOString().slice(0, 10);
     const activeVaultName = data.vaults.find(v => v.id === data.activeVaultId)?.name ?? 'BUM';
 
@@ -2522,22 +2692,22 @@ class AppController {
       }
     });
 
-    box.querySelector('#btn-export-cxf')?.addEventListener('click', () => {
-      if (!confirmPlaintextExport()) return;
+    box.querySelector('#btn-export-cxf')?.addEventListener('click', async () => {
+      if (!(await confirmPlaintextExport())) return;
       downloadExportFile(exportCredentialsAsCxf(creds), `bum-cxf-${exportDate}.json`, 'application/json');
       this.showToast(this.tr('Export CXF téléchargé', 'CXF export downloaded'), 'success');
     });
 
-    box.querySelector('#btn-export-json')?.addEventListener('click', () => {
-      if (!confirmPlaintextExport()) return;
+    box.querySelector('#btn-export-json')?.addEventListener('click', async () => {
+      if (!(await confirmPlaintextExport())) return;
       const jsonContent = exportVaultAsJson(creds, tasks);
       const filename = `bum-vault-export-${new Date().toISOString().slice(0, 10)}.json`;
       downloadExportFile(jsonContent, filename, 'application/json');
       this.showToast(i18n.getLocale() === 'fr' ? 'Export JSON téléchargé' : 'JSON export downloaded', 'success');
     });
 
-    box.querySelector('#btn-export-csv')?.addEventListener('click', () => {
-      if (!confirmPlaintextExport()) return;
+    box.querySelector('#btn-export-csv')?.addEventListener('click', async () => {
+      if (!(await confirmPlaintextExport())) return;
       const csvContent = exportVaultAsCsv(creds);
       const filename = `bum-credentials-${new Date().toISOString().slice(0, 10)}.csv`;
       downloadExportFile(csvContent, filename, 'text/csv;charset=utf-8;');

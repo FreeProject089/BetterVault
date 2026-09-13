@@ -43,7 +43,7 @@
 /* ── Vue Kanban des Tâches ────────────────────────────────────────────────── */
 .kanban-container {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 12px;
   padding: 16px;
   overflow-y: auto;
@@ -92,7 +92,12 @@
   font-weight: 600;
   color: var(--text-primary);
   line-height: 1.4;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .kanban-card-meta {
@@ -100,7 +105,13 @@
   color: var(--text-muted);
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+
+.kanban-card-meta > span:last-child {
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 /* ── Vue Calendrier / Échéances des Tâches ───────────────────────────────── */
@@ -138,7 +149,14 @@
   flex-direction: column;
 }
 
+.timeline-task-row > div:last-child {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .timeline-task-row {
+  gap: 12px;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -594,7 +612,15 @@
 }
 
 .subtask-item:hover {
-  border-color: var(--border-medium);
+  border-color: var(--text-muted);
+}
+
+.record-badges {
+  flex-shrink: 0;
+}
+
+.subtask-left {
+  min-width: 0;
 }
 
 .subtask-left {
@@ -615,6 +641,7 @@
   font-size: 13px;
   color: var(--text-primary);
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .subtask-title.done {
