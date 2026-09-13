@@ -809,3 +809,246 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ── Générateur de secrets ────────────────────────────────────────────── */
+.gen {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.gen-output-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 10px 14px 16px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.gen-output {
+  flex: 1;
+  min-width: 0;
+  min-height: 25px;
+  font-family: var(--font-mono);
+  font-size: 17px;
+  line-height: 1.45;
+  letter-spacing: 0.4px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  cursor: copy;
+}
+
+.gen-output .gen-digit { color: var(--accent-blue); }
+.gen-output .gen-symbol { color: var(--accent-orange); }
+
+.gen-output.gen-flash {
+  animation: gen-flash 0.25s ease-out;
+}
+
+@keyframes gen-flash {
+  from { opacity: 0.35; }
+  to { opacity: 1; }
+}
+
+.gen-output-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.gen-output-actions .icon-btn {
+  padding: 6px;
+}
+
+.gen-strength {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.gen-strength .strength-meter {
+  flex: 1;
+}
+
+.gen-strength-label {
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.gen-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.gen-slider-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) 64px;
+  align-items: center;
+  gap: 12px;
+}
+
+.gen-slider-row input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent-blue);
+}
+
+.gen-number {
+  padding: 5px 6px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.gen-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.gen-chip {
+  position: relative;
+  display: inline-flex;
+  cursor: pointer;
+}
+
+.gen-chip input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.gen-chip span {
+  padding: 5px 11px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  user-select: none;
+  transition: all 0.15s ease;
+}
+
+.gen-chip:hover span {
+  border-color: var(--text-muted);
+  color: var(--text-primary);
+}
+
+.gen-chip input:checked + span {
+  color: var(--accent-blue);
+  border-color: var(--accent-blue);
+  background-color: rgba(88, 166, 255, 0.1);
+}
+
+.gen-chip input:focus-visible + span {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 1px;
+}
+
+.gen-select {
+  width: auto;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.gen-use-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.gen-inline {
+  margin-top: 4px;
+  padding: 14px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  animation: modal-in 0.16s ease-out;
+}
+
+.gen-inline .gen-output-card,
+.gen-inline .gen-chip span {
+  background-color: var(--bg-secondary);
+}
+
+/* Champ avec bouton intégré (afficher / masquer) */
+.input-with-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-with-actions .form-input {
+  padding-right: 40px;
+  font-family: var(--font-mono);
+}
+
+.input-with-actions .icon-btn {
+  position: absolute;
+  right: 6px;
+}
+
+.field-inline-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.field-inline-row .gen-strength {
+  flex: 1;
+  min-width: 160px;
+}
+
+.modal-footer-hint {
+  margin-right: auto;
+  align-self: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.modal-footer-hint kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-tertiary);
+}
+
+/* Mobile : les modales deviennent des feuilles ancrées en bas */
+@media (max-width: 520px) {
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal-box {
+    width: 100%;
+    max-height: 92vh;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  }
+
+  .modal-footer-hint {
+    display: none;
+  }
+
+  .gen-slider-row {
+    grid-template-columns: minmax(0, 1fr) 64px;
+  }
+
+  .gen-slider-row > .form-label {
+    grid-column: 1 / -1;
+  }
+}

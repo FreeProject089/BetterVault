@@ -2,7 +2,7 @@ import { vaultStore } from './store/vaultStore';
 import { Task } from './types/vault';
 import { getServiceIconSvg } from './icons/serviceIcons';
 import { generateTOTP } from './crypto/totpEngine';
-import { calculatePasswordEntropy, generateStrongPassword, generatePassphrase, hashVaultPassword, auditVaultSecurity, checkPasswordPwnedHIBP } from './crypto/vaultCrypto';
+import { calculatePasswordEntropy, generateStrongPassword, generatePassphrase, hashVaultPassword, auditVaultSecurity, checkPasswordPwnedHIBP, PASSPHRASE_WORDLIST } from './crypto/vaultCrypto';
 import { exportVaultAsJson, exportVaultAsCsv, downloadExportFile } from './import_export/importEngine';
 import { parseImportData, PasswordRequiredError, ImportSecrets } from './import_export/importRouter';
 import { encryptExport, MIN_EXPORT_PASSWORD_LENGTH } from './import_export/encryptedExport';
@@ -35,6 +35,16 @@ const ACTION_ICONS = {
   task: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>'
 };
 
+const GEN_ICONS = {
+  bolt: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>',
+  close: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>',
+  copy: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>',
+  refresh: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>',
+  eye: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>',
+  eyeOff: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>'
+};
+
+const GENERATOR_PREFS_KEY = 'bum-generator-prefs';
 const SYNC_KEYCHAIN_ACCOUNT = 'sync-passphrase';
 const REMINDER_CHECK_INTERVAL_MS = 30_000;
 
@@ -1711,26 +1721,92 @@ class AppController {
      MODALS
   ══════════════════════════════════════════════════════════════════════ */
 
+  private modalReturnFocus: HTMLElement | null = null;
+
+  /**
+   * Ouvre une modale avec le comportement commun à toutes :
+   * clic sur le fond, croix / [data-close], Entrée → action [data-primary], focus piégé et restauré.
+   */
   private openModal(htmlContent: string): HTMLElement {
     const container = document.getElementById('modal-container');
     if (!container) return document.createElement('div');
+    if (!container.firstElementChild) this.modalReturnFocus = document.activeElement as HTMLElement | null;
+
     container.innerHTML = `
       <div class="modal-overlay" id="modal-overlay">
-        <div class="modal-box">
+        <div class="modal-box" role="dialog" aria-modal="true">
           ${htmlContent}
         </div>
       </div>
     `;
-    const overlay = document.getElementById('modal-overlay');
-    overlay?.addEventListener('click', (e) => {
-      if (e.target === overlay) this.closeModal();
+    const overlay = container.querySelector('#modal-overlay') as HTMLElement;
+    const box = overlay.querySelector('.modal-box') as HTMLElement;
+
+    const title = box.querySelector('.modal-title');
+    if (title) {
+      title.id = 'modal-title';
+      box.setAttribute('aria-labelledby', 'modal-title');
+    }
+
+    // Le clic doit commencer ET finir sur le fond : une sélection de texte relâchée hors de la boîte ne ferme rien
+    let pressedOnBackdrop = false;
+    overlay.addEventListener('mousedown', e => { pressedOnBackdrop = e.target === overlay; });
+    overlay.addEventListener('click', e => {
+      if (pressedOnBackdrop && e.target === overlay) this.closeModal();
+      pressedOnBackdrop = false;
     });
-    return container.querySelector('.modal-box') as HTMLElement;
+
+    box.querySelectorAll<HTMLElement>('.modal-close, [data-close]').forEach(button => {
+      if (!button.getAttribute('aria-label')) button.setAttribute('aria-label', this.tr('Fermer', 'Close'));
+      button.addEventListener('click', () => this.closeModal());
+    });
+
+    box.addEventListener('keydown', e => {
+      const target = e.target as HTMLElement;
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && target instanceof HTMLInputElement
+        && !['checkbox', 'radio', 'file', 'range', 'button', 'submit'].includes(target.type)) {
+        const primary = box.querySelector<HTMLButtonElement>('[data-primary]:not(:disabled), .modal-footer #modal-confirm:not(:disabled)');
+        if (primary) {
+          e.preventDefault();
+          primary.click();
+        }
+      }
+      if (e.key === 'Tab') {
+        const focusable = Array.from(box.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+        )).filter(el => el.offsetParent !== null);
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    });
+
+    // setTimeout plutôt que requestAnimationFrame : ce dernier est suspendu dans un onglet/panneau masqué
+    window.setTimeout(() => {
+      if (!box.isConnected || box.contains(document.activeElement)) return;
+      const target = box.querySelector<HTMLElement>('[data-autofocus]')
+        ?? box.querySelector<HTMLElement>('.modal-body input:not([type="hidden"]):not([type="range"]):not([type="checkbox"]):not([type="file"]):not([disabled]), .modal-body textarea, .modal-body select')
+        ?? box.querySelector<HTMLElement>('.modal-footer button:last-of-type');
+      target?.focus({ preventScroll: true });
+    });
+
+    return box;
   }
 
   private closeModal(): void {
     const container = document.getElementById('modal-container');
-    if (container) container.innerHTML = '';
+    if (!container?.firstElementChild) return;
+    container.innerHTML = '';
+    const returnTarget = this.modalReturnFocus;
+    this.modalReturnFocus = null;
+    if (returnTarget?.isConnected) returnTarget.focus({ preventScroll: true });
   }
 
   /** Boîte de confirmation stylée, empilée au-dessus d'une éventuelle modale ouverte */
@@ -1871,11 +1947,19 @@ class AppController {
           <input class="form-input" id="field-username" type="text" placeholder="user@example.com" value="${existing?.username || ''}" autocomplete="off">
         </div>
         <div class="form-field">
-          <label class="form-label">Mot de passe *</label>
-          <div style="display:flex;gap:8px;">
-            <input class="form-input" id="field-password" type="text" placeholder="Mot de passe fort..." value="${existing?.password || ''}" autocomplete="off" style="flex:1;">
-            <button class="btn-primary" id="btn-gen-pwd" style="white-space:nowrap;font-size:11px;padding:0 12px;">Générer</button>
+          <label class="form-label" for="field-password">${this.tr('Mot de passe *', 'Password *')}</label>
+          <div class="input-with-actions">
+            <input class="form-input" id="field-password" type="password" placeholder="${this.tr('Mot de passe fort…', 'Strong password…')}" value="${this.escapeHtml(existing?.password || '')}" autocomplete="new-password" spellcheck="false">
+            <button type="button" class="icon-btn" id="btn-toggle-field-password" aria-pressed="false" title="${this.tr('Afficher', 'Show')}">${GEN_ICONS.eye}</button>
           </div>
+          <div class="field-inline-row">
+            <div class="gen-strength" id="field-password-strength">
+              <div class="strength-meter">${'<div class="strength-segment"></div>'.repeat(4)}</div>
+              <span class="gen-strength-label"></span>
+            </div>
+            <button type="button" class="btn-primary btn-ghost" id="btn-gen-pwd" aria-expanded="false" aria-controls="cred-gen-panel">${GEN_ICONS.bolt}<span>${this.tr('Générer', 'Generate')}</span></button>
+          </div>
+          <div id="cred-gen-panel" class="gen-inline" hidden></div>
         </div>
         <div class="form-field">
           <label class="form-label">Secret TOTP (2FA) — optionnel</label>
@@ -1912,9 +1996,49 @@ class AppController {
     box.querySelector('#modal-close-btn')?.addEventListener('click', () => this.closeModal());
     box.querySelector('#modal-cancel')?.addEventListener('click', () => this.closeModal());
 
-    box.querySelector('#btn-gen-pwd')?.addEventListener('click', () => {
-      const pwdInput = box.querySelector('#field-password') as HTMLInputElement;
-      if (pwdInput) pwdInput.value = generateStrongPassword({ length: 20, uppercase: true, lowercase: true, numbers: true, symbols: false, avoidAmbiguous: false });
+    // Mot de passe : visibilité, force en direct et générateur intégré
+    const pwdField = box.querySelector('#field-password') as HTMLInputElement;
+    const pwdStrength = box.querySelector('#field-password-strength') as HTMLElement;
+    const pwdVisibility = box.querySelector('#btn-toggle-field-password') as HTMLButtonElement;
+    const genPanel = box.querySelector('#cred-gen-panel') as HTMLElement;
+    const genToggle = box.querySelector('#btn-gen-pwd') as HTMLButtonElement;
+
+    const updatePasswordStrength = () => {
+      const s = calculatePasswordEntropy(pwdField.value);
+      pwdStrength.querySelectorAll<HTMLElement>('.strength-segment').forEach((segment, i) => {
+        segment.style.backgroundColor = pwdField.value && i < s.score ? s.color : '';
+      });
+      const label = pwdStrength.querySelector('.gen-strength-label') as HTMLElement;
+      label.textContent = pwdField.value ? `${s.label} · ${s.bits} bits` : '';
+      label.style.color = s.color;
+    };
+    const setPasswordVisible = (visible: boolean) => {
+      pwdField.type = visible ? 'text' : 'password';
+      pwdVisibility.innerHTML = visible ? GEN_ICONS.eyeOff : GEN_ICONS.eye;
+      pwdVisibility.setAttribute('aria-pressed', String(visible));
+      pwdVisibility.title = visible ? this.tr('Masquer', 'Hide') : this.tr('Afficher', 'Show');
+    };
+
+    pwdField.addEventListener('input', updatePasswordStrength);
+    pwdVisibility.addEventListener('click', () => setPasswordVisible(pwdField.type === 'password'));
+    updatePasswordStrength();
+
+    genToggle.addEventListener('click', () => {
+      const open = genPanel.hidden;
+      genPanel.hidden = !open;
+      genToggle.setAttribute('aria-expanded', String(open));
+      if (open && genPanel.childElementCount === 0) {
+        this.mountGenerator(genPanel, {
+          onUse: value => {
+            pwdField.value = value;
+            setPasswordVisible(true);
+            updatePasswordStrength();
+            genPanel.hidden = true;
+            genToggle.setAttribute('aria-expanded', 'false');
+            pwdField.focus();
+          }
+        });
+      }
     });
 
     // Scan QR code 2FA (caméra ou image, décodage 100 % local)
@@ -2214,125 +2338,243 @@ class AppController {
   private openGeneratorModal(): void {
     const box = this.openModal(`
       <div class="modal-header">
-        <div class="modal-title">Générateur de secrets</div>
-        <button class="modal-close" id="modal-close-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
+        <div class="modal-title" style="display:flex;align-items:center;gap:8px;">${GEN_ICONS.bolt}${this.tr('Générateur de secrets', 'Secret generator')}</div>
+        <button class="modal-close">${GEN_ICONS.close}</button>
       </div>
-      <div class="modal-body">
-        <div class="tab-btn-group" role="tablist">
-          <button class="tab-btn active" id="mode-pwd" role="tab">${this.tr('Mot de passe', 'Password')}</button>
-          <button class="tab-btn" id="mode-phrase" role="tab">${this.tr('Phrase secrète', 'Passphrase')}</button>
-        </div>
-
-        <div id="section-pwd">
-          <div class="form-field">
-            <label class="form-label">Longueur : <span id="len-label">20</span></label>
-            <input type="range" id="pwd-length" min="8" max="64" value="20" style="width:100%;accent-color:var(--accent-blue);">
-          </div>
-          <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);">
-              <input type="checkbox" id="opt-upper" checked> Majuscules
-            </label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);">
-              <input type="checkbox" id="opt-lower" checked> Minuscules
-            </label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);">
-              <input type="checkbox" id="opt-digits" checked> Chiffres
-            </label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);">
-              <input type="checkbox" id="opt-symbols"> Symboles
-            </label>
-          </div>
-        </div>
-
-        <div id="section-phrase" style="display:none;">
-          <div class="form-field">
-            <label class="form-label">Nombre de mots : <span id="words-label">5</span></label>
-            <input type="range" id="words-count" min="3" max="10" value="5" style="width:100%;accent-color:var(--accent-blue);">
-          </div>
-          <div class="form-field">
-            <label class="form-label">Séparateur</label>
-            <select class="form-input" id="phrase-sep">
-              <option value="-">Tiret  (mot-de-passe)</option>
-              <option value=" ">Espace (mot de passe)</option>
-              <option value=".">Point  (mot.de.passe)</option>
-              <option value="_">Underscore (mot_de_passe)</option>
-            </select>
-          </div>
-        </div>
-
-        <div style="background-color:var(--bg-primary);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:12px 14px;font-family:var(--font-mono);font-size:14px;color:var(--text-primary);word-break:break-all;min-height:44px;margin:12px 0;" id="gen-output">
-          Cliquez sur Générer...
-        </div>
-      </div>
+      <div class="modal-body" data-generator-host></div>
       <div class="modal-footer">
-        <button class="btn-primary btn-ghost" id="btn-gen-new">${this.tr('Régénérer', 'Regenerate')}</button>
-        <button class="btn-primary" id="btn-gen-copy">${this.tr('Copier', 'Copy')}</button>
+        <span class="modal-footer-hint"><kbd>R</kbd> ${this.tr('régénérer', 'regenerate')} · <kbd>Échap</kbd> ${this.tr('fermer', 'close')}</span>
+        <button class="btn-primary btn-ghost" data-close>${this.tr('Fermer', 'Close')}</button>
+        <button class="btn-primary btn-accent" data-primary data-autofocus data-gen-copy>${GEN_ICONS.copy}<span>${this.tr('Copier', 'Copy')}</span></button>
       </div>
     `);
+    const generator = this.mountGenerator(box.querySelector('[data-generator-host]') as HTMLElement);
+    box.querySelector('[data-gen-copy]')?.addEventListener('click', () => void generator.copy());
+  }
 
-    let isPhrase = false;
-    let generatedValue = '';
-
-    const genOutput = box.querySelector('#gen-output') as HTMLElement;
-    const lenLabel = box.querySelector('#len-label') as HTMLElement;
-    const wordsLabel = box.querySelector('#words-label') as HTMLElement;
-    const lenInput = box.querySelector('#pwd-length') as HTMLInputElement;
-    const wordsInput = box.querySelector('#words-count') as HTMLInputElement;
-    const sectionPwd = box.querySelector('#section-pwd') as HTMLElement;
-    const sectionPhrase = box.querySelector('#section-phrase') as HTMLElement;
-
-    lenInput?.addEventListener('input', () => { lenLabel.textContent = lenInput.value; });
-    wordsInput?.addEventListener('input', () => { wordsLabel.textContent = wordsInput.value; });
-
-    box.querySelector('#modal-close-btn')?.addEventListener('click', () => this.closeModal());
-
-    const setMode = (phrase: boolean) => {
-      isPhrase = phrase;
-      sectionPwd.style.display = phrase ? 'none' : 'block';
-      sectionPhrase.style.display = phrase ? 'block' : 'none';
-      box.querySelector('#mode-pwd')?.classList.toggle('active', !phrase);
-      box.querySelector('#mode-phrase')?.classList.toggle('active', phrase);
-      generate();
+  /** Générateur réutilisable : modale dédiée ou panneau intégré au formulaire d'identifiant */
+  private mountGenerator(host: HTMLElement, options: { onUse?: (value: string) => void } = {}): { copy: () => Promise<void> } {
+    type GeneratorPrefs = {
+      mode: 'password' | 'passphrase';
+      length: number;
+      uppercase: boolean;
+      lowercase: boolean;
+      numbers: boolean;
+      symbols: boolean;
+      avoidAmbiguous: boolean;
+      words: number;
+      separator: string;
+      capitalize: boolean;
+      includeNumber: boolean;
+    };
+    const defaults: GeneratorPrefs = {
+      mode: 'password', length: 20, uppercase: true, lowercase: true, numbers: true, symbols: true, avoidAmbiguous: false,
+      words: 5, separator: '-', capitalize: true, includeNumber: true
+    };
+    let prefs: GeneratorPrefs = { ...defaults };
+    try {
+      prefs = { ...defaults, ...JSON.parse(localStorage.getItem(GENERATOR_PREFS_KEY) ?? '{}') };
+    } catch {
+      // Préférences illisibles : valeurs par défaut
+    }
+    const savePrefs = () => {
+      try {
+        localStorage.setItem(GENERATOR_PREFS_KEY, JSON.stringify(prefs));
+      } catch {
+        // Stockage indisponible (navigation privée)
+      }
     };
 
-    // Génération immédiate et à chaque changement d'option : plus besoin de cliquer « Générer »
+    const chip = (key: keyof GeneratorPrefs, label: string, hint: string) => `
+      <label class="gen-chip" title="${hint}">
+        <input type="checkbox" data-pref="${key}" ${prefs[key] ? 'checked' : ''}>
+        <span>${label}</span>
+      </label>`;
+    const slider = (key: 'length' | 'words', label: string, min: number, max: number) => `
+      <div class="gen-slider-row">
+        <span class="form-label">${label}</span>
+        <input type="range" min="${min}" max="${max}" value="${prefs[key]}" data-pref="${key}" aria-label="${label}">
+        <input type="number" class="form-input gen-number" min="${min}" max="${max}" value="${prefs[key]}" data-pref="${key}" aria-label="${label}">
+      </div>`;
+    const separators: Array<[string, string]> = [
+      ['-', this.tr('Tiret  -', 'Dash  -')],
+      [' ', this.tr('Espace', 'Space')],
+      ['.', this.tr('Point  .', 'Dot  .')],
+      ['_', this.tr('Tiret bas  _', 'Underscore  _')]
+    ];
+
+    host.innerHTML = `
+      <div class="gen">
+        <div class="gen-output-card">
+          <div class="gen-output" data-gen="output" aria-live="polite" title="${this.tr('Cliquer pour copier', 'Click to copy')}"></div>
+          <div class="gen-output-actions">
+            <button type="button" class="icon-btn" data-gen="refresh" title="${this.tr('Régénérer (R)', 'Regenerate (R)')}">${GEN_ICONS.refresh}</button>
+            <button type="button" class="icon-btn" data-gen="copy" title="${this.tr('Copier', 'Copy')}">${GEN_ICONS.copy}</button>
+          </div>
+        </div>
+        <div class="gen-strength">
+          <div class="strength-meter" data-gen="meter">${'<div class="strength-segment"></div>'.repeat(4)}</div>
+          <span class="gen-strength-label" data-gen="strength"></span>
+        </div>
+        <div class="tab-btn-group" role="tablist">
+          <button type="button" class="tab-btn" role="tab" data-mode="password">${this.tr('Mot de passe', 'Password')}</button>
+          <button type="button" class="tab-btn" role="tab" data-mode="passphrase">${this.tr('Phrase secrète', 'Passphrase')}</button>
+        </div>
+        <div class="gen-section" data-section="password">
+          ${slider('length', this.tr('Longueur', 'Length'), 8, 64)}
+          <div class="gen-chips">
+            ${chip('uppercase', 'A–Z', this.tr('Majuscules', 'Uppercase'))}
+            ${chip('lowercase', 'a–z', this.tr('Minuscules', 'Lowercase'))}
+            ${chip('numbers', '0–9', this.tr('Chiffres', 'Digits'))}
+            ${chip('symbols', '!@#$', this.tr('Symboles', 'Symbols'))}
+            ${chip('avoidAmbiguous', this.tr('Sans ambigus', 'No look-alikes'), this.tr('Exclut 0/O, 1/l/I', 'Excludes 0/O, 1/l/I'))}
+          </div>
+        </div>
+        <div class="gen-section" data-section="passphrase">
+          ${slider('words', this.tr('Mots', 'Words'), 3, 10)}
+          <div class="gen-chips">
+            <select class="form-input gen-select" data-pref="separator" aria-label="${this.tr('Séparateur', 'Separator')}">
+              ${separators.map(([value, label]) => `<option value="${value}" ${prefs.separator === value ? 'selected' : ''}>${label}</option>`).join('')}
+            </select>
+            ${chip('capitalize', this.tr('Majuscule initiale', 'Capitalize'), this.tr('Première lettre de chaque mot en majuscule', 'Capitalize each word'))}
+            ${chip('includeNumber', this.tr('+ nombre', '+ number'), this.tr('Ajoute un nombre à la fin', 'Append a number'))}
+          </div>
+        </div>
+        ${options.onUse ? `
+          <div class="gen-use-row">
+            <button type="button" class="btn-primary btn-accent" data-gen="use">${this.tr('Utiliser ce mot de passe', 'Use this password')}</button>
+          </div>` : ''}
+      </div>`;
+
+    const query = <T extends HTMLElement = HTMLElement>(selector: string) => host.querySelector(selector) as T;
+    const output = query('[data-gen="output"]');
+    const charsetKeys: Array<keyof GeneratorPrefs> = ['uppercase', 'lowercase', 'numbers', 'symbols'];
+    let value = '';
+
+    const strength = () => {
+      if (prefs.mode === 'password') return calculatePasswordEntropy(value);
+      // Entropie réelle d'une phrase : nombre de mots de la liste, pas la longueur des caractères
+      const bits = Math.round(prefs.words * Math.log2(PASSPHRASE_WORDLIST.length) + (prefs.includeNumber ? Math.log2(90) : 0));
+      const score = bits >= 75 ? 4 : bits >= 55 ? 3 : bits >= 36 ? 2 : 1;
+      const labels = ['', this.tr('Faible', 'Weak'), this.tr('Moyen', 'Fair'), this.tr('Fort', 'Strong'), this.tr('Excellent', 'Excellent')];
+      const colors = ['', '#DA3633', '#D29922', '#2EA043', '#238636'];
+      return { bits, score, label: labels[score], color: colors[score] };
+    };
+
+    const render = () => {
+      output.innerHTML = Array.from(value).map(ch => {
+        const kind = /[0-9]/.test(ch) ? 'gen-digit' : /[A-Za-z\s]/.test(ch) ? '' : 'gen-symbol';
+        const safe = this.escapeHtml(ch);
+        return kind ? `<span class="${kind}">${safe}</span>` : safe;
+      }).join('');
+      const s = strength();
+      host.querySelectorAll<HTMLElement>('[data-gen="meter"] .strength-segment').forEach((segment, i) => {
+        segment.style.backgroundColor = i < s.score ? s.color : '';
+      });
+      const label = query('[data-gen="strength"]');
+      label.textContent = `${s.label} · ≈ ${s.bits} bits`;
+      label.style.color = s.color;
+    };
+
     const generate = () => {
-      if (isPhrase) {
-        const count = parseInt(wordsInput.value);
-        const sep = (box.querySelector('#phrase-sep') as HTMLSelectElement)?.value ?? '-';
-        generatedValue = generatePassphrase({ wordCount: count, separator: sep, capitalize: true, includeNumber: false });
-      } else {
-        generatedValue = generateStrongPassword({
-          length: parseInt(lenInput.value),
-          uppercase: (box.querySelector('#opt-upper') as HTMLInputElement)?.checked ?? true,
-          lowercase: (box.querySelector('#opt-lower') as HTMLInputElement)?.checked ?? true,
-          numbers: (box.querySelector('#opt-digits') as HTMLInputElement)?.checked ?? true,
-          symbols: (box.querySelector('#opt-symbols') as HTMLInputElement)?.checked ?? false,
-          avoidAmbiguous: false
-        });
-      }
-      genOutput.textContent = generatedValue;
+      value = prefs.mode === 'password'
+        ? generateStrongPassword({
+            length: prefs.length,
+            uppercase: prefs.uppercase,
+            lowercase: prefs.lowercase,
+            numbers: prefs.numbers,
+            symbols: prefs.symbols,
+            avoidAmbiguous: prefs.avoidAmbiguous
+          })
+        : generatePassphrase({ wordCount: prefs.words, separator: prefs.separator, capitalize: prefs.capitalize, includeNumber: prefs.includeNumber });
+      render();
+      output.classList.remove('gen-flash');
+      void output.offsetWidth;
+      output.classList.add('gen-flash');
     };
 
-    box.querySelector('#mode-pwd')?.addEventListener('click', () => setMode(false));
-    box.querySelector('#mode-phrase')?.addEventListener('click', () => setMode(true));
-    box.querySelector('#btn-gen-new')?.addEventListener('click', generate);
-    box.querySelectorAll('#section-pwd input, #section-phrase input, #phrase-sep').forEach(el => {
-      el.addEventListener('input', generate);
-      el.addEventListener('change', generate);
-    });
-    generate();
+    const syncControls = () => {
+      host.querySelectorAll<HTMLElement>('[data-mode]').forEach(button => {
+        const active = button.dataset.mode === prefs.mode;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-selected', String(active));
+      });
+      host.querySelectorAll<HTMLElement>('[data-section]').forEach(section => {
+        section.hidden = section.dataset.section !== prefs.mode;
+      });
+      host.querySelectorAll<HTMLInputElement>('input[data-pref="length"]').forEach(input => { input.value = String(prefs.length); });
+      host.querySelectorAll<HTMLInputElement>('input[data-pref="words"]').forEach(input => { input.value = String(prefs.words); });
+    };
 
-    box.querySelector('#btn-gen-copy')?.addEventListener('click', async () => {
-      if (generatedValue) {
-        await navigator.clipboard.writeText(generatedValue);
-        this.showToast(i18n.t.common.copied, 'success');
+    host.querySelectorAll<HTMLElement>('[data-mode]').forEach(button => {
+      button.addEventListener('click', () => {
+        prefs.mode = button.dataset.mode as GeneratorPrefs['mode'];
+        syncControls();
+        savePrefs();
+        generate();
+      });
+    });
+
+    host.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-pref]').forEach(control => {
+      const key = control.dataset.pref as keyof GeneratorPrefs;
+      const isNumberField = control instanceof HTMLInputElement && control.type === 'number';
+
+      control.addEventListener('input', () => {
+        if (control instanceof HTMLInputElement && control.type === 'checkbox') {
+          if (charsetKeys.includes(key) && !control.checked && charsetKeys.every(k => k === key || !prefs[k])) {
+            control.checked = true;
+            this.showToast(this.tr('Gardez au moins un type de caractères', 'Keep at least one character set'), 'info', 1800);
+            return;
+          }
+          (prefs as Record<string, unknown>)[key] = control.checked;
+        } else if (key === 'length' || key === 'words') {
+          const [min, max] = key === 'length' ? [8, 64] : [3, 10];
+          const n = parseInt(control.value, 10);
+          // Saisie en cours dans le champ numérique (ex. « 1 » avant « 16 ») : on attend une valeur valide
+          if (!Number.isFinite(n) || (isNumberField && (n < min || n > max))) return;
+          prefs[key] = Math.min(max, Math.max(min, n));
+        } else {
+          (prefs as Record<string, unknown>)[key] = control.value;
+        }
+        if (!isNumberField) syncControls();
+        else host.querySelectorAll<HTMLInputElement>(`input[type="range"][data-pref="${key}"]`).forEach(range => { range.value = control.value; });
+        savePrefs();
+        generate();
+      });
+
+      if (isNumberField) control.addEventListener('change', syncControls);
+    });
+
+    const copy = async () => {
+      if (!value) return;
+      await this.copyToClipboardWithAutoClear(value, this.tr('Secret copié', 'Secret copied'), true);
+      const button = query('[data-gen="copy"]');
+      button.classList.add('copied');
+      setTimeout(() => button.classList.remove('copied'), 500);
+    };
+
+    query('[data-gen="refresh"]').addEventListener('click', generate);
+    query('[data-gen="copy"]').addEventListener('click', () => void copy());
+    output.addEventListener('click', () => void copy());
+    if (options.onUse) query('[data-gen="use"]').addEventListener('click', () => options.onUse?.(value));
+
+    host.addEventListener('keydown', e => {
+      const target = e.target as HTMLElement;
+      const typing = target instanceof HTMLSelectElement || (target instanceof HTMLInputElement && target.type === 'number');
+      if ((e.key === 'r' || e.key === 'R') && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        generate();
       }
     });
+    // La touche R fonctionne aussi quand le focus est sur le bouton Copier du pied de modale
+    host.closest('.modal-box')?.querySelector('.modal-footer')?.addEventListener('keydown', e => {
+      const key = (e as KeyboardEvent).key;
+      if (key === 'r' || key === 'R') generate();
+    });
+
+    syncControls();
+    generate();
+    return { copy };
   }
 
   /* ── Audit de Sécurité du Coffre ────────────────────────────────────────── */
@@ -2436,18 +2678,21 @@ class AppController {
       const compromisedList: string[] = [];
       const breachesLabel = i18n.getLocale() === 'fr' ? 'fuites publiques connues' : 'known public breaches';
 
-      for (const c of creds) {
-        if (!c.password) continue;
+      const toScan = creds.filter(c => c.password);
+      let scanned = 0;
+      for (const c of toScan) {
+        if (!btnHibp.isConnected) return; // Modale fermée pendant l'analyse
         const pwnedHits = await checkPasswordPwnedHIBP(c.password);
+        scanned++;
+        btnHibp.textContent = `${i18n.t.audit.scanningHibp} ${scanned}/${toScan.length}`;
         if (pwnedHits > 0) {
           compromisedCount++;
-          compromisedList.push(`<strong>${c.title}</strong> (${i18n.formatNumber(pwnedHits)} ${breachesLabel})`);
+          compromisedList.push(`<strong>${this.escapeHtml(c.title)}</strong> (${i18n.formatNumber(pwnedHits)} ${breachesLabel})`);
         }
       }
 
       btnHibp.disabled = false;
-      const doneLabel = i18n.getLocale() === 'fr' ? 'Analyse terminée' : 'Scan complete';
-      btnHibp.textContent = `✓ ${doneLabel}`;
+      btnHibp.textContent = this.tr('Relancer l’analyse', 'Run scan again');
 
       if (compromisedCount > 0) {
         const warnLabel = i18n.getLocale() === 'fr'
@@ -2895,7 +3140,7 @@ class AppController {
       </div>
       <div class="modal-footer">
         <button class="btn-primary" id="modal-close-sync" style="color:var(--text-muted);">${i18n.t.common.close}</button>
-        <button class="btn-primary" id="btn-trigger-sync" style="background-color:var(--accent-blue);color:#fff;">${i18n.t.syncModal.syncNowButton}</button>
+        <button class="btn-primary" id="btn-trigger-sync" data-primary style="background-color:var(--accent-blue);color:#fff;">${i18n.t.syncModal.syncNowButton}</button>
       </div>
     `);
 
@@ -3116,11 +3361,12 @@ class AppController {
     });
 
     btnBioUnlock?.addEventListener('click', async () => {
-      const verified = await verifyBiometrics();
+      btnBioUnlock.disabled = true;
+      const verified = await verifyBiometrics().catch(() => false);
+      btnBioUnlock.disabled = false;
       if (verified) {
-        // En mode biométrique vérifié, le coffre s'ouvre directement
-        vault.isLocked = false;
-        vaultStore.subscribe(() => {})(); // Trigger store update
+        // Passe par le store : sauvegarde + rafraîchissement de l'interface
+        vaultStore.unlockVaultWithBiometrics(vaultId);
         this.closeModal();
         this.showToast(`${i18n.t.vault.vaultUnlockedToast} ("${vault.name}")`, 'success');
       } else {
@@ -3132,14 +3378,16 @@ class AppController {
     box.querySelector('#modal-close-btn')?.addEventListener('click', () => this.closeModal());
     box.querySelector('#modal-cancel')?.addEventListener('click', () => this.closeModal());
 
-    pwdInput?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') (box.querySelector('#modal-confirm') as HTMLButtonElement)?.click();
-    });
-
     box.querySelector('#modal-confirm')?.addEventListener('click', async () => {
       const pwd = pwdInput?.value;
-      if (!pwd) { this.showToast(i18n.getLocale() === 'fr' ? 'Entrez le mot de passe' : 'Enter the password', 'error'); return; }
+      if (!pwd) {
+        errorEl.textContent = this.tr('Entrez le mot de passe du coffre', 'Enter the vault password');
+        errorEl.style.display = 'block';
+        pwdInput.focus();
+        return;
+      }
       const success = await vaultStore.unlockVault(vaultId, await hashVaultPassword(pwd));
+      errorEl.textContent = i18n.t.vault.invalidPasswordToast;
       if (success) {
         this.closeModal();
         this.showToast(`${i18n.t.vault.vaultUnlockedToast} ("${vault.name}")`, 'success');

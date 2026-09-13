@@ -224,6 +224,15 @@ export class VaultStore {
     return true;
   }
 
+  /** Déverrouillage après vérification biométrique WebAuthn réussie */
+  public unlockVaultWithBiometrics(vaultId: string): void {
+    const v = this.data.vaults.find(vault => vault.id === vaultId);
+    if (v?.isLocked) {
+      v.isLocked = false;
+      this.notify();
+    }
+  }
+
   public addCredential(item: Omit<UnlockedVaultData['credentials'][0], 'id' | 'createdAt' | 'updatedAt'>): void {
     const newItem = {
       ...item,
