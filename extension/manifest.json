@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "BUM — Zero-Knowledge Autofill & 2FA",
+  "version": "1.0.0",
+  "description": "Gestionnaire de mots de passe, coffre-fort E2EE, 2FA et tâches lié à BUM.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "BUM Vault"
+  },
+  "permissions": [
+    "activeTab",
+    "storage",
+    "clipboardWrite"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

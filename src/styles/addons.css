@@ -1,0 +1,608 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   ADDONS CSS — Extensions au Design System Swiss Modernism
+   Kanban Tasks, Locked Vault Banner, Inline Notes Edit, Tags, PWD Strength
+──────────────────────────────────────────────────────────────────────────── */
+
+/* ── Bandeau de Coffre Verrouillé ────────────────────────────────────────── */
+.vault-locked-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  height: 100%;
+  padding: 40px;
+  text-align: center;
+}
+
+.vault-locked-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-xl);
+  background-color: rgba(218, 54, 51, 0.1);
+  border: 1px solid rgba(218, 54, 51, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-red);
+}
+
+.vault-locked-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.vault-locked-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+  max-width: 280px;
+  line-height: 1.5;
+}
+
+/* ── Vue Kanban des Tâches ────────────────────────────────────────────────── */
+.kanban-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1;
+  align-content: start;
+}
+
+.kanban-column {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 120px;
+}
+
+.kanban-col-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--text-muted);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.kanban-card {
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.kanban-card:hover {
+  border-color: var(--accent-blue);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+}
+
+.kanban-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.4;
+  margin-bottom: 6px;
+}
+
+.kanban-card-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ── Tags ─────────────────────────────────────────────────────────────────── */
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tag-pill {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 20px;
+  background-color: rgba(88, 166, 255, 0.1);
+  border: 1px solid rgba(88, 166, 255, 0.25);
+  color: var(--accent-blue);
+  letter-spacing: 0.2px;
+}
+
+/* ── Jauge de Force du Mot de Passe ─────────────────────────────────────── */
+.strength-meter {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.strength-segment {
+  height: 3px;
+  border-radius: 2px;
+  flex: 1;
+  background-color: var(--bg-hover);
+  transition: background-color 0.3s ease;
+}
+
+/* ── Notes Chiffrées Édition Inline ─────────────────────────────────────── */
+.note-editor {
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+  width: 100%;
+  min-height: 80px;
+  transition: border-color 0.15s ease;
+}
+
+.note-editor:focus {
+  border-color: var(--accent-blue);
+}
+
+/* ── Accordéon Section dans le Panneau Détail ────────────────────────────── */
+.section-divider {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background-color: var(--border-subtle);
+}
+
+/* ── Historique de Mots de Passe ─────────────────────────────────────────── */
+.history-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  gap: 12px;
+}
+
+.history-password {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  letter-spacing: 1px;
+}
+
+.history-date {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ── Vault Type Badge ────────────────────────────────────────────────────── */
+.vault-type-badge {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.vault-type-badge.personal {
+  background-color: rgba(88, 166, 255, 0.12);
+  color: #58a6ff;
+  border: 1px solid rgba(88, 166, 255, 0.2);
+}
+
+.vault-type-badge.work {
+  background-color: rgba(35, 134, 54, 0.12);
+  color: #2ea043;
+  border: 1px solid rgba(35, 134, 54, 0.2);
+}
+
+.vault-type-badge.team {
+  background-color: rgba(163, 113, 247, 0.12);
+  color: #a371f7;
+  border: 1px solid rgba(163, 113, 247, 0.2);
+}
+
+/* ── Statut de Compte (Favicon + Status Dot) ─────────────────────────────── */
+.record-icon-wrapper {
+  position: relative;
+}
+
+.record-icon-wrapper .status-dot {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--bg-primary);
+}
+
+/* ── Barre de Progression pour 2FA ──────────────────────────────────────── */
+.totp-progress-bar {
+  height: 2px;
+  background-color: var(--bg-tertiary);
+  border-radius: 1px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.totp-progress-fill {
+  height: 100%;
+  background-color: var(--accent-blue);
+  border-radius: 1px;
+  transition: width 1s linear;
+}
+
+.totp-progress-fill.warning {
+  background-color: var(--accent-orange);
+}
+
+.totp-progress-fill.danger {
+  background-color: var(--accent-red);
+}
+
+/* ── Effets de Chargement (Skeleton UI) ──────────────────────────────────── */
+@keyframes skeleton-shimmer {
+  0% { background-position: -600px 0; }
+  100% { background-position: 600px 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-hover) 50%, var(--bg-tertiary) 75%);
+  background-size: 600px 100%;
+  animation: skeleton-shimmer 1.5s infinite;
+  border-radius: var(--radius-md);
+}
+
+/* ── Notification Toast ──────────────────────────────────────────────────── */
+#toast-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 2000;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 10px 16px;
+  font-size: 13px;
+  color: var(--text-primary);
+  box-shadow: var(--shadow-md);
+  animation: toast-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  max-width: 320px;
+}
+
+.toast.success { border-left: 3px solid var(--accent-green); }
+.toast.error   { border-left: 3px solid var(--accent-red); }
+.toast.info    { border-left: 3px solid var(--accent-blue); }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Inline Copy Feedback ────────────────────────────────────────────────── */
+@keyframes copy-flash {
+  0%, 100% { color: var(--text-secondary); }
+  50% { color: var(--accent-green); }
+}
+
+.icon-btn.copied {
+  animation: copy-flash 0.4s ease;
+}
+
+/* ── Overlay Mobile Sidebar Backdrop ─────────────────────────────────────── */
+.mobile-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 499;
+}
+
+.mobile-overlay.active {
+  display: block;
+}
+
+/* ── Liste filterable - Badges vue basculée ──────────────────────────────── */
+.view-toggle {
+  display: flex;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1px;
+  gap: 1px;
+}
+
+.view-toggle-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: all 0.12s ease;
+}
+
+.view-toggle-btn.active {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+/* ── Scrollbars Custom (WebKit) ──────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--bg-hover);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ── Placeholder de recherche sans résultats ─────────────────────────────── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 48px 24px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.empty-state svg {
+  opacity: 0.4;
+}
+
+.empty-state-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.empty-state-sub {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ── Mot de passe fort ────────────────────────────────────────────────────── */
+.password-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.password-mask {
+  letter-spacing: 2px;
+  color: var(--text-secondary);
+}
+
+/* ── Audit de Sécurité & Health Score ────────────────────────────────────── */
+.audit-score-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  margin-bottom: 16px;
+}
+
+.audit-score-circle {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 20px;
+  border: 3px solid var(--accent-green);
+  color: var(--text-primary);
+}
+
+.audit-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.audit-metric-box {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  text-align: center;
+}
+
+.audit-metric-num {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.audit-metric-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.audit-issue-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+}
+
+/* ── Onglets Import / Export ─────────────────────────────────────────────── */
+.import-export-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 16px;
+}
+
+.import-export-tab {
+  padding: 8px 16px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.import-export-tab.active {
+  color: var(--accent-blue);
+  border-bottom-color: var(--accent-blue);
+  font-weight: 600;
+}
+
+/* ── Sous-tâches Checklist ───────────────────────────────────────────────── */
+.subtask-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.subtask-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  transition: all 0.15s ease;
+}
+
+.subtask-item:hover {
+  border-color: var(--border-medium);
+}
+
+.subtask-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.subtask-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-green);
+  cursor: pointer;
+}
+
+.subtask-title {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.subtask-title.done {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.subtask-add-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* ── Champs personnalisés ────────────────────────────────────────────────── */
+.custom-fields-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.custom-field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.custom-field-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+}
+
+.custom-field-val {
+  font-size: 13px;
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.custom-field-val.masked {
+  font-family: var(--font-mono);
+  letter-spacing: 2px;
+}
+
+
