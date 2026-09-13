@@ -3,12 +3,34 @@ import { Task } from './types/vault';
 import { getServiceIconSvg } from './icons/serviceIcons';
 import { generateTOTP } from './crypto/totpEngine';
 import { calculatePasswordEntropy, generateStrongPassword, generatePassphrase, hashVaultPassword, auditVaultSecurity, checkPasswordPwnedHIBP } from './crypto/vaultCrypto';
-import { parseImportFile, exportVaultAsJson, exportVaultAsCsv, downloadExportFile } from './import_export/importEngine';
+import { exportVaultAsJson, exportVaultAsCsv, downloadExportFile } from './import_export/importEngine';
+import { parseImportData, PasswordRequiredError, ImportSecrets } from './import_export/importRouter';
+import { encryptExport, MIN_EXPORT_PASSWORD_LENGTH } from './import_export/encryptedExport';
+import { buildKdbx4 } from './import_export/keepass';
+import { exportCredentialsAsCxf } from './import_export/cxf';
+import { normalizeTotpInput, parseOtpAuthUri } from './crypto/otpauthUri';
+import { CameraQrScanner, decodeQrFromFile } from './crypto/qrScanner';
+import { osKeychain } from './platform/tauriBridge';
+import {
+  EisenhowerQuadrant,
+  describeRecurrence,
+  getDependents,
+  getDueReminders,
+  getEisenhowerQuadrant,
+  getOpenBlockers,
+  planTaskCompletion,
+  wouldCreateDependencyCycle
+} from './tasks/taskEngine';
+import type { RecurrenceFrequency, TaskRecurrence } from './types/vault';
 import { isBiometricsAvailable, verifyBiometrics } from './crypto/webauthn';
 import { syncEngine } from './sync/syncEngine';
 import { i18n } from './i18n';
 
 type ActiveView = 'all-credentials' | '2fa-tokens' | 'tasks';
+type TaskViewMode = 'list' | 'kanban' | 'matrix' | 'calendar';
+
+const SYNC_KEYCHAIN_ACCOUNT = 'sync-passphrase';
+const REMINDER_CHECK_INTERVAL_MS = 30_000;
 
 /* ════════════════════════════════════════════════════════════════════════════
    APP CONTROLLER — Zero-Knowledge Vault Manager
@@ -17,7 +39,7 @@ class AppController {
   private activeView: ActiveView = 'all-credentials';
   private selectedItemId: string | null = null;
   private searchQuery = '';
-  private taskViewMode: 'list' | 'kanban' | 'calendar' = 'list';
+  private taskViewMode: TaskViewMode = 'list';
   public totpInterval: number | null = null;
   private autoLockTimeout: number | null = null;
   private readonly AUTO_LOCK_DELAY_MS = 5 * 60 * 1000; // 5 minutes d'inactivité
@@ -25,6 +47,7 @@ class AppController {
 
   constructor() {
     this.initTheme();
+    this.initReminders();
     this.initEventListeners();
     this.initMobileControls();
     this.initI18n();
@@ -45,6 +68,55 @@ class AppController {
       this.renderCounts();
       if (this.selectedItemId) this.renderDetail(this.selectedItemId);
     });
+  }
+
+  private tr(fr: string, en: string): string {
+    return i18n.getLocale() === 'fr' ? fr : en;
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /* ── Rappels de tâches (toast + notification système) ─────────────────── */
+  private initReminders(): void {
+    const check = () => {
+      const data = vaultStore.getData();
+      const lockedVaults = new Set(data.vaults.filter(v => v.isLocked).map(v => v.id));
+      const due = getDueReminders(data.tasks).filter(t => !lockedVaults.has(t.vaultId));
+      for (const task of due) {
+        vaultStore.updateTask(task.id, { reminderSent: true });
+        const label = this.tr('Rappel de tâche', 'Task reminder');
+        this.showToast(`${label} : ${task.title}`, 'info', 6000);
+        if ('Notification' in window && Notification.permission === 'granted') {
+          try {
+            new Notification(`BUM — ${label}`, { body: task.title, tag: task.id });
+          } catch {
+            // Notifications système indisponibles (contexte non sécurisé, webview restreinte)
+          }
+        }
+      }
+    };
+    check();
+    window.setInterval(check, REMINDER_CHECK_INTERVAL_MS);
+  }
+
+  private requestNotificationPermission(): void {
+    if ('Notification' in window && Notification.permission === 'default') {
+      void Notification.requestPermission();
+    }
+  }
+
+  private toDateTimeInputValue(timestamp?: number): string {
+    if (!timestamp) return '';
+    const d = new Date(timestamp);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
 
   /* ── Theme Toggle (Dark / Light) ──────────────────────────────────────── */
@@ -349,28 +421,18 @@ class AppController {
       this.openCreateVaultModal();
     });
 
-    document.getElementById('btn-view-list')?.addEventListener('click', () => {
-      this.taskViewMode = 'list';
-      document.getElementById('btn-view-list')?.classList.add('active');
-      document.getElementById('btn-view-kanban')?.classList.remove('active');
-      document.getElementById('btn-view-calendar')?.classList.remove('active');
-      this.renderList();
-    });
-
-    document.getElementById('btn-view-kanban')?.addEventListener('click', () => {
-      this.taskViewMode = 'kanban';
-      document.getElementById('btn-view-kanban')?.classList.add('active');
-      document.getElementById('btn-view-list')?.classList.remove('active');
-      document.getElementById('btn-view-calendar')?.classList.remove('active');
-      this.renderList();
-    });
-
-    document.getElementById('btn-view-calendar')?.addEventListener('click', () => {
-      this.taskViewMode = 'calendar';
-      document.getElementById('btn-view-calendar')?.classList.add('active');
-      document.getElementById('btn-view-list')?.classList.remove('active');
-      document.getElementById('btn-view-kanban')?.classList.remove('active');
-      this.renderList();
+    const viewButtons: Array<[string, TaskViewMode]> = [
+      ['btn-view-list', 'list'],
+      ['btn-view-kanban', 'kanban'],
+      ['btn-view-matrix', 'matrix'],
+      ['btn-view-calendar', 'calendar']
+    ];
+    viewButtons.forEach(([buttonId, mode]) => {
+      document.getElementById(buttonId)?.addEventListener('click', () => {
+        this.taskViewMode = mode;
+        viewButtons.forEach(([id]) => document.getElementById(id)?.classList.toggle('active', id === buttonId));
+        this.renderList();
+      });
     });
   }
 
@@ -583,6 +645,63 @@ class AppController {
         return;
       }
 
+      // Mode Matrice d'Eisenhower
+      if (this.taskViewMode === 'matrix') {
+        const quadrants: Array<{ key: EisenhowerQuadrant; title: string; sub: string; color: string }> = [
+          { key: 'do', title: this.tr('Faire maintenant', 'Do now'), sub: this.tr('Urgent et important', 'Urgent & important'), color: 'var(--accent-red)' },
+          { key: 'plan', title: this.tr('Planifier', 'Schedule'), sub: this.tr('Important, non urgent', 'Important, not urgent'), color: 'var(--accent-blue)' },
+          { key: 'delegate', title: this.tr('Déléguer', 'Delegate'), sub: this.tr('Urgent, peu important', 'Urgent, less important'), color: 'var(--accent-orange)' },
+          { key: 'eliminate', title: this.tr('Plus tard', 'Later'), sub: this.tr('Ni urgent ni important', 'Neither urgent nor important'), color: 'var(--text-muted)' }
+        ];
+        const openTasks = tasks.filter(t => t.status !== 'completed');
+        const grid = document.createElement('div');
+        grid.className = 'eisenhower-grid';
+
+        quadrants.forEach(q => {
+          const quadrantTasks = openTasks.filter(t => getEisenhowerQuadrant(t) === q.key);
+          const cell = document.createElement('div');
+          cell.className = 'eisenhower-cell';
+          cell.style.borderTopColor = q.color;
+          cell.innerHTML = `
+            <div class="eisenhower-cell-header">
+              <div>
+                <div class="eisenhower-cell-title" style="color:${q.color};">${q.title}</div>
+                <div class="eisenhower-cell-sub">${q.sub}</div>
+              </div>
+              <span class="eisenhower-count">${quadrantTasks.length}</span>
+            </div>
+            <div class="eisenhower-cell-body"></div>
+          `;
+          const body = cell.querySelector('.eisenhower-cell-body') as HTMLElement;
+          if (quadrantTasks.length === 0) {
+            body.innerHTML = `<div class="eisenhower-empty">${this.tr('Aucune tâche', 'No tasks')}</div>`;
+          }
+          quadrantTasks.forEach(task => {
+            const card = document.createElement('div');
+            card.className = `kanban-card ${this.selectedItemId === task.id ? 'selected' : ''}`;
+            card.innerHTML = `
+              <div class="kanban-card-title">${this.escapeHtml(task.title)}</div>
+              <div class="kanban-card-meta">
+                <span class="badge priority-${task.priority}">${task.priority.toUpperCase()}</span>
+                ${task.status === 'blocked' ? `<span class="badge" style="color:var(--accent-red);">${this.tr('BLOQUÉE', 'BLOCKED')}</span>` : ''}
+                <span>${task.dueDate ? i18n.formatRelativeDate(task.dueDate) : ''}</span>
+              </div>
+            `;
+            card.addEventListener('click', () => {
+              this.selectedItemId = task.id;
+              this.renderList();
+              this.renderDetail(task.id);
+              document.getElementById('detail-container')?.classList.add('mobile-active');
+            });
+            body.appendChild(card);
+          });
+          grid.appendChild(cell);
+        });
+
+        container.appendChild(grid);
+        return;
+      }
+
       // Mode Calendrier / Échéances (Timeline)
       if (this.taskViewMode === 'calendar') {
         const timelineWrapper = document.createElement('div');
@@ -701,6 +820,9 @@ class AppController {
             <div class="record-sub">${task.dueDate ? i18n.formatRelativeDate(task.dueDate) : statusSub}</div>
           </div>
           <div class="record-badges">
+            ${task.status === 'blocked' ? `<span class="badge" style="color:var(--accent-red);border-color:rgba(218,54,51,0.4);" title="${this.tr('Bloquée par des dépendances', 'Blocked by dependencies')}">${this.tr('BLOQ', 'BLK')}</span>` : ''}
+            ${task.recurrence ? `<span class="badge" style="color:var(--accent-purple);" title="${describeRecurrence(task.recurrence, i18n.getLocale() === 'fr' ? 'fr' : 'en')}">${this.tr('RÉC', 'REC')}</span>` : ''}
+            ${task.reminderAt && !task.reminderSent && task.status !== 'completed' ? `<span class="badge" style="color:var(--accent-orange);" title="${new Date(task.reminderAt).toLocaleString()}">${this.tr('RAP', 'REM')}</span>` : ''}
             <span class="badge priority-${task.priority}">${task.priority.charAt(0).toUpperCase()}</span>
           </div>
         `;
@@ -820,6 +942,51 @@ class AppController {
         blocked: i18n.t.tasks.statusBlocked
       };
 
+      const locale = i18n.getLocale() === 'fr' ? 'fr' : 'en';
+      const blockers = getOpenBlockers(task, data.tasks);
+      const dependencyTasks = (task.dependsOn ?? [])
+        .map(depId => data.tasks.find(t => t.id === depId))
+        .filter((t): t is Task => !!t);
+      const dependents = getDependents(task.id, data.tasks);
+      const taskLinkRow = (t: Task) => `
+        <div class="field-box dep-task-row" data-task-id="${t.id}" style="cursor:pointer;margin-bottom:6px;">
+          <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+            <span style="font-size:10px;color:${statusColors[t.status]};">&#9679;</span>
+            <span style="font-size:13px;font-weight:500;${t.status === 'completed' ? 'text-decoration:line-through;opacity:0.5;' : ''}">${this.escapeHtml(t.title)}</span>
+          </div>
+          <span style="font-size:11px;color:${statusColors[t.status]};">${statusLabels[t.status]}</span>
+        </div>`;
+
+      const planningHTML = `
+        ${task.recurrence ? `
+          <div class="field-group">
+            <div class="field-label">${this.tr('Récurrence', 'Recurrence')}</div>
+            <div class="field-box"><span class="field-val">${describeRecurrence(task.recurrence, locale)}</span></div>
+          </div>` : ''}
+        ${task.reminderAt ? `
+          <div class="field-group">
+            <div class="field-label">${this.tr('Rappel', 'Reminder')}</div>
+            <div class="field-box">
+              <span class="field-val">${new Date(task.reminderAt).toLocaleString(locale === 'fr' ? 'fr-FR' : 'en-US')}</span>
+              ${task.reminderSent ? `<span class="badge">${this.tr('ENVOYÉ', 'SENT')}</span>` : ''}
+            </div>
+          </div>` : ''}
+        ${dependencyTasks.length ? `
+          <div class="field-group">
+            <div class="section-divider" style="margin-bottom:8px;">${this.tr('Dépend de', 'Depends on')} (${dependencyTasks.length - blockers.length}/${dependencyTasks.length})</div>
+            ${blockers.length ? `
+              <div style="padding:8px 12px;margin-bottom:8px;background:rgba(218,54,51,0.1);border:1px solid rgba(218,54,51,0.3);border-radius:var(--radius-md);color:var(--accent-red);font-size:12px;">
+                ${this.tr(`${blockers.length} prérequis à terminer avant de clore cette tâche.`, `${blockers.length} prerequisite(s) must be completed first.`)}
+              </div>` : ''}
+            ${dependencyTasks.map(taskLinkRow).join('')}
+          </div>` : ''}
+        ${dependents.length ? `
+          <div class="field-group">
+            <div class="section-divider" style="margin-bottom:8px;">${this.tr('Bloque', 'Blocks')} (${dependents.length})</div>
+            ${dependents.map(taskLinkRow).join('')}
+          </div>` : ''}
+      `;
+
       container.innerHTML = `
         <div class="detail-header">
           <div class="detail-header-left">
@@ -865,6 +1032,8 @@ class AppController {
               <div class="field-box"><span class="field-val">${task.dueDate}</span></div>
             </div>
           ` : ''}
+
+          ${planningHTML}
 
           ${task.description ? `
             <div class="field-group">
@@ -925,9 +1094,38 @@ class AppController {
       });
 
       document.getElementById('btn-toggle-task-status')?.addEventListener('click', () => {
-        const nextStatus = task.status === 'completed' ? 'todo' : 'completed';
-        vaultStore.updateTask(task.id, { status: nextStatus });
-        this.showToast(nextStatus === 'completed' ? 'Tâche terminée' : 'Tâche rouverte', 'success');
+        if (task.status === 'completed') {
+          const reopenedStatus = getOpenBlockers(task, vaultStore.getData().tasks).length > 0 ? 'blocked' : 'todo';
+          vaultStore.updateTask(task.id, { status: reopenedStatus, completedAt: undefined });
+          this.showToast(this.tr('Tâche rouverte', 'Task reopened'), 'success');
+          return;
+        }
+
+        const plan = planTaskCompletion(task, vaultStore.getData().tasks);
+        if (plan.blockers.length > 0) {
+          const names = plan.blockers.map(b => `"${b.title}"`).join(', ');
+          this.showToast(`${this.tr('Terminez d’abord', 'Complete first')} : ${names}`, 'error', 5000);
+          return;
+        }
+
+        vaultStore.updateTask(task.id, plan.updates);
+        plan.unblockedIds.forEach(unblockedId => vaultStore.updateTask(unblockedId, { status: 'todo' }));
+        if (plan.nextOccurrence) {
+          vaultStore.addTask(plan.nextOccurrence);
+          this.showToast(`${this.tr('Tâche terminée — prochaine occurrence le', 'Task completed — next occurrence on')} ${plan.nextOccurrence.dueDate}`, 'success', 4000);
+        } else {
+          this.showToast(this.tr('Tâche terminée', 'Task completed'), 'success');
+        }
+      });
+
+      document.querySelectorAll('.dep-task-row').forEach(el => {
+        el.addEventListener('click', () => {
+          const targetId = (el as HTMLElement).dataset.taskId;
+          if (!targetId) return;
+          this.selectedItemId = targetId;
+          this.renderList();
+          this.renderDetail(targetId);
+        });
       });
 
       document.getElementById('btn-goto-linked-cred')?.addEventListener('click', () => {
@@ -1025,16 +1223,20 @@ class AppController {
     // Passkeys HTML
     const passkeysHTML = cred.passkeys && cred.passkeys.length > 0 ? `
       <div class="field-group">
-        <div class="field-label">Passkeys FIDO2 / WebAuthn</div>
-        <div class="field-box">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-blue)" stroke-width="2">
-              <path d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5z"></path>
-            </svg>
-            <span class="field-val">${cred.passkeys[0].rpId} (x${cred.passkeys[0].signCount})</span>
-          </div>
-          <span class="badge" style="color:var(--accent-blue);">FIDO2</span>
-        </div>
+        <div class="field-label">Passkeys FIDO2 / WebAuthn (${cred.passkeys.length})</div>
+        ${cred.passkeys.map(pk => `
+          <div class="field-box" style="margin-bottom:6px;">
+            <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-blue)" stroke-width="2">
+                <path d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5z"></path>
+              </svg>
+              <span class="field-val">${this.escapeHtml(pk.rpId)} &middot; ${this.escapeHtml(pk.userName || '—')}</span>
+            </div>
+            <span style="display:flex;gap:4px;">
+              ${pk.privateKey ? `<span class="badge" style="color:var(--accent-green);" title="${this.tr('Clé privée présente : exportable (CXF / KeePass)', 'Private key present: exportable (CXF / KeePass)')}">${this.tr('CLÉ', 'KEY')}</span>` : ''}
+              <span class="badge" style="color:var(--accent-blue);">FIDO2</span>
+            </span>
+          </div>`).join('')}
       </div>` : '';
 
     // TOTP Card HTML
@@ -1515,7 +1717,20 @@ class AppController {
         </div>
         <div class="form-field">
           <label class="form-label">Secret TOTP (2FA) — optionnel</label>
-          <input class="form-input" id="field-totp" type="text" placeholder="JBSWY3DPEHPK3PXP" value="${existing?.totpSecret || ''}" autocomplete="off">
+          <div style="display:flex;gap:8px;">
+            <input class="form-input" id="field-totp" type="text" placeholder="JBSWY3DPEHPK3PXP ou otpauth://totp/..." value="${existing?.totpSecret || ''}" autocomplete="off" style="flex:1;">
+            <button class="btn-primary" id="btn-scan-qr" type="button" style="white-space:nowrap;font-size:11px;padding:0 12px;">${this.tr('Scanner QR', 'Scan QR')}</button>
+          </div>
+          <div id="qr-scan-panel" hidden>
+            <video id="qr-video" playsinline muted style="width:100%;max-height:220px;margin-top:8px;border-radius:var(--radius-md);background:#000;object-fit:cover;"></video>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;">
+              <label class="btn-primary" style="font-size:11px;padding:5px 12px;cursor:pointer;">
+                ${this.tr('Importer une image', 'Upload an image')}
+                <input type="file" id="qr-image-input" accept="image/*" hidden>
+              </label>
+              <span id="qr-scan-status" style="font-size:11px;color:var(--text-muted);"></span>
+            </div>
+          </div>
         </div>
         <div class="form-field">
           <label class="form-label">Date d'expiration / Renouvellement — optionnel</label>
@@ -1540,6 +1755,69 @@ class AppController {
       if (pwdInput) pwdInput.value = generateStrongPassword({ length: 20, uppercase: true, lowercase: true, numbers: true, symbols: false, avoidAmbiguous: false });
     });
 
+    // Scan QR code 2FA (caméra ou image, décodage 100 % local)
+    const qrPanel = box.querySelector('#qr-scan-panel') as HTMLElement;
+    const qrVideo = box.querySelector('#qr-video') as HTMLVideoElement;
+    const qrStatus = box.querySelector('#qr-scan-status') as HTMLElement;
+    let qrScanner: CameraQrScanner | null = null;
+
+    const applyScannedOtp = (text: string): boolean => {
+      const normalized = normalizeTotpInput(text);
+      if (!normalized) {
+        qrStatus.textContent = this.tr('QR code non reconnu comme secret 2FA (otpauth://totp)', 'QR code is not a 2FA secret (otpauth://totp)');
+        qrStatus.style.color = 'var(--accent-red)';
+        return false;
+      }
+      (box.querySelector('#field-totp') as HTMLInputElement).value = normalized;
+      const info = parseOtpAuthUri(text);
+      const titleInput = box.querySelector('#field-title') as HTMLInputElement;
+      const usernameInput = box.querySelector('#field-username') as HTMLInputElement;
+      if (info?.issuer && !titleInput.value) titleInput.value = info.issuer;
+      if (info?.account && !usernameInput.value) usernameInput.value = info.account;
+      qrScanner?.stop();
+      qrPanel.hidden = true;
+      this.showToast(this.tr('Secret 2FA importé depuis le QR code', '2FA secret imported from QR code'), 'success');
+      return true;
+    };
+
+    box.querySelector('#btn-scan-qr')?.addEventListener('click', async () => {
+      if (!qrPanel.hidden) {
+        qrScanner?.stop();
+        qrPanel.hidden = true;
+        return;
+      }
+      qrPanel.hidden = false;
+      qrStatus.style.color = 'var(--text-muted)';
+      qrStatus.textContent = this.tr('Présentez le QR code à la caméra…', 'Point the camera at the QR code…');
+      qrScanner = new CameraQrScanner(qrVideo);
+      try {
+        await qrScanner.start(text => {
+          if (!applyScannedOtp(text)) {
+            qrStatus.textContent += ' — ' + this.tr('importez une image', 'upload an image');
+          }
+        });
+      } catch {
+        qrStatus.textContent = this.tr('Caméra indisponible — importez une capture du QR code.', 'Camera unavailable — upload a screenshot of the QR code.');
+      }
+    });
+
+    box.querySelector('#qr-image-input')?.addEventListener('change', async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      try {
+        const text = await decodeQrFromFile(file);
+        if (text) {
+          applyScannedOtp(text);
+        } else {
+          qrStatus.textContent = this.tr('Aucun QR code détecté dans l’image', 'No QR code found in the image');
+          qrStatus.style.color = 'var(--accent-red)';
+        }
+      } catch {
+        qrStatus.textContent = this.tr('Image illisible', 'Unreadable image');
+        qrStatus.style.color = 'var(--accent-red)';
+      }
+    });
+
     box.querySelector('#modal-confirm')?.addEventListener('click', () => {
       const title = (box.querySelector('#field-title') as HTMLInputElement)?.value.trim();
       const password = (box.querySelector('#field-password') as HTMLInputElement)?.value;
@@ -1549,7 +1827,13 @@ class AppController {
       }
       const website = (box.querySelector('#field-website') as HTMLInputElement)?.value.trim();
       const username = (box.querySelector('#field-username') as HTMLInputElement)?.value.trim();
-      const totpSecret = (box.querySelector('#field-totp') as HTMLInputElement)?.value.trim();
+      const totpRaw = (box.querySelector('#field-totp') as HTMLInputElement)?.value.trim();
+      const totpSecret = totpRaw ? normalizeTotpInput(totpRaw) : null;
+      if (totpRaw && !totpSecret) {
+        this.showToast(this.tr('Secret 2FA invalide (Base32 ou URI otpauth://totp attendu)', 'Invalid 2FA secret (Base32 or otpauth://totp URI expected)'), 'error');
+        return;
+      }
+      qrScanner?.stop();
       const notes = (box.querySelector('#field-notes') as HTMLTextAreaElement)?.value;
       const expiresVal = (box.querySelector('#field-expires-at') as HTMLInputElement)?.value;
       const expiresAt = expiresVal ? new Date(expiresVal).getTime() : undefined;
@@ -1601,6 +1885,15 @@ class AppController {
       .map(c => `<option value="${c.id}" ${c.id === targetLinkedCredId ? 'selected' : ''}>${c.title}</option>`)
       .join('');
 
+    const dependencyOptions = data.tasks
+      .filter(t => t.vaultId === data.activeVaultId && t.id !== existing?.id)
+      .map(t => `
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-secondary);cursor:pointer;">
+          <input type="checkbox" class="task-dep-check" value="${t.id}" ${existing?.dependsOn?.includes(t.id) ? 'checked' : ''}>
+          <span style="${t.status === 'completed' ? 'text-decoration:line-through;opacity:0.6;' : ''}">${this.escapeHtml(t.title)}</span>
+        </label>`)
+      .join('');
+
     const box = this.openModal(`
       <div class="modal-header">
         <div class="modal-title">${isEdit ? `Modifier "${existing?.title}"` : 'Nouvelle tâche'}</div>
@@ -1634,6 +1927,39 @@ class AppController {
             <input class="form-input" id="task-due" type="date" value="${existing?.dueDate || ''}">
           </div>
         </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="form-field">
+            <label class="form-label">${this.tr('Récurrence', 'Recurrence')}</label>
+            <select class="form-input" id="task-recur-freq">
+              <option value="">${this.tr('— Aucune —', '— None —')}</option>
+              <option value="daily" ${existing?.recurrence?.freq === 'daily' ? 'selected' : ''}>${this.tr('Quotidienne', 'Daily')}</option>
+              <option value="weekly" ${existing?.recurrence?.freq === 'weekly' ? 'selected' : ''}>${this.tr('Hebdomadaire', 'Weekly')}</option>
+              <option value="monthly" ${existing?.recurrence?.freq === 'monthly' ? 'selected' : ''}>${this.tr('Mensuelle', 'Monthly')}</option>
+              <option value="yearly" ${existing?.recurrence?.freq === 'yearly' ? 'selected' : ''}>${this.tr('Annuelle', 'Yearly')}</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label">${this.tr('Tous les (intervalle)', 'Every (interval)')}</label>
+            <input class="form-input" id="task-recur-interval" type="number" min="1" max="365" value="${existing?.recurrence?.interval ?? 1}">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="form-field">
+            <label class="form-label">${this.tr('Fin de récurrence', 'Recurrence end')}</label>
+            <input class="form-input" id="task-recur-until" type="date" value="${existing?.recurrence?.until || ''}">
+          </div>
+          <div class="form-field">
+            <label class="form-label">${this.tr('Rappel', 'Reminder')}</label>
+            <input class="form-input" id="task-reminder" type="datetime-local" value="${this.toDateTimeInputValue(existing?.reminderAt)}">
+          </div>
+        </div>
+        ${dependencyOptions ? `
+          <div class="form-field">
+            <label class="form-label">${this.tr('Dépend de (à terminer avant)', 'Depends on (complete first)')}</label>
+            <div style="display:flex;flex-direction:column;gap:6px;max-height:140px;overflow:auto;padding:8px 10px;border:1px solid var(--border-subtle);border-radius:var(--radius-md);background:var(--bg-secondary);">
+              ${dependencyOptions}
+            </div>
+          </div>` : ''}
         ${credOptions ? `
           <div class="form-field">
             <label class="form-label">Identifiant lié (optionnel)</label>
@@ -1660,13 +1986,43 @@ class AppController {
       const linkedCredSel = box.querySelector('#task-cred') as HTMLSelectElement;
       const linkedCred = linkedCredSel?.value || undefined;
 
+      const freq = (box.querySelector('#task-recur-freq') as HTMLSelectElement).value as RecurrenceFrequency | '';
+      const interval = Math.min(365, Math.max(1, parseInt((box.querySelector('#task-recur-interval') as HTMLInputElement).value, 10) || 1));
+      const until = (box.querySelector('#task-recur-until') as HTMLInputElement).value || undefined;
+      const recurrence: TaskRecurrence | undefined = freq ? { freq, interval, until } : undefined;
+      if (recurrence && until && dueDate && until < dueDate) {
+        this.showToast(this.tr('La fin de récurrence précède l’échéance', 'Recurrence end is before the due date'), 'error');
+        return;
+      }
+
+      const reminderValue = (box.querySelector('#task-reminder') as HTMLInputElement).value;
+      const reminderAt = reminderValue ? new Date(reminderValue).getTime() : undefined;
+      const reminderSent = reminderAt !== undefined && existing?.reminderAt === reminderAt ? existing.reminderSent : false;
+      if (reminderAt && reminderAt > Date.now()) this.requestNotificationPermission();
+
+      const dependsOn = Array.from(box.querySelectorAll<HTMLInputElement>('.task-dep-check:checked')).map(el => el.value);
+      const allTasks = vaultStore.getData().tasks;
+      if (existing && wouldCreateDependencyCycle(allTasks, existing.id, dependsOn)) {
+        this.showToast(this.tr('Dépendance circulaire : une tâche choisie dépend déjà de celle-ci', 'Circular dependency: a selected task already depends on this one'), 'error', 5000);
+        return;
+      }
+      const hasOpenBlockers = getOpenBlockers({ dependsOn } as Task, allTasks).length > 0;
+
       if (isEdit && existing) {
+        const status: Task['status'] = existing.status === 'completed'
+          ? 'completed'
+          : hasOpenBlockers ? 'blocked' : existing.status === 'blocked' ? 'todo' : existing.status;
         vaultStore.updateTask(existing.id, {
           title,
           description: description || undefined,
           priority,
           dueDate: dueDate || undefined,
-          linkedCredentialId: linkedCred
+          linkedCredentialId: linkedCred,
+          status,
+          recurrence,
+          dependsOn: dependsOn.length ? dependsOn : undefined,
+          reminderAt,
+          reminderSent
         });
         this.closeModal();
         this.showToast('Tâche mise à jour', 'success');
@@ -1676,11 +2032,15 @@ class AppController {
           vaultId: data3.activeVaultId,
           title,
           description: description || undefined,
-          status: 'todo',
+          status: hasOpenBlockers ? 'blocked' : 'todo',
           priority,
           dueDate: dueDate || undefined,
           linkedCredentialId: linkedCred,
-          tags: []
+          tags: [],
+          recurrence,
+          dependsOn: dependsOn.length ? dependsOn : undefined,
+          reminderAt,
+          reminderSent: false
         });
         this.closeModal();
         this.showToast('Tâche créée', 'success');
@@ -1982,10 +2342,23 @@ class AppController {
               <line x1="12" y1="3" x2="12" y2="15"></line>
             </svg>
             <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">${i18n.t.importExport.dragDropLabel}</div>
-            <div style="font-size:11px;color:var(--text-muted);">JSON / CSV</div>
-            <input type="file" id="import-file-input" accept=".json,.csv" style="position:absolute;opacity:0;inset:0;cursor:pointer;">
+            <div style="font-size:11px;color:var(--text-muted);">KDBX / 1PUX / CXF / JSON / CSV / XML</div>
+            <input type="file" id="import-file-input" accept=".json,.csv,.xml,.kdbx,.1pux" style="position:absolute;opacity:0;inset:0;cursor:pointer;">
           </div>
           <div id="import-status" style="margin-top:10px;font-size:12px;color:var(--text-secondary);min-height:20px;"></div>
+          <div id="import-secret-panel" hidden>
+            <div style="margin-top:10px;padding:12px;border:1px solid var(--border-subtle);border-radius:var(--radius-md);background:var(--bg-secondary);">
+              <label class="form-label" id="import-secret-label">${this.tr('Mot de passe', 'Password')}</label>
+              <input class="form-input" id="import-secret-password" type="password" autocomplete="off">
+              <div id="import-keyfile-row" hidden>
+                <label class="form-label" style="margin-top:8px;">${this.tr('Fichier clé KeePass (optionnel)', 'KeePass key file (optional)')}</label>
+                <input class="form-input" id="import-keyfile" type="file">
+              </div>
+              <div style="display:flex;justify-content:flex-end;margin-top:10px;">
+                <button class="btn-primary" id="btn-import-unlock" style="font-size:12px;">${this.tr('Déchiffrer', 'Decrypt')}</button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Section Export -->
@@ -1994,6 +2367,41 @@ class AppController {
             Exportez les identifiants et tâches du coffre actif vers un fichier téléchargeable.
           </p>
           <div style="display:flex;flex-direction:column;gap:10px;">
+            <button class="btn-primary" id="btn-export-encrypted" style="justify-content:flex-start;padding:12px 16px;gap:12px;background-color:var(--bg-tertiary);border-color:var(--border-subtle);color:var(--text-primary);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green)" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+              <div style="text-align:left;">
+                <div style="font-size:13px;font-weight:600;">${this.tr('Export chiffré (recommandé)', 'Encrypted export (recommended)')}</div>
+                <div style="font-size:11px;color:var(--text-muted);">${this.tr('JSON BUM protégé par un mot de passe dédié — Argon2id + AES-256-GCM', 'BUM JSON protected by a dedicated password — Argon2id + AES-256-GCM')}</div>
+              </div>
+            </button>
+            <button class="btn-primary" id="btn-export-kdbx" style="justify-content:flex-start;padding:12px 16px;gap:12px;background-color:var(--bg-tertiary);border-color:var(--border-subtle);color:var(--text-primary);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green)" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
+              <div style="text-align:left;">
+                <div style="font-size:13px;font-weight:600;">${this.tr('Base KeePass (.kdbx 4)', 'KeePass database (.kdbx 4)')}</div>
+                <div style="font-size:11px;color:var(--text-muted);">${this.tr('Compatible KeePass, KeePassXC, Strongbox — chiffrée', 'Compatible with KeePass, KeePassXC, Strongbox — encrypted')}</div>
+              </div>
+            </button>
+            <div id="export-password-panel" hidden>
+              <div style="padding:12px;border:1px solid var(--border-subtle);border-radius:var(--radius-md);background:var(--bg-secondary);">
+                <div class="form-label" id="export-password-title"></div>
+                <input class="form-input" id="export-password" type="password" autocomplete="new-password" placeholder="${this.tr(`Mot de passe (${MIN_EXPORT_PASSWORD_LENGTH} caractères min.)`, `Password (min. ${MIN_EXPORT_PASSWORD_LENGTH} characters)`)}">
+                <input class="form-input" id="export-password-confirm" type="password" autocomplete="new-password" placeholder="${this.tr('Confirmer le mot de passe', 'Confirm password')}" style="margin-top:8px;">
+                <div id="export-password-status" style="font-size:11px;min-height:16px;margin-top:6px;color:var(--text-muted);"></div>
+                <div style="display:flex;justify-content:flex-end;margin-top:6px;">
+                  <button class="btn-primary" id="btn-export-password-confirm" style="font-size:12px;">${this.tr('Chiffrer et télécharger', 'Encrypt & download')}</button>
+                </div>
+              </div>
+            </div>
+            <div style="padding:8px 12px;border:1px solid rgba(210,153,34,0.35);background:rgba(210,153,34,0.08);border-radius:var(--radius-md);font-size:11px;color:var(--accent-orange);line-height:1.5;">
+              ${this.tr('Les formats ci-dessous sont en clair : quiconque obtient le fichier lit tous vos secrets. Supprimez-le après usage.', 'The formats below are unencrypted: anyone who gets the file can read all your secrets. Delete it after use.')}
+            </div>
+            <button class="btn-primary" id="btn-export-cxf" style="justify-content:flex-start;padding:12px 16px;gap:12px;background-color:var(--bg-tertiary);border-color:var(--border-subtle);color:var(--text-primary);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-purple)" stroke-width="2"><path d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5z"></path></svg>
+              <div style="text-align:left;">
+                <div style="font-size:13px;font-weight:600;">${this.tr('FIDO CXF — Passkeys & identifiants', 'FIDO CXF — Passkeys & credentials')}</div>
+                <div style="font-size:11px;color:var(--text-muted);">${this.tr('Credential Exchange Format de la FIDO Alliance (passkeys, TOTP, notes)', 'FIDO Alliance Credential Exchange Format (passkeys, TOTP, notes)')}</div>
+              </div>
+            </button>
             <button class="btn-primary" id="btn-export-json" style="justify-content:flex-start;padding:12px 16px;gap:12px;background-color:var(--bg-tertiary);border-color:var(--border-subtle);color:var(--text-primary);">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-blue)" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
               <div style="text-align:left;">
@@ -2051,7 +2459,77 @@ class AppController {
     });
 
     // Actions Export
+    const confirmPlaintextExport = () => confirm(this.tr(
+      'Cet export n’est PAS chiffré : mots de passe, secrets 2FA et clés de passkeys seront lisibles par quiconque accède au fichier. Continuer ?',
+      'This export is NOT encrypted: passwords, 2FA secrets and passkey keys will be readable by anyone with the file. Continue?'
+    ));
+    const exportDate = new Date().toISOString().slice(0, 10);
+    const activeVaultName = data.vaults.find(v => v.id === data.activeVaultId)?.name ?? 'BUM';
+
+    const exportPanel = box.querySelector('#export-password-panel') as HTMLElement;
+    const exportTitle = box.querySelector('#export-password-title') as HTMLElement;
+    const exportPwd = box.querySelector('#export-password') as HTMLInputElement;
+    const exportPwdConfirm = box.querySelector('#export-password-confirm') as HTMLInputElement;
+    const exportStatus = box.querySelector('#export-password-status') as HTMLElement;
+    const exportConfirmBtn = box.querySelector('#btn-export-password-confirm') as HTMLButtonElement;
+    let protectedExportMode: 'encrypted' | 'kdbx' = 'encrypted';
+
+    const openExportPasswordPanel = (mode: 'encrypted' | 'kdbx') => {
+      protectedExportMode = mode;
+      exportTitle.textContent = mode === 'encrypted'
+        ? this.tr('Mot de passe dédié de l’export chiffré', 'Dedicated encrypted export password')
+        : this.tr('Mot de passe maître de la base KeePass', 'KeePass database master password');
+      exportStatus.textContent = '';
+      exportPanel.hidden = false;
+      exportPwd.focus();
+    };
+
+    box.querySelector('#btn-export-encrypted')?.addEventListener('click', () => openExportPasswordPanel('encrypted'));
+    box.querySelector('#btn-export-kdbx')?.addEventListener('click', () => openExportPasswordPanel('kdbx'));
+
+    exportConfirmBtn?.addEventListener('click', async () => {
+      const setExportStatus = (text: string, color: string) => {
+        exportStatus.textContent = text;
+        exportStatus.style.color = color;
+      };
+      if (exportPwd.value !== exportPwdConfirm.value) {
+        setExportStatus(this.tr('Les mots de passe ne correspondent pas', 'Passwords do not match'), 'var(--accent-red)');
+        return;
+      }
+      if (exportPwd.value.length < MIN_EXPORT_PASSWORD_LENGTH) {
+        setExportStatus(this.tr(`${MIN_EXPORT_PASSWORD_LENGTH} caractères minimum`, `At least ${MIN_EXPORT_PASSWORD_LENGTH} characters`), 'var(--accent-red)');
+        return;
+      }
+
+      exportConfirmBtn.disabled = true;
+      setExportStatus(this.tr('Dérivation de la clé Argon2id en cours…', 'Deriving Argon2id key…'), 'var(--text-secondary)');
+      try {
+        if (protectedExportMode === 'encrypted') {
+          const file = await encryptExport(exportVaultAsJson(creds, tasks), exportPwd.value);
+          downloadExportFile(file, `bum-vault-encrypted-${exportDate}.json`, 'application/json');
+        } else {
+          const kdbx = await buildKdbx4(creds, exportPwd.value, { databaseName: activeVaultName });
+          downloadExportFile(kdbx, `bum-${exportDate}.kdbx`, 'application/octet-stream');
+        }
+        exportPwd.value = '';
+        exportPwdConfirm.value = '';
+        exportPanel.hidden = true;
+        this.showToast(this.tr('Export chiffré téléchargé', 'Encrypted export downloaded'), 'success');
+      } catch (err) {
+        setExportStatus(err instanceof Error ? err.message : String(err), 'var(--accent-red)');
+      } finally {
+        exportConfirmBtn.disabled = false;
+      }
+    });
+
+    box.querySelector('#btn-export-cxf')?.addEventListener('click', () => {
+      if (!confirmPlaintextExport()) return;
+      downloadExportFile(exportCredentialsAsCxf(creds), `bum-cxf-${exportDate}.json`, 'application/json');
+      this.showToast(this.tr('Export CXF téléchargé', 'CXF export downloaded'), 'success');
+    });
+
     box.querySelector('#btn-export-json')?.addEventListener('click', () => {
+      if (!confirmPlaintextExport()) return;
       const jsonContent = exportVaultAsJson(creds, tasks);
       const filename = `bum-vault-export-${new Date().toISOString().slice(0, 10)}.json`;
       downloadExportFile(jsonContent, filename, 'application/json');
@@ -2059,6 +2537,7 @@ class AppController {
     });
 
     box.querySelector('#btn-export-csv')?.addEventListener('click', () => {
+      if (!confirmPlaintextExport()) return;
       const csvContent = exportVaultAsCsv(creds);
       const filename = `bum-credentials-${new Date().toISOString().slice(0, 10)}.csv`;
       downloadExportFile(csvContent, filename, 'text/csv;charset=utf-8;');
@@ -2093,21 +2572,70 @@ class AppController {
     let parsedResult: { credentials: any[]; tasks: any[]; sourceFormat: string; count: number } = { credentials: [], tasks: [], sourceFormat: 'unknown', count: 0 };
     const statusEl = box.querySelector('#import-status') as HTMLElement;
 
-    const handleFile = async (file: File) => {
+    const secretPanel = box.querySelector('#import-secret-panel') as HTMLElement;
+    const secretLabel = box.querySelector('#import-secret-label') as HTMLElement;
+    const secretPwd = box.querySelector('#import-secret-password') as HTMLInputElement;
+    const keyFileRow = box.querySelector('#import-keyfile-row') as HTMLElement;
+    const keyFileInput = box.querySelector('#import-keyfile') as HTMLInputElement;
+    const unlockBtn = box.querySelector('#btn-import-unlock') as HTMLButtonElement;
+    let pendingFile: { bytes: Uint8Array; name: string } | null = null;
+
+    const setImportStatus = (text: string, color: string) => {
+      statusEl.textContent = text;
+      statusEl.style.color = color;
+    };
+
+    const tryParse = async (secrets?: ImportSecrets) => {
+      if (!pendingFile) return;
+      confirmBtn.disabled = true;
+      if (secrets) setImportStatus(this.tr('Déchiffrement en cours…', 'Decrypting…'), 'var(--text-secondary)');
       try {
-        const text = await file.text();
-        parsedResult = parseImportFile(text, file.name);
-        const foundLabel = i18n.getLocale() === 'fr' ? 'identifiant(s) trouvé(s)' : 'item(s) found';
-        statusEl.textContent = `${parsedResult.count} ${foundLabel} — "${file.name}" [${parsedResult.sourceFormat}]`;
-        statusEl.style.color = 'var(--accent-green)';
+        parsedResult = await parseImportData(pendingFile.bytes, pendingFile.name, secrets);
+        secretPanel.hidden = true;
+        secretPwd.value = '';
+        const foundLabel = this.tr('identifiant(s) trouvé(s)', 'item(s) found');
+        setImportStatus(`${parsedResult.count} ${foundLabel} — "${pendingFile.name}" [${parsedResult.sourceFormat}]`, 'var(--accent-green)');
         confirmBtn.disabled = parsedResult.count === 0;
       } catch (err) {
-        const errLabel = i18n.getLocale() === 'fr' ? 'Erreur de lecture' : 'Read error';
-        statusEl.textContent = `${errLabel}: ${err}`;
-        statusEl.style.color = 'var(--accent-red)';
-        confirmBtn.disabled = true;
+        if (err instanceof PasswordRequiredError) {
+          secretPanel.hidden = false;
+          keyFileRow.hidden = err.kind !== 'kdbx';
+          secretLabel.textContent = err.kind === 'kdbx'
+            ? this.tr('Mot de passe maître KeePass', 'KeePass master password')
+            : this.tr('Mot de passe de l’export chiffré', 'Encrypted export password');
+          setImportStatus(err.message, 'var(--accent-orange)');
+          secretPwd.focus();
+          return;
+        }
+        const errLabel = this.tr('Erreur de lecture', 'Read error');
+        setImportStatus(`${errLabel} : ${err instanceof Error ? err.message : String(err)}`, 'var(--accent-red)');
       }
     };
+
+    const handleFile = async (file: File) => {
+      pendingFile = { bytes: new Uint8Array(await file.arrayBuffer()), name: file.name };
+      secretPanel.hidden = true;
+      secretPwd.value = '';
+      keyFileInput.value = '';
+      await tryParse();
+    };
+
+    unlockBtn?.addEventListener('click', async () => {
+      const keyFile = keyFileInput.files?.[0];
+      unlockBtn.disabled = true;
+      try {
+        await tryParse({
+          password: secretPwd.value,
+          keyFile: keyFile && !keyFileRow.hidden ? new Uint8Array(await keyFile.arrayBuffer()) : undefined
+        });
+      } finally {
+        unlockBtn.disabled = false;
+      }
+    });
+
+    secretPwd?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') unlockBtn.click();
+    });
 
     box.querySelector('#import-file-input')?.addEventListener('change', (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
@@ -2126,6 +2654,8 @@ class AppController {
 
     confirmBtn?.addEventListener('click', () => {
       vaultStore.importBulk(parsedResult.credentials, parsedResult.tasks);
+      pendingFile?.bytes.fill(0);
+      pendingFile = null;
       this.closeModal();
       const importedLabel = i18n.getLocale() === 'fr' ? `${parsedResult.count} identifiant(s) importé(s)` : `${parsedResult.count} item(s) imported`;
       this.showToast(importedLabel, 'success');
@@ -2183,6 +2713,12 @@ class AppController {
         <div class="form-field">
           <label class="form-label">${i18n.t.syncModal.passphraseLabel}</label>
           <input class="form-input" id="sync-passphrase" type="password" placeholder="${i18n.t.syncModal.passphrasePlaceholder}" autocomplete="off">
+          <div id="sync-keychain-row" hidden>
+            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-secondary);margin-top:8px;cursor:pointer;">
+              <input type="checkbox" id="sync-remember-keychain">
+              ${this.tr('Mémoriser la clé dans le trousseau du système (Windows / macOS / Linux)', 'Remember passphrase in the OS keychain (Windows / macOS / Linux)')}
+            </label>
+          </div>
         </div>
 
         <div id="sync-message-box" style="display:none;margin-top:12px;padding:10px 12px;border-radius:var(--radius-md);font-size:12px;"></div>
@@ -2201,6 +2737,18 @@ class AppController {
     const pwdInput = box.querySelector('#sync-passphrase') as HTMLInputElement;
     const msgBox = box.querySelector('#sync-message-box') as HTMLElement;
     const btnSync = box.querySelector('#btn-trigger-sync') as HTMLButtonElement;
+    const keychainRow = box.querySelector('#sync-keychain-row') as HTMLElement;
+    const rememberCheck = box.querySelector('#sync-remember-keychain') as HTMLInputElement;
+
+    void osKeychain.isAvailable().then(async available => {
+      if (!available || !keychainRow.isConnected) return;
+      keychainRow.hidden = false;
+      const stored = await osKeychain.get(SYNC_KEYCHAIN_ACCOUNT).catch(() => null);
+      if (stored && !pwdInput.value) {
+        pwdInput.value = stored;
+        rememberCheck.checked = true;
+      }
+    });
 
     enabledCheck?.addEventListener('change', () => {
       syncEngine.updateConfig({ enabled: enabledCheck.checked });
@@ -2226,6 +2774,18 @@ class AppController {
         msgBox.style.color = 'var(--accent-red)';
         msgBox.textContent = i18n.getLocale() === 'fr' ? 'Clé secrète E2EE requise' : 'E2EE secret passphrase required';
         return;
+      }
+
+      if (!keychainRow.hidden) {
+        try {
+          if (rememberCheck.checked) {
+            await osKeychain.set(SYNC_KEYCHAIN_ACCOUNT, pass);
+          } else {
+            await osKeychain.remove(SYNC_KEYCHAIN_ACCOUNT);
+          }
+        } catch (err) {
+          this.showToast(`${this.tr('Trousseau système', 'OS keychain')} : ${err instanceof Error ? err.message : String(err)}`, 'error');
+        }
       }
 
       syncEngine.updateConfig({ enabled: true, endpointUrl: endpoint });

@@ -1,0 +1,69 @@
+/**
+ * Pont vers le cœur Rust Tauri v2. Toutes les fonctions dégradent proprement
+ * (null / false) lorsque l'application tourne dans un navigateur classique.
+ */
+
+type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+
+function getInvoke(): InvokeFn | null {
+  const internals = (globalThis as { __TAURI_INTERNALS__?: { invoke?: InvokeFn } }).__TAURI_INTERNALS__;
+  return typeof internals?.invoke === 'function' ? internals.invoke : null;
+}
+
+export function isTauri(): boolean {
+  return getInvoke() !== null;
+}
+
+export async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const invoke = getInvoke();
+  if (!invoke) throw new Error('Runtime Tauri indisponible');
+  return invoke<T>(cmd, args);
+}
+
+/** Argon2id natif (Rust) — retourne null hors Tauri pour basculer sur l'implémentation JS */
+export async function nativeArgon2id(
+  password: string,
+  salt: Uint8Array,
+  params: { t: number; m: number; p: number }
+): Promise<Uint8Array | null> {
+  if (!isTauri()) return null;
+  try {
+    const out = await tauriInvoke<number[]>('derive_key_argon2', {
+      passphrase: password,
+      salt: Array.from(salt),
+      memoryKib: params.m,
+      iterations: params.t,
+      parallelism: params.p
+    });
+    return new Uint8Array(out);
+  } catch (err) {
+    console.warn('Argon2id natif indisponible, repli sur WebAssembly/JS', err);
+    return null;
+  }
+}
+
+/** Trousseau du système (Windows Credential Manager, macOS Keychain, Secret Service) */
+export const osKeychain = {
+  async isAvailable(): Promise<boolean> {
+    if (!isTauri()) return false;
+    try {
+      return await tauriInvoke<boolean>('get_os_keychain_available');
+    } catch {
+      return false;
+    }
+  },
+
+  async set(account: string, secret: string): Promise<void> {
+    await tauriInvoke<void>('keychain_set_secret', { account, secret });
+  },
+
+  async get(account: string): Promise<string | null> {
+    if (!isTauri()) return null;
+    return tauriInvoke<string | null>('keychain_get_secret', { account });
+  },
+
+  async remove(account: string): Promise<void> {
+    if (!isTauri()) return;
+    await tauriInvoke<void>('keychain_delete_secret', { account });
+  }
+};

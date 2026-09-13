@@ -19,6 +19,8 @@
 - **Champs complets** : Nom, URL de site, Identifiant/Email, Mot de passe avec historique des versions précédentes, Notes chiffrées, Passkeys (FIDO2 / WebAuthn).
 - **Champs personnalisés** : Support de champs dynamiques additionnels (Texte, Masqué/PIN, Question secrète) avec bouton révéler/copier.
 - **Authentificateur 2FA RFC 6238** : Génération de codes TOTP en temps réel avec compte à rebours circulaire SVG et copie en 1 clic.
+- **Scanner de QR code 2FA** : lecture `otpauth://` via la caméra ou une capture d'écran, décodage 100 % local (jsQR), pré-remplissage du service et de l'identifiant.
+- **Passkeys** : affichage de toutes les passkeys d'un identifiant, import/export avec clé privée (FIDO CXF, Bitwarden, KeePassXC).
 - **Iconographie intelligente** : Détection de domaine et affichage automatique du logo officiel via `SimpleIcons` vectoriel SVG ou fallback globe monochrome (0 emoji dans l'UI).
 
 ### 3. Gestionnaire de Tâches & Projets (GTD)
@@ -26,14 +28,20 @@
 - **Sous-tâches interactives** : Checklist à cocher directement dans la vue détaillée avec suivi du ratio de complétion.
 - **Liaison bidirectionnelle** : Association d'une tâche à un identifiant pour un accès direct en 1 clic.
 - **Gestion complète** : Priorités (`Basse`, `Moyenne`, `Haute`, `Urgente`), dates d'échéances, statuts et édition.
+- **Matrice d'Eisenhower** : classement automatique Faire / Planifier / Déléguer / Plus tard (priorité + échéance à 2 jours).
+- **Récurrences avancées** : quotidienne, hebdomadaire, mensuelle, annuelle avec intervalle et date de fin ; la prochaine occurrence est créée à la complétion (fin de mois gérée).
+- **Dépendances** : une tâche ne peut être terminée tant que ses prérequis sont ouverts ; statut « Bloquée » automatique, déblocage des tâches suivantes et détection des cycles.
+- **Rappels** : notification système + toast à l'heure choisie, décalés avec la récurrence.
 
 ### 4. Interopérabilité & Backups
-- **Import universel** : Glisser-déposer de fichiers Bitwarden (JSON/CSV), 1Password, KeePass, LastPass, Dashlane, Passky, Chrome, Firefox et JSON brut.
-- **Export sécurisé** : Export standard JSON BUM (préservant toutes les métadonnées) et export CSV universel.
+- **Import universel** : Glisser-déposer de fichiers Bitwarden (JSON avec passkeys / CSV), 1Password (`.1pux`, CSV), KeePass (`.kdbx` 3.1 & 4.x — AES-KDF, Argon2d/id, AES-256, ChaCha20, fichier clé — et XML), FIDO CXF, LastPass, Dashlane, Passky, Chrome, Firefox et JSON brut.
+- **Export chiffré** : JSON BUM protégé par un mot de passe dédié (Argon2id + AES-256-GCM, paramètres authentifiés en AAD).
+- **Export KeePass** : base `.kdbx` 4 (Argon2id, AES-256) ouvrable dans KeePass / KeePassXC.
+- **Exports en clair** : JSON BUM, CSV universel et FIDO CXF, avec avertissement de sécurité avant téléchargement.
 
 ### 5. Multi-Plateforme
 - **Web App / PWA** : Accessible directement dans le navigateur.
-- **Desktop Tauri v2 (`src-tauri/`)** : Application de bureau native Windows / macOS / Linux avec backend Rust et commandes trousseau OS.
+- **Desktop Tauri v2 (`src-tauri/`)** : Application de bureau native Windows / macOS / Linux avec backend Rust : Argon2id natif, AES-256-GCM et trousseau du système (Windows Credential Manager, macOS Keychain, Secret Service) via `keyring` — utilisé pour mémoriser la clé de synchronisation.
 - **Extension Web Chromium / Firefox (`extension/`)** : Manifest V3 avec remplissage automatique des identifiants sur les pages web (Autofill).
 - **Mobile Android (`mobile-android/`)** : Application native Kotlin + Jetpack Compose avec chiffrement hardware Keystore (AES-256-GCM).
 - **Mobile iOS (`mobile-ios/`)** : Application native Swift + SwiftUI avec CryptoKit et Apple Keychain sécurisé.
@@ -67,7 +75,9 @@ npm run tauri build
 ├── src/
 │   ├── crypto/            # Moteurs WebCrypto (AES-GCM, KDF, HIBP, Diceware)
 │   ├── icons/             # Résolution vectorielle SimpleIcons + Fallback globe
-│   ├── import_export/     # Parseurs & générateurs universels JSON/CSV
+│   ├── import_export/     # Import/export : KeePass KDBX, 1PUX, CXF, export chiffré, JSON/CSV
+│   ├── platform/          # Pont Tauri (Argon2id natif, trousseau OS)
+│   ├── tasks/             # Moteur de tâches : Eisenhower, récurrences, dépendances, rappels
 │   ├── store/             # State manager réactif avec persistence chiffrée
 │   ├── styles/            # Design System Swiss Modernism & Addons
 │   ├── types/             # Schémas TypeScript stricts

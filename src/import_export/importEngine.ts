@@ -23,6 +23,27 @@ export function parseImportFile(fileContent: string, fileName = ''): ImportResul
         const credentials: Partial<CredentialItem>[] = parsed.items.map((item: any) => {
           const login = item.login || {};
           const uri = (login.uris && login.uris[0] && login.uris[0].uri) || '';
+          const passkeys = (login.fido2Credentials || [])
+            .filter((f: any) => f.credentialId && f.rpId)
+            .map((f: any) => ({
+              credentialId: f.credentialId,
+              publicKey: '',
+              privateKey: f.keyValue || undefined,
+              signCount: Number(f.counter) || 0,
+              rpId: f.rpId,
+              userName: f.userName || login.username || '',
+              userDisplayName: f.userDisplayName || undefined,
+              userHandle: f.userHandle || undefined,
+              createdAt: f.creationDate ? new Date(f.creationDate).getTime() : Date.now()
+            }));
+          const fields = (item.fields || [])
+            .filter((f: any) => f.name && f.value)
+            .map((f: any) => ({
+              id: 'cf-' + Math.random().toString(36).substring(2, 8),
+              label: f.name,
+              value: String(f.value),
+              isMasked: f.type === 1
+            }));
           return {
             title: item.name || 'Identifiant sans nom',
             username: login.username || '',
@@ -30,6 +51,9 @@ export function parseImportFile(fileContent: string, fileName = ''): ImportResul
             website: uri,
             totpSecret: login.totp || undefined,
             notes: item.notes || '',
+            passkeys: passkeys.length ? passkeys : undefined,
+            fields: fields.length ? fields : undefined,
+            isFavorite: !!item.favorite,
             tags: item.folderId ? ['Import Bitwarden'] : [],
             createdAt: item.creationDate ? new Date(item.creationDate).getTime() : Date.now(),
             updatedAt: item.revisionDate ? new Date(item.revisionDate).getTime() : Date.now()
@@ -88,12 +112,14 @@ export function parseImportFile(fileContent: string, fileName = ''): ImportResul
     const headerCols = header.split(delimiter).map(c => c.replace(/"/g, '').trim());
 
     // Détection des index de colonnes avec précision
-    const titleIdx = headerCols.findIndex(c => c === 'name' || c === 'title' || c.includes('name') || c.includes('title'));
+    // Priorité aux colonnes exactes : chez Dashlane, "username" précède "title" et contient "name"
+    const exactTitleIdx = headerCols.findIndex(c => c === 'name' || c === 'title');
+    const titleIdx = exactTitleIdx >= 0 ? exactTitleIdx : headerCols.findIndex(c => (c.includes('name') && !c.includes('user')) || c.includes('title'));
     const urlIdx = headerCols.findIndex(c => c.includes('uri') || c.includes('url') || c.includes('website'));
     const userIdx = headerCols.findIndex(c => c === 'login_username' || c === 'username' || c === 'email' || c.includes('username') || c.includes('email') || (c.includes('user') && !c.includes('uri')));
     const passIdx = headerCols.findIndex(c => c === 'login_password' || c === 'password' || c.includes('password') || c.includes('pass'));
     const totpIdx = headerCols.findIndex(c => c.includes('totp') || c.includes('otp') || c.includes('2fa'));
-    const notesIdx = headerCols.findIndex(c => c.includes('note') || c.includes('comment'));
+    const notesIdx = headerCols.findIndex(c => c.includes('note') || c.includes('comment') || c === 'extra');
 
     for (const row of rows) {
       // Parse CSV basique avec gestion des guillemets
@@ -185,8 +211,9 @@ export function exportVaultAsCsv(credentials: CredentialItem[]): string {
 /**
  * Déclenche le téléchargement du fichier généré dans le navigateur
  */
-export function downloadExportFile(content: string, filename: string, mimeType: string): void {
-  const blob = new Blob([content], { type: mimeType });
+export function downloadExportFile(content: string | Uint8Array, filename: string, mimeType: string): void {
+  const part = typeof content === 'string' ? content : (content.slice().buffer as ArrayBuffer);
+  const blob = new Blob([part], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

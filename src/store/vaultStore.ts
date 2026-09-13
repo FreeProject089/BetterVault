@@ -290,12 +290,23 @@ export class VaultStore {
   }
 
   public deleteTask(id: string): void {
-    this.data.tasks = this.data.tasks.filter(t => t.id !== id);
+    this.data.tasks = this.data.tasks
+      .filter(t => t.id !== id)
+      .map(t => t.dependsOn?.includes(id) ? { ...t, dependsOn: t.dependsOn.filter(d => d !== id) } : t);
     this.notify();
   }
 
   public importBulk(credentials: Partial<UnlockedVaultData['credentials'][0]>[], tasks: Partial<UnlockedVaultData['tasks'][0]>[]): void {
     const activeVaultId = this.data.activeVaultId || 'vault-perso';
+    const domainOf = (website?: string): string => {
+      if (!website) return '';
+      try {
+        return new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(website) ? website : 'https://' + website).hostname;
+      } catch {
+        return '';
+      }
+    };
+
     const newCreds = credentials.map(c => ({
       id: 'cred-' + Math.random().toString(36).substring(2, 9),
       vaultId: activeVaultId,
@@ -303,10 +314,14 @@ export class VaultStore {
       username: c.username || '',
       password: c.password || '',
       website: c.website || '',
-      domain: c.website ? new URL(c.website.startsWith('http') ? c.website : 'https://' + c.website).hostname : '',
+      domain: domainOf(c.website),
       totpSecret: c.totpSecret,
+      passkeys: c.passkeys,
+      fields: c.fields,
+      isFavorite: c.isFavorite,
+      expiresAt: c.expiresAt,
       notes: c.notes || '',
-      tags: c.tags || ['Import'],
+      tags: c.tags?.length ? c.tags : ['Import'],
       createdAt: Date.now(),
       updatedAt: Date.now()
     }));

@@ -7,6 +7,14 @@ export interface SubTask {
   isDone: boolean;
 }
 
+export type RecurrenceFrequency = 'daily' | 'weekly' | 'monthly' | 'yearly';
+
+export interface TaskRecurrence {
+  freq: RecurrenceFrequency;
+  interval: number;
+  until?: string; // ISO date (inclusive)
+}
+
 export interface Task {
   id: string;
   vaultId: string;
@@ -19,6 +27,11 @@ export interface Task {
   tags: string[];
   subtasks?: SubTask[];
   notes?: string;
+  recurrence?: TaskRecurrence;
+  dependsOn?: string[]; // IDs des tâches à terminer avant celle-ci
+  reminderAt?: number;  // Timestamp du rappel
+  reminderSent?: boolean;
+  completedAt?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -38,6 +51,8 @@ export interface PasskeyData {
   rpId: string;
   userName: string;
   userDisplayName?: string;
+  userHandle?: string;  // Base64url
+  privateKey?: string;  // PKCS#8 Base64url (champ "key" du format FIDO CXF)
   createdAt: number;
 }
 
