@@ -33,8 +33,10 @@
 
 ### 5. Multi-Plateforme
 - **Web App / PWA** : Accessible directement dans le navigateur.
-- **Desktop Tauri v2 (`src-tauri/`)** : Application de bureau native Windows / macOS / Linux avec backend Rust.
+- **Desktop Tauri v2 (`src-tauri/`)** : Application de bureau native Windows / macOS / Linux avec backend Rust et commandes trousseau OS.
 - **Extension Web Chromium / Firefox (`extension/`)** : Manifest V3 avec remplissage automatique des identifiants sur les pages web (Autofill).
+- **Mobile Android (`mobile-android/`)** : Application native Kotlin + Jetpack Compose avec chiffrement hardware Keystore (AES-256-GCM).
+- **Mobile iOS (`mobile-ios/`)** : Application native Swift + SwiftUI avec CryptoKit et Apple Keychain sécurisé.
 
 ---
 
@@ -72,6 +74,8 @@ npm run tauri build
 │   └── main.ts            # Contrôleur d'interface principal
 ├── src-tauri/             # Backend Desktop natif Tauri v2 (Rust)
 ├── extension/             # Extension Web Manifest V3 avec Autofill
+├── mobile-android/        # Application native Android (Kotlin, Jetpack Compose, Keystore)
+├── mobile-ios/            # Application native iOS (Swift, SwiftUI, CryptoKit, Keychain)
 ├── Prompt/                # Cahier des charges & spécifications UI/UX
 └── index.html             # Point d'entrée de l'application
 ```
