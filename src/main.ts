@@ -14,7 +14,7 @@ class AppController {
   private activeView: ActiveView = 'all-credentials';
   private selectedItemId: string | null = null;
   private searchQuery = '';
-  private taskViewMode: 'list' | 'kanban' = 'list';
+  private taskViewMode: 'list' | 'kanban' | 'calendar' = 'list';
   public totpInterval: number | null = null;
 
   constructor() {
@@ -133,6 +133,7 @@ class AppController {
       this.taskViewMode = 'list';
       document.getElementById('btn-view-list')?.classList.add('active');
       document.getElementById('btn-view-kanban')?.classList.remove('active');
+      document.getElementById('btn-view-calendar')?.classList.remove('active');
       this.renderList();
     });
 
@@ -140,6 +141,15 @@ class AppController {
       this.taskViewMode = 'kanban';
       document.getElementById('btn-view-kanban')?.classList.add('active');
       document.getElementById('btn-view-list')?.classList.remove('active');
+      document.getElementById('btn-view-calendar')?.classList.remove('active');
+      this.renderList();
+    });
+
+    document.getElementById('btn-view-calendar')?.addEventListener('click', () => {
+      this.taskViewMode = 'calendar';
+      document.getElementById('btn-view-calendar')?.classList.add('active');
+      document.getElementById('btn-view-list')?.classList.remove('active');
+      document.getElementById('btn-view-kanban')?.classList.remove('active');
       this.renderList();
     });
   }
@@ -345,6 +355,95 @@ class AppController {
         });
 
         container.appendChild(kanbanWrapper);
+        return;
+      }
+
+      // Mode Calendrier / Échéances (Timeline)
+      if (this.taskViewMode === 'calendar') {
+        const timelineWrapper = document.createElement('div');
+        timelineWrapper.className = 'calendar-timeline-container';
+
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const overdueTasks: Task[] = [];
+        const todayTasks: Task[] = [];
+        const upcomingTasks: Task[] = [];
+        const noDueDateTasks: Task[] = [];
+
+        tasks.forEach(t => {
+          if (!t.dueDate) {
+            noDueDateTasks.push(t);
+          } else if (t.dueDate < todayStr && t.status !== 'completed') {
+            overdueTasks.push(t);
+          } else if (t.dueDate === todayStr) {
+            todayTasks.push(t);
+          } else {
+            upcomingTasks.push(t);
+          }
+        });
+
+        // Tri par date croissante
+        upcomingTasks.sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''));
+
+        const groups = [
+          { title: 'En retard / Dépassées', tasks: overdueTasks, color: 'var(--accent-red)', count: overdueTasks.length },
+          { title: "Aujourd'hui", tasks: todayTasks, color: 'var(--accent-orange)', count: todayTasks.length },
+          { title: 'À venir', tasks: upcomingTasks, color: 'var(--accent-blue)', count: upcomingTasks.length },
+          { title: 'Sans échéance', tasks: noDueDateTasks, color: 'var(--text-muted)', count: noDueDateTasks.length }
+        ];
+
+        groups.forEach(grp => {
+          if (grp.tasks.length === 0 && grp.title === 'En retard / Dépassées') return; // Ne pas encombrer si rien en retard
+
+          const groupEl = document.createElement('div');
+          groupEl.className = 'timeline-group';
+          groupEl.innerHTML = `
+            <div class="timeline-group-header" style="color: ${grp.color};">
+              <span style="display:flex;align-items:center;gap:6px;">
+                <span style="width:7px;height:7px;border-radius:50%;background-color:${grp.color};"></span>
+                ${grp.title}
+              </span>
+              <span style="opacity:0.7;">${grp.count}</span>
+            </div>
+            <div class="timeline-items-list"></div>
+          `;
+
+          const listEl = groupEl.querySelector('.timeline-items-list') as HTMLElement;
+          grp.tasks.forEach(task => {
+            const row = document.createElement('div');
+            row.className = `timeline-task-row ${this.selectedItemId === task.id ? 'selected' : ''}`;
+            const isDone = task.status === 'completed';
+
+            row.innerHTML = `
+              <div style="display:flex;align-items:center;gap:10px;min-width:0;flex:1;">
+                <span style="color:${isDone ? 'var(--accent-green)' : 'var(--text-muted)'};">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    ${isDone ? '<polyline points="20 6 9 17 4 12"></polyline>' : '<circle cx="12" cy="12" r="9"></circle>'}
+                  </svg>
+                </span>
+                <span style="font-size:12px;font-weight:500;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${isDone ? 'text-decoration:line-through;opacity:0.5;' : ''}">
+                  ${task.title}
+                </span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;font-size:11px;font-family:var(--font-mono);color:var(--text-muted);">
+                <span class="badge priority-${task.priority}">${task.priority.toUpperCase()}</span>
+                <span>${task.dueDate || '—'}</span>
+              </div>
+            `;
+
+            row.addEventListener('click', () => {
+              this.selectedItemId = task.id;
+              this.renderList();
+              this.renderDetail(task.id);
+              document.getElementById('detail-container')?.classList.add('mobile-active');
+            });
+
+            listEl.appendChild(row);
+          });
+
+          timelineWrapper.appendChild(groupEl);
+        });
+
+        container.appendChild(timelineWrapper);
         return;
       }
 

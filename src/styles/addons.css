@@ -103,6 +103,64 @@
   justify-content: space-between;
 }
 
+/* ── Vue Calendrier / Échéances des Tâches ───────────────────────────────── */
+.calendar-timeline-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.timeline-group {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.timeline-group-header {
+  padding: 10px 14px;
+  background-color: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.timeline-items-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.timeline-task-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.timeline-task-row:last-child {
+  border-bottom: none;
+}
+
+.timeline-task-row:hover {
+  background-color: var(--bg-hover);
+}
+
+.timeline-task-row.selected {
+  background-color: rgba(88, 166, 255, 0.1);
+  border-left: 3px solid var(--accent-blue);
+}
+
 /* ── Tags ─────────────────────────────────────────────────────────────────── */
 .tag-list {
   display: flex;
