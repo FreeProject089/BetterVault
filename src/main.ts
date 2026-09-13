@@ -1040,6 +1040,11 @@ class AppController {
           <div>
             <div class="detail-title">${cred.title}</div>
             <div class="detail-meta">${cred.domain || cred.website || 'Pas de domaine'}</div>
+            ${cred.tags && cred.tags.length > 0 ? `
+              <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;">
+                ${cred.tags.map(t => `<span class="badge" style="font-size:10px;padding:2px 6px;">#${t}</span>`).join('')}
+              </div>
+            ` : ''}
           </div>
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
