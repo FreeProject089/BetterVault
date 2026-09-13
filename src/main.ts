@@ -186,12 +186,12 @@ class AppController {
         const lockPath = isLocked
           ? 'M7 11V7a5 5 0 0 1 10 0v4'
           : 'M7 11V7a5 5 0 0 0 10 0v4';
-        rightHTML += ` <span style="color:${lockColor}; display:inline-flex; align-items:center;" title="${isLocked ? 'Verrouillé' : 'Déverrouillé'}">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        rightHTML += ` <button class="icon-btn btn-vault-lock-action" data-vault-id="${vault.id}" data-locked="${isLocked}" style="color:${lockColor}; padding:2px;" title="${isLocked ? 'Cliquer pour déverrouiller' : 'Cliquer pour verrouiller ce coffre'}">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
             <path d="${lockPath}"></path>
           </svg>
-        </span>`;
+        </button>`;
       }
 
       li.innerHTML = `
@@ -205,6 +205,16 @@ class AppController {
         </span>
         <span style="display:flex;align-items:center;gap:5px;">${rightHTML}</span>
       `;
+
+      li.querySelector('.btn-vault-lock-action')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (vault.isLocked) {
+          this.openUnlockVaultModal(vault.id);
+        } else {
+          vaultStore.lockVault(vault.id);
+          this.showToast(`Coffre "${vault.name}" verrouillé`, 'info');
+        }
+      });
 
       li.addEventListener('click', () => {
         if (vault.passwordProtected && vault.isLocked) {
