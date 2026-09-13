@@ -6,6 +6,19 @@ export default defineConfig({
     open: false
   },
   build: {
-    target: 'esnext'
+    target: 'esnext',
+    chunkSizeWarningLimit: 6000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('simple-icons')) {
+            return 'icons-vendor';
+          }
+          if (id.includes('node_modules')) {
+            return 'vendor';
+          }
+        }
+      }
+    }
   }
 });

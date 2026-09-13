@@ -18,11 +18,14 @@ class AppController {
   private searchQuery = '';
   private taskViewMode: 'list' | 'kanban' | 'calendar' = 'list';
   public totpInterval: number | null = null;
+  private autoLockTimeout: number | null = null;
+  private readonly AUTO_LOCK_DELAY_MS = 5 * 60 * 1000; // 5 minutes d'inactivité
 
   constructor() {
     this.initEventListeners();
     this.initMobileControls();
     this.initI18n();
+    this.initAutoLock();
     this.renderSidebar();
     this.renderList();
     this.renderCounts();
@@ -141,6 +144,29 @@ class AppController {
       toast.style.transition = 'all 0.25s ease';
       setTimeout(() => toast.remove(), 300);
     }, durationMs);
+  }
+
+  /* ── Auto-Lock Timer (Zero-Knowledge Inactivity Protection) ────────────── */
+  private initAutoLock(): void {
+    const resetTimer = () => {
+      if (this.autoLockTimeout) {
+        window.clearTimeout(this.autoLockTimeout);
+      }
+      this.autoLockTimeout = window.setTimeout(() => {
+        const data = vaultStore.getData();
+        const activeVault = data.vaults.find(v => v.id === data.activeVaultId);
+        if (activeVault && activeVault.passwordHash && !activeVault.isLocked) {
+          vaultStore.lockVault(activeVault.id);
+          this.showToast(i18n.getLocale() === 'fr' ? 'Coffre verrouillé pour inactivité' : 'Vault locked due to inactivity', 'info');
+        }
+      }, this.AUTO_LOCK_DELAY_MS);
+    };
+
+    ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'].forEach(evt => {
+      window.addEventListener(evt, resetTimer, { passive: true });
+    });
+
+    resetTimer();
   }
 
   /* ── Event Listeners ───────────────────────────────────────────────────── */
