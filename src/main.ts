@@ -4,6 +4,7 @@ import { getServiceIconSvg } from './icons/serviceIcons';
 import { generateTOTP } from './crypto/totpEngine';
 import { calculatePasswordEntropy, generateStrongPassword, generatePassphrase, hashVaultPassword, auditVaultSecurity, checkPasswordPwnedHIBP } from './crypto/vaultCrypto';
 import { parseImportFile, exportVaultAsJson, exportVaultAsCsv, downloadExportFile } from './import_export/importEngine';
+import { i18n } from './i18n';
 
 type ActiveView = 'all-credentials' | '2fa-tokens' | 'tasks';
 
@@ -20,6 +21,7 @@ class AppController {
   constructor() {
     this.initEventListeners();
     this.initMobileControls();
+    this.initI18n();
     this.renderSidebar();
     this.renderList();
     this.renderCounts();
@@ -28,6 +30,74 @@ class AppController {
       this.renderList();
       this.renderCounts();
       if (this.selectedItemId) this.renderDetail(this.selectedItemId);
+    });
+    i18n.subscribe(() => {
+      this.applyI18n();
+      this.renderSidebar();
+      this.renderList();
+      this.renderCounts();
+      if (this.selectedItemId) this.renderDetail(this.selectedItemId);
+    });
+  }
+
+  /* ── Internationalisation (i18n & i10n) ─────────────────────────────────── */
+  private initI18n(): void {
+    const toggleBtn = document.getElementById('btn-language-toggle');
+    toggleBtn?.addEventListener('click', () => {
+      const nextLang = i18n.toggleLocale();
+      const label = document.getElementById('current-lang-label');
+      if (label) label.textContent = nextLang.toUpperCase();
+      this.showToast(nextLang === 'fr' ? 'Langue : Français' : 'Language: English', 'info', 1500);
+    });
+    this.applyI18n();
+  }
+
+  private applyI18n(): void {
+    const lang = i18n.getLocale();
+    document.documentElement.lang = lang;
+    const label = document.getElementById('current-lang-label');
+    if (label) label.textContent = lang.toUpperCase();
+
+    // Traduction des textes data-i18n
+    document.querySelectorAll<HTMLElement>('[data-i18n]').forEach(el => {
+      const key = el.getAttribute('data-i18n');
+      if (!key) return;
+      const keys = key.split('.');
+      let val: any = i18n.t;
+      for (const k of keys) {
+        val = val?.[k];
+      }
+      if (typeof val === 'string') {
+        el.textContent = val;
+      }
+    });
+
+    // Traduction des placeholders data-i18n-placeholder
+    document.querySelectorAll<HTMLInputElement>('[data-i18n-placeholder]').forEach(el => {
+      const key = el.getAttribute('data-i18n-placeholder');
+      if (!key) return;
+      const keys = key.split('.');
+      let val: any = i18n.t;
+      for (const k of keys) {
+        val = val?.[k];
+      }
+      if (typeof val === 'string') {
+        el.placeholder = val;
+      }
+    });
+
+    // Traduction des titles/tooltips data-i18n-title
+    document.querySelectorAll<HTMLElement>('[data-i18n-title]').forEach(el => {
+      const key = el.getAttribute('data-i18n-title');
+      if (!key) return;
+      const keys = key.split('.');
+      let val: any = i18n.t;
+      for (const k of keys) {
+        val = val?.[k];
+      }
+      if (typeof val === 'string') {
+        el.title = val;
+      }
     });
   }
 
@@ -187,7 +257,11 @@ class AppController {
       li.className = `nav-item ${vault.id === data.activeVaultId ? 'active' : ''}`;
       li.style.justifyContent = 'space-between';
 
-      const typeLabels: Record<string, string> = { personal: 'Perso', work: 'Pro', team: 'Équipe' };
+      const typeLabels: Record<string, string> = {
+        personal: i18n.t.common.personal,
+        work: i18n.t.common.work,
+        team: i18n.t.common.team
+      };
       let rightHTML = `<span class="vault-type-badge ${vault.type}">${typeLabels[vault.type] ?? vault.type}</span>`;
 
       if (vault.passwordProtected) {
@@ -196,7 +270,7 @@ class AppController {
         const lockPath = isLocked
           ? 'M7 11V7a5 5 0 0 1 10 0v4'
           : 'M7 11V7a5 5 0 0 0 10 0v4';
-        rightHTML += ` <button class="icon-btn btn-vault-lock-action" data-vault-id="${vault.id}" data-locked="${isLocked}" style="color:${lockColor}; padding:2px;" title="${isLocked ? 'Cliquer pour déverrouiller' : 'Cliquer pour verrouiller ce coffre'}">
+        rightHTML += ` <button class="icon-btn btn-vault-lock-action" data-vault-id="${vault.id}" data-locked="${isLocked}" style="color:${lockColor}; padding:2px;" title="${isLocked ? i18n.t.vault.unlockActionTitle : i18n.t.vault.lockActionTitle}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
             <path d="${lockPath}"></path>
@@ -222,7 +296,7 @@ class AppController {
           this.openUnlockVaultModal(vault.id);
         } else {
           vaultStore.lockVault(vault.id);
-          this.showToast(`Coffre "${vault.name}" verrouillé`, 'info');
+          this.showToast(`${i18n.t.vault.vaultLockedToast} ("${vault.name}")`, 'info');
         }
       });
 
@@ -252,7 +326,7 @@ class AppController {
     // Coffre verrouillé → bannière
     const activeVault = data.vaults.find(v => v.id === data.activeVaultId);
     if (activeVault?.isLocked) {
-      if (listTitle) listTitle.textContent = `${activeVault.name} — Verrouillé`;
+      if (listTitle) listTitle.textContent = `${activeVault.name} — ${i18n.t.common.locked}`;
       const banner = document.createElement('div');
       banner.className = 'vault-locked-banner';
       banner.innerHTML = `
@@ -262,10 +336,10 @@ class AppController {
             <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
           </svg>
         </div>
-        <div class="vault-locked-title">Coffre-fort verrouillé</div>
-        <div class="vault-locked-sub">Ce coffre est protégé par un mot de passe dédié. Cliquez ci-dessous pour déverrouiller.</div>
+        <div class="vault-locked-title">${i18n.t.vault.lockedBannerTitle}</div>
+        <div class="vault-locked-sub">${i18n.t.vault.lockedBannerSub}</div>
         <button class="btn-primary" id="btn-quick-unlock" style="margin-top:8px;background-color:var(--accent-green);color:#fff;border-color:var(--accent-green);">
-          Déverrouiller
+          ${i18n.t.vault.unlockButton}
         </button>
       `;
       container.appendChild(banner);
@@ -281,7 +355,7 @@ class AppController {
     }
 
     if (this.activeView === 'tasks') {
-      if (listTitle) listTitle.textContent = 'Tâches & Rappels';
+      if (listTitle) listTitle.textContent = i18n.t.tasks.title;
       let tasks = data.tasks.filter(t => t.vaultId === data.activeVaultId);
 
       if (this.searchQuery) {
@@ -298,8 +372,8 @@ class AppController {
               <polyline points="9 11 12 14 22 4"></polyline>
               <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
             </svg>
-            <div class="empty-state-title">Aucune tâche</div>
-            <div class="empty-state-sub">Créez votre première tâche avec le bouton Nouveau.</div>
+            <div class="empty-state-title">${i18n.t.tasks.emptyTasksTitle}</div>
+            <div class="empty-state-sub">${i18n.t.tasks.emptyTasksSub}</div>
           </div>`;
         return;
       }
@@ -307,10 +381,10 @@ class AppController {
       // Mode Kanban
       if (this.taskViewMode === 'kanban') {
         const statuses: Array<{ key: Task['status']; label: string; dot: string }> = [
-          { key: 'todo', label: 'À faire', dot: 'var(--text-muted)' },
-          { key: 'in_progress', label: 'En cours', dot: 'var(--accent-blue)' },
-          { key: 'blocked', label: 'Bloquée', dot: 'var(--accent-red)' },
-          { key: 'completed', label: 'Terminée', dot: 'var(--accent-green)' }
+          { key: 'todo', label: i18n.t.tasks.statusTodo, dot: 'var(--text-muted)' },
+          { key: 'in_progress', label: i18n.t.tasks.statusInProgress, dot: 'var(--accent-blue)' },
+          { key: 'blocked', label: i18n.t.tasks.statusBlocked, dot: 'var(--accent-red)' },
+          { key: 'completed', label: i18n.t.tasks.statusCompleted, dot: 'var(--accent-green)' }
         ];
 
         const kanbanWrapper = document.createElement('div');
@@ -335,11 +409,12 @@ class AppController {
           colTasks.forEach(task => {
             const card = document.createElement('div');
             card.className = `kanban-card ${this.selectedItemId === task.id ? 'selected' : ''}`;
+            const prioLabel = (i18n.t.common as any)[task.priority] || task.priority;
             card.innerHTML = `
               <div class="kanban-card-title">${task.title}</div>
               <div class="kanban-card-meta">
-                <span class="badge priority-${task.priority}">${task.priority.toUpperCase()}</span>
-                <span>${task.dueDate || ''}</span>
+                <span class="badge priority-${task.priority}">${prioLabel.toUpperCase()}</span>
+                <span>${i18n.formatRelativeDate(task.dueDate || '')}</span>
               </div>
             `;
             card.addEventListener('click', () => {
@@ -385,10 +460,10 @@ class AppController {
         upcomingTasks.sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''));
 
         const groups = [
-          { title: 'En retard / Dépassées', tasks: overdueTasks, color: 'var(--accent-red)', count: overdueTasks.length },
-          { title: "Aujourd'hui", tasks: todayTasks, color: 'var(--accent-orange)', count: todayTasks.length },
-          { title: 'À venir', tasks: upcomingTasks, color: 'var(--accent-blue)', count: upcomingTasks.length },
-          { title: 'Sans échéance', tasks: noDueDateTasks, color: 'var(--text-muted)', count: noDueDateTasks.length }
+          { title: i18n.t.common.overdue, tasks: overdueTasks, color: 'var(--accent-red)', count: overdueTasks.length },
+          { title: i18n.t.common.today, tasks: todayTasks, color: 'var(--accent-orange)', count: todayTasks.length },
+          { title: i18n.t.common.upcoming, tasks: upcomingTasks, color: 'var(--accent-blue)', count: upcomingTasks.length },
+          { title: i18n.t.common.noDueDate, tasks: noDueDateTasks, color: 'var(--text-muted)', count: noDueDateTasks.length }
         ];
 
         groups.forEach(grp => {
@@ -463,6 +538,7 @@ class AppController {
         const dotColor = isDone ? 'var(--accent-green)' : isInProgress ? 'var(--accent-blue)' : 'var(--text-muted)';
         const iconBg = isDone ? '35,134,54' : isInProgress ? '88,166,255' : '110,118,129';
 
+        const statusSub = isInProgress ? i18n.t.tasks.statusInProgress : i18n.t.common.noDueDate;
         row.innerHTML = `
           <div class="record-icon" style="color:${dotColor};background-color:rgba(${iconBg},0.1);">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -472,7 +548,7 @@ class AppController {
           </div>
           <div class="record-info">
             <div class="record-title" style="${isDone ? 'text-decoration:line-through;opacity:0.5;' : ''}">${task.title}</div>
-            <div class="record-sub">${task.dueDate ? task.dueDate : isInProgress ? 'En cours' : 'Sans échéance'}</div>
+            <div class="record-sub">${task.dueDate ? i18n.formatRelativeDate(task.dueDate) : statusSub}</div>
           </div>
           <div class="record-badges">
             <span class="badge priority-${task.priority}">${task.priority.charAt(0).toUpperCase()}</span>
@@ -491,7 +567,7 @@ class AppController {
     }
 
     // Vue Credentials ou 2FA
-    if (listTitle) listTitle.textContent = this.activeView === '2fa-tokens' ? 'Codes 2FA (TOTP)' : 'Identifiants';
+    if (listTitle) listTitle.textContent = this.activeView === '2fa-tokens' ? i18n.t.nav.twoFactorTokens : i18n.t.credentials.title;
 
     let creds = data.credentials.filter(c => c.vaultId === data.activeVaultId);
     if (this.activeView === '2fa-tokens') {
@@ -513,8 +589,8 @@ class AppController {
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
             <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
           </svg>
-          <div class="empty-state-title">${this.searchQuery ? 'Aucun résultat' : 'Coffre vide'}</div>
-          <div class="empty-state-sub">${this.searchQuery ? 'Aucun identifiant ne correspond.' : 'Créez votre premier identifiant avec le bouton Nouveau.'}</div>
+          <div class="empty-state-title">${this.searchQuery ? i18n.t.common.noResultsTitle : i18n.t.common.emptyVaultTitle}</div>
+          <div class="empty-state-sub">${this.searchQuery ? i18n.t.common.noResultsSub : i18n.t.common.emptyVaultSub}</div>
         </div>`;
       return;
     }
@@ -565,7 +641,7 @@ class AppController {
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
             <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
           </svg>
-          <p>Sélectionnez un identifiant ou une tâche pour afficher ses détails sécurisés</p>
+          <p>${i18n.t.common.emptySelection}</p>
         </div>`;
       return;
     }
@@ -586,21 +662,21 @@ class AppController {
         blocked: 'var(--accent-red)'
       };
       const statusLabels: Record<string, string> = {
-        todo: 'À faire',
-        in_progress: 'En cours',
-        completed: 'Terminée',
-        blocked: 'Bloquée'
+        todo: i18n.t.tasks.statusTodo,
+        in_progress: i18n.t.tasks.statusInProgress,
+        completed: i18n.t.tasks.statusCompleted,
+        blocked: i18n.t.tasks.statusBlocked
       };
 
       container.innerHTML = `
         <div class="detail-header">
           <div class="detail-header-left">
-            <button class="detail-mobile-back" id="btn-detail-back" title="Retour">
+            <button class="detail-mobile-back" id="btn-detail-back" title="${i18n.t.common.close}">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="19" y1="12" x2="5" y2="12"></line>
                 <polyline points="12 19 5 12 12 5"></polyline>
               </svg>
-              <span>Retour</span>
+              <span>${i18n.t.common.close}</span>
             </button>
             <div class="detail-main-icon" style="color:${statusColors[task.status] || 'var(--text-secondary)'};">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
