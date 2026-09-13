@@ -192,10 +192,51 @@ class AppController {
     }
 
     window.addEventListener('keydown', (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName);
+
+      // Cmd/Ctrl + K : Recherche globale
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         searchInput?.focus();
         searchInput?.select();
+        return;
+      }
+
+      // Cmd/Ctrl + N : Nouvel élément (Identifiant ou Tâche selon vue active)
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n' && !isInput) {
+        e.preventDefault();
+        if (this.activeView === 'tasks') {
+          this.openCreateTaskModal();
+        } else {
+          this.openCreateCredentialModal();
+        }
+        return;
+      }
+
+      // Cmd/Ctrl + L : Verrouiller le coffre actif immédiatement
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'l' && !isInput) {
+        e.preventDefault();
+        const data = vaultStore.getData();
+        const activeVault = data.vaults.find(v => v.id === data.activeVaultId);
+        if (activeVault && activeVault.passwordHash && !activeVault.isLocked) {
+          vaultStore.lockVault(activeVault.id);
+          this.showToast(i18n.getLocale() === 'fr' ? 'Coffre verrouillé' : 'Vault locked', 'info');
+        }
+        return;
+      }
+
+      // Cmd/Ctrl + G : Ouvrir le générateur de mot de passe
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g' && !isInput) {
+        e.preventDefault();
+        this.openGeneratorModal();
+        return;
+      }
+
+      // Touche '?' : Afficher la palette d'aide des raccourcis
+      if (e.key === '?' && !isInput && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        this.openShortcutsModal();
+        return;
       }
     });
 
@@ -2101,6 +2142,52 @@ class AppController {
     });
 
     setTimeout(() => pwdInput?.focus(), 100);
+  }
+
+  /* ── Raccourcis Clavier (Palette Cheat Sheet) ─────────────────────────── */
+  private openShortcutsModal(): void {
+    const isFr = i18n.getLocale() === 'fr';
+    const shortcuts = [
+      { key: 'Cmd / Ctrl + K', label: isFr ? 'Recherche globale & filtre instantané' : 'Global search & instant filter' },
+      { key: 'Cmd / Ctrl + N', label: isFr ? 'Créer un élément (Identifiant ou Tâche)' : 'Create new item (Credential or Task)' },
+      { key: 'Cmd / Ctrl + G', label: isFr ? 'Générateur de mots de passe & passphrases' : 'Password & passphrase generator' },
+      { key: 'Cmd / Ctrl + L', label: isFr ? 'Verrouiller immédiatement le coffre actif' : 'Immediately lock the active vault' },
+      { key: '?', label: isFr ? 'Afficher cette liste de raccourcis' : 'Show keyboard shortcuts cheat sheet' },
+      { key: 'Esc', label: isFr ? 'Fermer la fenêtre modale active' : 'Close active modal window' }
+    ];
+
+    const box = this.openModal(`
+      <div class="modal-header">
+        <div class="modal-title" style="display:flex;align-items:center;gap:8px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect>
+            <path d="M6 8h.001M10 8h.001M14 8h.001M18 8h.001M6 12h.001M10 12h.001M14 12h.001M18 12h.001M8 16h8"></path>
+          </svg>
+          ${isFr ? 'Raccourcis Clavier' : 'Keyboard Shortcuts'}
+        </div>
+        <button class="modal-close" id="modal-close-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          ${shortcuts.map(s => `
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg-tertiary);border:1px solid var(--border-subtle);border-radius:var(--radius-md);">
+              <span style="font-size:13px;color:var(--text-primary);">${s.label}</span>
+              <kbd style="font-family:var(--font-mono);font-size:11px;font-weight:600;padding:3px 8px;background:var(--bg-primary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);color:var(--accent-blue);box-shadow:0 1px 2px rgba(0,0,0,0.2);">${s.key}</kbd>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-primary" id="modal-cancel">${i18n.t.common.close}</button>
+      </div>
+    `);
+
+    box.querySelector('#modal-close-btn')?.addEventListener('click', () => this.closeModal());
+    box.querySelector('#modal-cancel')?.addEventListener('click', () => this.closeModal());
   }
 }
 
