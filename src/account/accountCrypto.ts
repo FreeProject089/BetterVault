@@ -146,6 +146,75 @@ export async function rewrapVaultKey(oldEncKey: CryptoKey, wrapped: EncryptedBlo
   }
 }
 
+/* ── Clé de secours ─────────────────────────────────────────────────────────
+ * 256 bits aléatoires affichés en Base32 (13 groupes de 4 caractères).
+ * Elle chiffre une seconde copie de la clé du coffre : avec elle, un mot de passe oublié ne fait rien perdre.
+ * Déjà aléatoire, elle n'a pas besoin d'Argon2 : HKDF suffit.
+ */
+
+const RECOVERY_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+export class InvalidRecoveryKeyError extends Error {
+  constructor(message = 'Clé de secours invalide') {
+    super(message);
+    this.name = 'InvalidRecoveryKeyError';
+  }
+}
+
+export function generateRecoveryKey(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  let bits = 0;
+  let value = 0;
+  let out = '';
+  for (const byte of bytes) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      out += RECOVERY_ALPHABET[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) out += RECOVERY_ALPHABET[(value << (5 - bits)) & 31];
+  return out.match(/.{1,4}/g)!.join('-');
+}
+
+export function parseRecoveryKey(input: string): Uint8Array {
+  const clean = input.toUpperCase().replace(/[\s-]/g, '').replace(/0/g, 'O').replace(/1/g, 'I').replace(/8/g, 'B');
+  if (clean.length !== 52) throw new InvalidRecoveryKeyError('La clé de secours doit contenir 52 caractères');
+  const out = new Uint8Array(32);
+  let bits = 0;
+  let value = 0;
+  let index = 0;
+  for (const char of clean) {
+    const digit = RECOVERY_ALPHABET.indexOf(char);
+    if (digit === -1) throw new InvalidRecoveryKeyError(`Caractère « ${char} » inattendu dans la clé de secours`);
+    value = (value << 5) | digit;
+    bits += 5;
+    if (bits >= 8) {
+      if (index < 32) out[index++] = (value >>> (bits - 8)) & 255;
+      bits -= 8;
+    }
+  }
+  return out;
+}
+
+export async function deriveRecoveryKeys(recoveryKey: Uint8Array): Promise<AccountKeys> {
+  const hkdfKey = await crypto.subtle.importKey('raw', toBuffer(recoveryKey), 'HKDF', false, ['deriveKey', 'deriveBits']);
+  const params = (label: string): HkdfParams => ({ name: 'HKDF', hash: 'SHA-256', salt: new ArrayBuffer(0), info: toBuffer(encoder.encode(label)) });
+  const encKey = await crypto.subtle.deriveKey(params('bettervault/v1/recovery-encryption'), hkdfKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  const authBits = await crypto.subtle.deriveBits(params('bettervault/v1/recovery-authentication'), hkdfKey, 256);
+  return { encKey, authHash: toBase64(new Uint8Array(authBits)) };
+}
+
+/** Déchiffre la clé du coffre avec la clé de secours */
+export async function unwrapWithRecoveryKey(recoveryEncKey: CryptoKey, wrapped: EncryptedBlob, extractable = false): Promise<CryptoKey> {
+  try {
+    return await unwrapVaultKey(recoveryEncKey, wrapped, extractable);
+  } catch {
+    throw new InvalidRecoveryKeyError('Clé de secours incorrecte');
+  }
+}
+
 export function encryptVaultJson(vaultKey: CryptoKey, json: string): Promise<EncryptedBlob> {
   return encryptBytes(vaultKey, encoder.encode(json), AAD.vault);
 }

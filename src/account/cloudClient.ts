@@ -1,5 +1,6 @@
 import type { Argon2Params } from '../import_export/encryptedExport';
 import type { EncryptedBlob } from './accountCrypto';
+import type { VaultLimits } from './limits';
 
 export class CloudError extends Error {
   readonly status: number;
@@ -28,6 +29,11 @@ export interface CloudSession {
   salt: string;
 }
 
+export interface RecoveryPayload {
+  authHash: string;
+  wrappedVaultKey: EncryptedBlob;
+}
+
 export interface RegisterPayload {
   email: string;
   authHash: string;
@@ -35,7 +41,28 @@ export interface RegisterPayload {
   salt: string;
   wrappedVaultKey: EncryptedBlob;
   vault: EncryptedBlob;
+  recovery?: RecoveryPayload;
+  locale?: string;
 }
+
+export interface ServerConfig {
+  version: string;
+  limits: VaultLimits;
+  registrationOpen: boolean;
+  emailEnabled: boolean;
+}
+
+export interface AccountInfo {
+  email: string;
+  createdAt: number;
+  totpEnabled: boolean;
+  hasRecoveryKey: boolean;
+  emailEnabled: boolean;
+  limits: VaultLimits;
+}
+
+/** Le serveur demande le code de l'application d'authentification */
+export const isTotpRequired = (err: unknown) => err instanceof CloudError && err.code === 'totp_required';
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
@@ -110,6 +137,10 @@ export class CloudClient {
     return this.request('GET', '/api/v1/health');
   }
 
+  config(): Promise<ServerConfig> {
+    return this.request('GET', '/api/v1/config');
+  }
+
   prelogin(email: string): Promise<{ kdf: Argon2Params; salt: string }> {
     return this.request('POST', '/api/v1/sessions/prelogin', { email });
   }
@@ -120,10 +151,52 @@ export class CloudClient {
     return result;
   }
 
-  async login(email: string, authHash: string): Promise<CloudSession> {
-    const session = await this.request<CloudSession>('POST', '/api/v1/sessions', { email, authHash });
+  async login(email: string, authHash: string, extra: { totp?: string; locale?: string; notify?: boolean } = {}): Promise<CloudSession> {
+    const session = await this.request<CloudSession>('POST', '/api/v1/sessions', { email, authHash, ...extra });
     this.token = session.token;
     return session;
+  }
+
+  me(): Promise<AccountInfo> {
+    return this.request('GET', '/api/v1/accounts/me');
+  }
+
+  setupTotp(authHash: string): Promise<{ secret: string; uri: string }> {
+    return this.request('POST', '/api/v1/accounts/2fa/setup', { authHash });
+  }
+
+  async enableTotp(code: string): Promise<void> {
+    await this.request('POST', '/api/v1/accounts/2fa/enable', { code });
+  }
+
+  async disableTotp(authHash: string, code: string): Promise<void> {
+    await this.request('DELETE', '/api/v1/accounts/2fa', { authHash, code });
+  }
+
+  async setRecovery(authHash: string, recovery: RecoveryPayload): Promise<void> {
+    await this.request('PUT', '/api/v1/accounts/recovery', { authHash, recovery });
+  }
+
+  recoveryStart(email: string, locale?: string): Promise<{ emailCodeRequired: boolean }> {
+    return this.request('POST', '/api/v1/recovery/start', { email, locale });
+  }
+
+  recoveryVerify(payload: { email: string; recoveryAuthHash?: string; emailCode?: string; totp?: string }): Promise<{ token: string; withRecoveryKey: boolean; wrappedVaultKey: EncryptedBlob | null }> {
+    return this.request('POST', '/api/v1/recovery/verify', payload);
+  }
+
+  async recoveryComplete(payload: {
+    token: string;
+    authHash: string;
+    kdf: Argon2Params;
+    salt: string;
+    wrappedVaultKey: EncryptedBlob;
+    recovery?: RecoveryPayload;
+    vault?: EncryptedBlob;
+  }): Promise<{ token: string; revision: number }> {
+    const result = await this.request<{ token: string; revision: number }>('POST', '/api/v1/recovery/complete', payload);
+    this.token = result.token;
+    return result;
   }
 
   async logout(): Promise<void> {

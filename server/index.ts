@@ -1,8 +1,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { openDatabase } from './src/db.ts';
 import { createApp } from './src/app.ts';
+import { settingsFromEnv } from './src/config.ts';
 
 const secret = process.env.BETTERVAULT_SECRET ?? '';
 if (secret.length < 32) {
@@ -14,18 +16,52 @@ const port = Number(process.env.PORT ?? 8787);
 const host = process.env.HOST ?? '127.0.0.1';
 const dbPath = resolve(process.env.BETTERVAULT_DB ?? 'server/data/bettervault.db');
 const staticDir = process.env.BETTERVAULT_STATIC ? resolve(process.env.BETTERVAULT_STATIC) : null;
+const adminDir = resolve(import.meta.dirname, 'admin');
 const corsOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean)
   : '*';
 
-mkdirSync(dirname(dbPath), { recursive: true });
+let settings;
+try {
+  settings = settingsFromEnv(process.env);
+} catch (err) {
+  console.error(`Configuration invalide : ${err instanceof Error ? err.message : err}`);
+  process.exit(1);
+}
 
+mkdirSync(dirname(dbPath), { recursive: true });
 const db = openDatabase(dbPath);
+
+/**
+ * Jeton de la page d'administration : ADMIN_TOKEN s'il est défini,
+ * sinon généré au premier démarrage et affiché une seule fois dans les journaux.
+ */
+function adminTokenHash(): string | null {
+  const sha256 = (value: string) => createHash('sha256').update(value).digest('base64');
+  if (process.env.ADMIN_TOKEN === 'disabled') return null;
+  if (process.env.ADMIN_TOKEN) {
+    if (process.env.ADMIN_TOKEN.length < 16) {
+      console.error('ADMIN_TOKEN doit contenir au moins 16 caractères');
+      process.exit(1);
+    }
+    return sha256(process.env.ADMIN_TOKEN);
+  }
+  const stored = db.prepare('SELECT value FROM settings WHERE key = ?').get('admin_token_hash') as { value: string } | undefined;
+  if (stored) return stored.value;
+  const token = randomBytes(24).toString('base64url');
+  const hash = sha256(token);
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('admin_token_hash', hash);
+  console.log(`\nJeton d'administration (affiché une seule fois, à conserver) : ${token}\nPage d'administration : /admin\n`);
+  return hash;
+}
+
 const api = createApp({
   db,
   serverSecret: secret,
   corsOrigins,
-  trustProxy: process.env.TRUST_PROXY === 'true'
+  trustProxy: process.env.TRUST_PROXY === 'true',
+  settings,
+  adminTokenHash: adminTokenHash()
 });
 
 const MIME_TYPES: Record<string, string> = {
@@ -41,26 +77,41 @@ const MIME_TYPES: Record<string, string> = {
   '.woff2': 'font/woff2'
 };
 
-/** Sert l'application web compilée (dist/) à la même origine que l'API */
-function serveStatic(root: string, req: IncomingMessage, res: ServerResponse): void {
-  const pathname = decodeURIComponent(new URL(req.url ?? '/', 'http://localhost').pathname);
+const CSP = "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://api.pwnedpasswords.com; frame-ancestors 'none'";
+
+/** Sert un dossier de fichiers statiques ; les chemins inconnus renvoient index.html */
+function serveStatic(root: string, pathname: string, res: ServerResponse): void {
   const candidate = normalize(join(root, pathname));
   const insideRoot = candidate === root || candidate.startsWith(root + sep);
   const file = insideRoot && existsSync(candidate) && statSync(candidate).isFile() ? candidate : join(root, 'index.html');
 
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://api.pwnedpasswords.com; frame-ancestors 'none'");
+  res.setHeader('Content-Security-Policy', CSP);
   res.setHeader('Cache-Control', file.includes(`${sep}assets${sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache');
   res.writeHead(200, { 'Content-Type': MIME_TYPES[extname(file)] ?? 'application/octet-stream' });
   res.end(readFileSync(file));
 }
 
-const server = createServer((req, res) => {
-  const isApi = (req.url ?? '').startsWith('/api/');
-  if (staticDir && !isApi && (req.method === 'GET' || req.method === 'HEAD')) {
-    serveStatic(staticDir, req, res);
-    return;
+const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+  const url = req.url ?? '/';
+  const isRead = req.method === 'GET' || req.method === 'HEAD';
+  if (!url.startsWith('/api/') && isRead) {
+    let pathname: string;
+    try {
+      pathname = decodeURIComponent(new URL(url, 'http://localhost').pathname);
+    } catch {
+      res.writeHead(400).end();
+      return;
+    }
+    if (pathname === '/admin' || pathname.startsWith('/admin/')) {
+      serveStatic(adminDir, pathname.slice('/admin'.length) || '/', res);
+      return;
+    }
+    if (staticDir) {
+      serveStatic(staticDir, pathname, res);
+      return;
+    }
   }
   void api(req, res);
 });
@@ -78,6 +129,7 @@ server.on('error', (err: NodeJS.ErrnoException) => {
 
 server.listen(port, host, () => {
   console.log(`BetterVault server: http://${host}:${port}${staticDir ? ` (application ${staticDir})` : ''} (base ${dbPath})`);
+  console.log(settings.smtp ? `Emails : ${settings.smtp.host}:${settings.smtp.port}` : 'Emails désactivés (SMTP_HOST non défini)');
 });
 
 // Arrêt propre (docker stop, Ctrl+C) : fin des requêtes en cours puis fermeture de la base

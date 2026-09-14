@@ -1,6 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createHash, createHmac, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomInt, randomUUID, scrypt, timingSafeEqual } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
+import { parseSettingsUpdate, publicSettings, settingsFromEnv, type ServerSettings } from './config.ts';
+import { createSmtpMailer, type Mailer, type MailMessage, type SmtpConfig } from './mailer.ts';
+import { emails, pickLocale, type Locale } from './emails.ts';
+import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.ts';
 
 /**
  * API BetterVault : le serveur ne stocke que des données chiffrées côté client.
@@ -25,11 +29,15 @@ export interface AppOptions {
   serverSecret: string;
   corsOrigins?: string[] | '*';
   sessionTtlMs?: number;
-  maxBodyBytes?: number;
   minKdfMemoryKib?: number;
   authRateLimit?: { windowMs: number; max: number };
   /** Derrière un reverse proxy : utiliser X-Forwarded-For pour identifier le client */
   trustProxy?: boolean;
+  /** Réglages initiaux (.env) ; ceux enregistrés depuis la page d'administration les remplacent */
+  settings?: ServerSettings;
+  /** Empreinte SHA-256 (base64) du jeton d'administration ; sans elle, l'API d'administration est désactivée */
+  adminTokenHash?: string | null;
+  mailerFactory?: (smtp: SmtpConfig) => Mailer;
   now?: () => number;
 }
 
@@ -41,6 +49,14 @@ interface UserRow {
   kdf: string;
   salt: string;
   wrapped_key: string;
+  created_at: number;
+  locale: string | null;
+  totp_secret: string | null;
+  totp_enabled: number;
+  totp_last_step: number;
+  recovery_verifier: string | null;
+  recovery_salt: string | null;
+  recovery_wrapped_key: string | null;
 }
 
 interface Reply {
@@ -48,9 +64,12 @@ interface Reply {
   body?: unknown;
 }
 
-export const SERVER_VERSION = '1.0.0';
+export const SERVER_VERSION = '1.1.0';
 const DEFAULT_KDF: KdfParams = { t: 3, m: 65536, p: 4 };
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+const EMAIL_CODE_TTL_MS = 15 * 60 * 1000;
+const RECOVERY_TOKEN_TTL_MS = 10 * 60 * 1000;
+const MAX_EMAIL_CODE_ATTEMPTS = 5;
 
 class HttpError extends Error {
   readonly status: number;
@@ -107,6 +126,27 @@ function parseBlob(value: unknown, field: string, maxBytes: number): EncryptedBl
   return { v: 1, iv: parseBase64(blob.iv, `${field}.iv`, { exact: 12 }), ct: parseBase64(blob.ct, `${field}.ct`, { max: maxBytes }) };
 }
 
+function parseCode(value: unknown, field: string): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || !/^\d{6}$/.test(value.replace(/\s/g, ''))) throw invalid(field);
+  return value.replace(/\s/g, '');
+}
+
+interface RecoveryMaterial {
+  authHash: string;
+  wrappedVaultKey: EncryptedBlob;
+}
+
+function parseRecovery(value: unknown): RecoveryMaterial | null {
+  if (value === undefined || value === null) return null;
+  const recovery = value as Partial<RecoveryMaterial>;
+  if (typeof recovery !== 'object') throw invalid('recovery');
+  return {
+    authHash: parseBase64(recovery.authHash, 'recovery.authHash', { exact: 32 }),
+    wrappedVaultKey: parseBlob(recovery.wrappedVaultKey, 'recovery.wrappedVaultKey', 64)
+  };
+}
+
 async function readJson(req: IncomingMessage, maxBytes: number): Promise<Record<string, unknown>> {
   if (!(req.headers['content-type'] ?? '').startsWith('application/json')) {
     throw new HttpError(415, 'unsupported_media_type', 'Corps JSON attendu');
@@ -134,27 +174,63 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
 
   const now = options.now ?? Date.now;
   const sessionTtl = options.sessionTtlMs ?? 30 * 24 * 60 * 60 * 1000;
-  const maxBody = options.maxBodyBytes ?? 20 * 1024 * 1024;
   const minKdfMemory = options.minKdfMemoryKib ?? 19456;
   const rateLimit = options.authRateLimit ?? { windowMs: 60_000, max: 20 };
   const corsOrigins = options.corsOrigins ?? '*';
+  const mailerFactory = options.mailerFactory ?? createSmtpMailer;
   const dummySalt = randomBytes(16);
   const attempts = new Map<string, { count: number; resetAt: number }>();
+
+  const readSetting = db.prepare('SELECT value FROM settings WHERE key = ?');
+  const writeSetting = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+
+  let settings: ServerSettings = options.settings ?? settingsFromEnv({});
+  const saved = readSetting.get('settings') as { value: string } | undefined;
+  if (saved) {
+    try {
+      settings = parseSettingsUpdate(JSON.parse(saved.value), settings);
+    } catch (err) {
+      console.error('Réglages enregistrés ignorés :', err);
+    }
+  }
+
+  // Le coffre est transmis en base64 dans du JSON : marge de 40 % et quelques Ko pour l'enveloppe
+  const maxBody = () => Math.ceil(settings.limits.maxVaultBytes * 1.4) + 64 * 1024;
 
   const sql = {
     userByEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
     userById: db.prepare('SELECT * FROM users WHERE id = ?'),
-    insertUser: db.prepare('INSERT INTO users (id, email, auth_verifier, auth_salt, kdf, salt, wrapped_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
+    insertUser: db.prepare(`INSERT INTO users (id, email, auth_verifier, auth_salt, kdf, salt, wrapped_key, created_at, locale, recovery_verifier, recovery_salt, recovery_wrapped_key)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
     updateCredentials: db.prepare('UPDATE users SET auth_verifier = ?, auth_salt = ?, kdf = ?, salt = ?, wrapped_key = ? WHERE id = ?'),
+    updateRecovery: db.prepare('UPDATE users SET recovery_verifier = ?, recovery_salt = ?, recovery_wrapped_key = ? WHERE id = ?'),
+    updateLocale: db.prepare('UPDATE users SET locale = ? WHERE id = ?'),
+    setTotpSecret: db.prepare('UPDATE users SET totp_secret = ?, totp_enabled = 0, totp_last_step = 0 WHERE id = ?'),
+    enableTotp: db.prepare('UPDATE users SET totp_enabled = 1, totp_last_step = ? WHERE id = ?'),
+    disableTotp: db.prepare('UPDATE users SET totp_secret = NULL, totp_enabled = 0, totp_last_step = 0 WHERE id = ?'),
+    useTotpStep: db.prepare('UPDATE users SET totp_last_step = ? WHERE id = ? AND totp_last_step < ?'),
     deleteOtherSessions: db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?'),
+    deleteAllSessions: db.prepare('DELETE FROM sessions WHERE user_id = ?'),
     insertVault: db.prepare('INSERT INTO vaults (user_id, revision, blob, updated_at) VALUES (?, ?, ?, ?)'),
     vaultByUser: db.prepare('SELECT revision, blob, updated_at FROM vaults WHERE user_id = ?'),
     updateVault: db.prepare('UPDATE vaults SET revision = ?, blob = ?, updated_at = ? WHERE user_id = ? AND revision = ?'),
+    replaceVault: db.prepare('UPDATE vaults SET revision = revision + 1, blob = ?, updated_at = ? WHERE user_id = ?'),
     insertSession: db.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'),
     sessionByHash: db.prepare('SELECT user_id, expires_at FROM sessions WHERE token_hash = ?'),
     deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash = ?'),
-    deleteExpiredSessions: db.prepare('DELETE FROM sessions WHERE expires_at <= ?')
+    deleteExpiredSessions: db.prepare('DELETE FROM sessions WHERE expires_at <= ?'),
+    upsertEmailCode: db.prepare(`INSERT INTO email_codes (user_id, code_hash, expires_at, attempts) VALUES (?, ?, ?, 0)
+      ON CONFLICT(user_id) DO UPDATE SET code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0`),
+    emailCodeByUser: db.prepare('SELECT code_hash, expires_at, attempts FROM email_codes WHERE user_id = ?'),
+    bumpEmailCode: db.prepare('UPDATE email_codes SET attempts = attempts + 1 WHERE user_id = ?'),
+    deleteEmailCode: db.prepare('DELETE FROM email_codes WHERE user_id = ?'),
+    insertRecoveryToken: db.prepare('INSERT INTO recovery_tokens (token_hash, user_id, with_recovery_key, expires_at) VALUES (?, ?, ?, ?)'),
+    recoveryToken: db.prepare('SELECT user_id, with_recovery_key, expires_at FROM recovery_tokens WHERE token_hash = ?'),
+    deleteRecoveryTokens: db.prepare('DELETE FROM recovery_tokens WHERE user_id = ?'),
+    countUsers: db.prepare('SELECT COUNT(*) AS count FROM users'),
+    vaultBytes: db.prepare('SELECT COALESCE(SUM(LENGTH(blob)), 0) AS bytes FROM vaults'),
+    twoFactorUsers: db.prepare('SELECT COUNT(*) AS count FROM users WHERE totp_enabled = 1')
   };
 
   const clientAddress = (req: IncomingMessage) => {
@@ -192,10 +268,38 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
     return { userId: session.user_id, tokenHash };
   };
 
+  const getUser = (userId: string): UserRow => {
+    const user = sql.userById.get(userId) as UserRow | undefined;
+    if (!user) throw new HttpError(401, 'unauthorized', 'Compte introuvable');
+    return user;
+  };
+
   const verifyAuthHash = async (user: UserRow | undefined, authHash: string): Promise<boolean> => {
     const computed = await scryptVerifier(authHash, user ? Buffer.from(user.auth_salt, 'base64') : dummySalt);
     const expected = user ? Buffer.from(user.auth_verifier, 'base64') : randomBytes(32);
     return !!user && timingSafeEqual(computed, expected);
+  };
+
+  const verifyRecoveryHash = async (user: UserRow | undefined, authHash: string): Promise<boolean> => {
+    const hasRecovery = !!user?.recovery_verifier && !!user.recovery_salt;
+    const computed = await scryptVerifier(authHash, hasRecovery ? Buffer.from(user!.recovery_salt!, 'base64') : dummySalt);
+    const expected = hasRecovery ? Buffer.from(user!.recovery_verifier!, 'base64') : randomBytes(32);
+    return hasRecovery && timingSafeEqual(computed, expected);
+  };
+
+  /** Consomme un code de l'application d'authentification (un code ne sert qu'une fois) */
+  const consumeTotp = (user: UserRow, code: string | null): boolean => {
+    if (!user.totp_secret || !code) return false;
+    const step = verifyTotp(user.totp_secret, code, now(), user.totp_last_step);
+    if (step === null) return false;
+    return Number(sql.useTotpStep.run(step, user.id, step).changes) === 1;
+  };
+
+  const recoveryColumns = async (recovery: RecoveryMaterial | null): Promise<[string | null, string | null, string | null]> => {
+    if (!recovery) return [null, null, null];
+    const salt = randomBytes(16);
+    const verifier = await scryptVerifier(recovery.authHash, salt);
+    return [verifier.toString('base64'), salt.toString('base64'), JSON.stringify(recovery.wrappedVaultKey)];
   };
 
   const readVault = (userId: string) => {
@@ -205,8 +309,40 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
       : { revision: 0, blob: null, updatedAt: null };
   };
 
+  const locale = (user: UserRow): Locale => (user.locale === 'fr' || user.locale === 'en' ? user.locale : 'en');
+
+  /** Envoi en arrière-plan : une panne du serveur SMTP ne bloque jamais l'utilisateur */
+  const notify = (build: (ctx: { to: string; locale: Locale; publicUrl: string }) => MailMessage, user: UserRow) => {
+    if (!settings.smtp) return;
+    const message = build({ to: user.email, locale: locale(user), publicUrl: settings.publicUrl });
+    mailerFactory(settings.smtp).send(message).catch(err => console.error(`Email non envoyé à ${user.email} :`, err instanceof Error ? err.message : err));
+  };
+
+  const requireAdmin = (req: IncomingMessage) => {
+    limit(req, 'admin');
+    if (!options.adminTokenHash) throw new HttpError(404, 'not_found', 'Route inconnue');
+    const match = /^Bearer (.{16,200})$/.exec(req.headers.authorization ?? '');
+    const provided = Buffer.from(match ? sha256(match[1]) : '', 'base64');
+    const expected = Buffer.from(options.adminTokenHash, 'base64');
+    if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
+      throw new HttpError(401, 'unauthorized', 'Jeton d’administration incorrect');
+    }
+  };
+
+  const emailCodeHash = (userId: string, code: string) => createHmac('sha256', serverSecret).update(`email-code:${userId}:${code}`).digest('base64');
+
   const routes: Record<string, (req: IncomingMessage) => Promise<Reply>> = {
     'GET /api/v1/health': async () => ({ status: 200, body: { ok: true, name: 'BetterVault', version: SERVER_VERSION } }),
+
+    'GET /api/v1/config': async () => ({
+      status: 200,
+      body: {
+        version: SERVER_VERSION,
+        limits: settings.limits,
+        registrationOpen: settings.registrationOpen,
+        emailEnabled: !!settings.smtp
+      }
+    }),
 
     'POST /api/v1/sessions/prelogin': async req => {
       limit(req, 'prelogin');
@@ -220,24 +356,28 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
 
     'POST /api/v1/accounts': async req => {
       limit(req, 'register');
-      const body = await readJson(req, maxBody);
+      if (!settings.registrationOpen) throw new HttpError(403, 'registration_closed', 'Les inscriptions sont fermées sur ce serveur');
+      const body = await readJson(req, maxBody());
       const email = parseEmail(body.email);
       const authHash = parseBase64(body.authHash, 'authHash', { exact: 32 });
       const kdf = parseKdf(body.kdf, minKdfMemory);
       const salt = parseBase64(body.salt, 'salt', { exact: 16 });
       const wrappedVaultKey = parseBlob(body.wrappedVaultKey, 'wrappedVaultKey', 64);
-      const vault = parseBlob(body.vault, 'vault', maxBody);
+      const vault = parseBlob(body.vault, 'vault', settings.limits.maxVaultBytes);
+      const recovery = parseRecovery(body.recovery);
 
       if (sql.userByEmail.get(email)) throw new HttpError(409, 'email_taken', 'Un compte existe déjà pour cet email');
 
       const userId = randomUUID();
       const authSalt = randomBytes(16);
       const verifier = await scryptVerifier(authHash, authSalt);
+      const [recoveryVerifier, recoverySalt, recoveryWrapped] = await recoveryColumns(recovery);
       const createdAt = now();
 
       db.exec('BEGIN IMMEDIATE');
       try {
-        sql.insertUser.run(userId, email, verifier.toString('base64'), authSalt.toString('base64'), JSON.stringify(kdf), salt, JSON.stringify(wrappedVaultKey), createdAt);
+        sql.insertUser.run(userId, email, verifier.toString('base64'), authSalt.toString('base64'), JSON.stringify(kdf), salt, JSON.stringify(wrappedVaultKey), createdAt,
+          pickLocale(body.locale, req.headers['accept-language']), recoveryVerifier, recoverySalt, recoveryWrapped);
         sql.insertVault.run(userId, 1, JSON.stringify(vault), createdAt);
         db.exec('COMMIT');
       } catch (err) {
@@ -254,13 +394,22 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
       const body = await readJson(req, 4096);
       const email = parseEmail(body.email);
       const authHash = parseBase64(body.authHash, 'authHash', { exact: 32 });
+      const totp = parseCode(body.totp, 'totp');
       const user = sql.userByEmail.get(email) as UserRow | undefined;
 
       if (!(await verifyAuthHash(user, authHash)) || !user) {
         throw new HttpError(401, 'invalid_credentials', 'Email ou mot de passe incorrect');
       }
+      if (user.totp_enabled) {
+        if (!totp) throw new HttpError(401, 'totp_required', 'Code de l’application d’authentification requis');
+        if (!consumeTotp(user, totp)) throw new HttpError(401, 'totp_invalid', 'Code incorrect ou déjà utilisé');
+      }
 
+      if (body.locale === 'fr' || body.locale === 'en') sql.updateLocale.run(body.locale, user.id);
       sql.deleteExpiredSessions.run(now());
+      if (body.notify !== false) {
+        notify(ctx => emails.newLogin(ctx, now(), clientAddress(req), String(req.headers['user-agent'] ?? '').slice(0, 160)), user);
+      }
       return {
         status: 200,
         body: { token: createSession(user.id), wrappedVaultKey: JSON.parse(user.wrapped_key), kdf: JSON.parse(user.kdf), salt: user.salt }
@@ -280,10 +429,18 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
 
     'PUT /api/v1/vault': async req => {
       const { userId } = authenticate(req);
-      const body = await readJson(req, maxBody);
+      const body = await readJson(req, maxBody());
       const baseRevision = body.baseRevision;
       if (!Number.isInteger(baseRevision) || (baseRevision as number) < 0) throw invalid('baseRevision');
-      const blob = parseBlob(body.blob, 'blob', maxBody);
+      let blob: EncryptedBlob;
+      try {
+        blob = parseBlob(body.blob, 'blob', settings.limits.maxVaultBytes);
+      } catch (err) {
+        if (err instanceof HttpError && Buffer.byteLength(String((body.blob as EncryptedBlob | undefined)?.ct ?? ''), 'base64') > settings.limits.maxVaultBytes) {
+          throw new HttpError(413, 'vault_too_large', `Le coffre dépasse la taille autorisée sur ce serveur (${Math.round(settings.limits.maxVaultBytes / 1048576)} Mo)`);
+        }
+        throw err;
+      }
       const updatedAt = now();
 
       // Écriture conditionnelle : échoue si un autre appareil a publié entre-temps
@@ -292,6 +449,21 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
         throw new HttpError(409, 'conflict', 'Le coffre a été modifié sur un autre appareil', readVault(userId));
       }
       return { status: 200, body: { revision: (baseRevision as number) + 1, updatedAt } };
+    },
+
+    'GET /api/v1/accounts/me': async req => {
+      const user = getUser(authenticate(req).userId);
+      return {
+        status: 200,
+        body: {
+          email: user.email,
+          createdAt: user.created_at,
+          totpEnabled: !!user.totp_enabled,
+          hasRecoveryKey: !!user.recovery_verifier,
+          emailEnabled: !!settings.smtp,
+          limits: settings.limits
+        }
+      };
     },
 
     'PUT /api/v1/accounts/password': async req => {
@@ -304,7 +476,7 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
       const salt = parseBase64(body.salt, 'salt', { exact: 16 });
       const wrappedVaultKey = parseBlob(body.wrappedVaultKey, 'wrappedVaultKey', 64);
 
-      const user = sql.userById.get(userId) as UserRow | undefined;
+      const user = getUser(userId);
       if (!(await verifyAuthHash(user, currentAuthHash))) throw new HttpError(403, 'invalid_credentials', 'Mot de passe principal actuel incorrect');
 
       const authSalt = randomBytes(16);
@@ -312,6 +484,63 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
       sql.updateCredentials.run(verifier.toString('base64'), authSalt.toString('base64'), JSON.stringify(kdf), salt, JSON.stringify(wrappedVaultKey), userId);
       // Les autres appareils devront se reconnecter avec le nouveau mot de passe
       sql.deleteOtherSessions.run(userId, tokenHash);
+      notify(ctx => emails.passwordChanged(ctx, now(), false), user);
+      return { status: 204 };
+    },
+
+    'PUT /api/v1/accounts/recovery': async req => {
+      const { userId } = authenticate(req);
+      limit(req, 'password');
+      const body = await readJson(req, 4096);
+      const authHash = parseBase64(body.authHash, 'authHash', { exact: 32 });
+      const recovery = parseRecovery(body.recovery);
+      if (!recovery) throw invalid('recovery');
+      const user = getUser(userId);
+      if (!(await verifyAuthHash(user, authHash))) throw new HttpError(403, 'invalid_credentials', 'Mot de passe principal incorrect');
+      const [verifier, salt, wrapped] = await recoveryColumns(recovery);
+      sql.updateRecovery.run(verifier, salt, wrapped, userId);
+      sql.deleteRecoveryTokens.run(userId);
+      notify(ctx => emails.recoveryKeyChanged(ctx, now()), user);
+      return { status: 204 };
+    },
+
+    'POST /api/v1/accounts/2fa/setup': async req => {
+      const { userId } = authenticate(req);
+      limit(req, 'password');
+      const authHash = parseBase64((await readJson(req, 4096)).authHash, 'authHash', { exact: 32 });
+      const user = getUser(userId);
+      if (!(await verifyAuthHash(user, authHash))) throw new HttpError(403, 'invalid_credentials', 'Mot de passe principal incorrect');
+      if (user.totp_enabled) throw new HttpError(409, 'totp_already_enabled', 'La double authentification est déjà activée');
+      const secret = generateTotpSecret();
+      sql.setTotpSecret.run(secret, userId);
+      return { status: 200, body: { secret, uri: otpauthUri(secret, user.email, 'BetterVault') } };
+    },
+
+    'POST /api/v1/accounts/2fa/enable': async req => {
+      const { userId } = authenticate(req);
+      limit(req, 'password');
+      const code = parseCode((await readJson(req, 4096)).code, 'code');
+      const user = getUser(userId);
+      if (user.totp_enabled) throw new HttpError(409, 'totp_already_enabled', 'La double authentification est déjà activée');
+      if (!user.totp_secret) throw new HttpError(400, 'totp_not_setup', 'Recommencez la configuration de la double authentification');
+      const step = code ? verifyTotp(user.totp_secret, code, now(), 0) : null;
+      if (step === null) throw new HttpError(400, 'totp_invalid', 'Code incorrect. Vérifiez l’heure de votre téléphone.');
+      sql.enableTotp.run(step, userId);
+      notify(ctx => emails.twoFactor(ctx, now(), true), user);
+      return { status: 204 };
+    },
+
+    'DELETE /api/v1/accounts/2fa': async req => {
+      const { userId } = authenticate(req);
+      limit(req, 'password');
+      const body = await readJson(req, 4096);
+      const authHash = parseBase64(body.authHash, 'authHash', { exact: 32 });
+      const code = parseCode(body.code, 'code');
+      const user = getUser(userId);
+      if (!(await verifyAuthHash(user, authHash))) throw new HttpError(403, 'invalid_credentials', 'Mot de passe principal incorrect');
+      if (user.totp_enabled && !consumeTotp(user, code)) throw new HttpError(400, 'totp_invalid', 'Code incorrect ou déjà utilisé');
+      sql.disableTotp.run(userId);
+      if (user.totp_enabled) notify(ctx => emails.twoFactor(ctx, now(), false), user);
       return { status: 204 };
     },
 
@@ -322,6 +551,164 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
       const user = sql.userById.get(userId) as UserRow | undefined;
       if (!(await verifyAuthHash(user, authHash))) throw new HttpError(403, 'invalid_credentials', 'Mot de passe incorrect');
       sql.deleteUser.run(userId);
+      return { status: 204 };
+    },
+
+    /* ── Mot de passe oublié ──────────────────────────────────────────── */
+
+    'POST /api/v1/recovery/start': async req => {
+      limit(req, 'recovery');
+      const body = await readJson(req, 4096);
+      const email = parseEmail(body.email);
+      const user = sql.userByEmail.get(email) as UserRow | undefined;
+      if (user && settings.smtp) {
+        const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+        sql.upsertEmailCode.run(user.id, emailCodeHash(user.id, code), now() + EMAIL_CODE_TTL_MS);
+        const ctx = { to: user.email, locale: pickLocale(body.locale, req.headers['accept-language']), publicUrl: settings.publicUrl };
+        mailerFactory(settings.smtp).send(emails.resetCode(ctx, code, EMAIL_CODE_TTL_MS / 60_000))
+          .catch(err => console.error(`Code de réinitialisation non envoyé à ${user.email} :`, err instanceof Error ? err.message : err));
+      }
+      // Même réponse que le compte existe ou non
+      return { status: 200, body: { emailCodeRequired: !!settings.smtp } };
+    },
+
+    'POST /api/v1/recovery/verify': async req => {
+      limit(req, 'recovery');
+      const body = await readJson(req, 4096);
+      const email = parseEmail(body.email);
+      const emailCode = parseCode(body.emailCode, 'emailCode');
+      const totp = parseCode(body.totp, 'totp');
+      const recoveryAuthHash = body.recoveryAuthHash === undefined || body.recoveryAuthHash === null
+        ? null
+        : parseBase64(body.recoveryAuthHash, 'recoveryAuthHash', { exact: 32 });
+
+      const user = sql.userByEmail.get(email) as UserRow | undefined;
+      const refuse = (message = 'Informations de récupération incorrectes') => new HttpError(401, 'recovery_invalid', message);
+      // Travail constant : la clé de secours est toujours vérifiée, même pour un compte inconnu
+      const keyValid = recoveryAuthHash ? await verifyRecoveryHash(user, recoveryAuthHash) : false;
+      if (!user) throw refuse();
+
+      let emailVerified = false;
+      if (settings.smtp) {
+        const row = sql.emailCodeByUser.get(user.id) as { code_hash: string; expires_at: number; attempts: number } | undefined;
+        if (!row || row.expires_at <= now() || row.attempts >= MAX_EMAIL_CODE_ATTEMPTS) {
+          throw refuse('Code email expiré. Demandez-en un nouveau.');
+        }
+        sql.bumpEmailCode.run(user.id);
+        const expected = Buffer.from(row.code_hash, 'base64');
+        const provided = Buffer.from(emailCodeHash(user.id, emailCode ?? ''), 'base64');
+        if (!emailCode || !timingSafeEqual(expected, provided)) throw refuse('Code email incorrect');
+        emailVerified = true;
+      }
+
+      let totpVerified = false;
+      if (user.totp_enabled) {
+        if (!totp) throw new HttpError(401, 'totp_required', 'Code de l’application d’authentification requis');
+        if (!consumeTotp(user, totp)) throw new HttpError(401, 'totp_invalid', 'Code incorrect ou déjà utilisé');
+        totpVerified = true;
+      }
+
+      if (recoveryAuthHash && !keyValid) throw refuse('Clé de secours incorrecte');
+      // Sans clé de secours, le coffre est remplacé : il faut au moins un second facteur pour éviter qu'un tiers l'efface
+      if (!recoveryAuthHash && !emailVerified && !totpVerified) {
+        throw new HttpError(403, 'recovery_unavailable', 'Sans clé de secours, la réinitialisation demande un code email ou la double authentification');
+      }
+
+      const token = randomBytes(32).toString('base64url');
+      sql.deleteRecoveryTokens.run(user.id);
+      sql.insertRecoveryToken.run(sha256(token), user.id, keyValid ? 1 : 0, now() + RECOVERY_TOKEN_TTL_MS);
+      return {
+        status: 200,
+        body: {
+          token,
+          withRecoveryKey: keyValid,
+          wrappedVaultKey: keyValid ? JSON.parse(user.recovery_wrapped_key!) : null
+        }
+      };
+    },
+
+    'POST /api/v1/recovery/complete': async req => {
+      limit(req, 'recovery');
+      const body = await readJson(req, maxBody());
+      if (typeof body.token !== 'string' || body.token.length !== 43) throw invalid('token');
+      const row = sql.recoveryToken.get(sha256(body.token)) as { user_id: string; with_recovery_key: number; expires_at: number } | undefined;
+      if (!row || row.expires_at <= now()) throw new HttpError(401, 'recovery_expired', 'La récupération a expiré, recommencez');
+
+      const authHash = parseBase64(body.authHash, 'authHash', { exact: 32 });
+      const kdf = parseKdf(body.kdf, minKdfMemory);
+      const salt = parseBase64(body.salt, 'salt', { exact: 16 });
+      const wrappedVaultKey = parseBlob(body.wrappedVaultKey, 'wrappedVaultKey', 64);
+      const recovery = parseRecovery(body.recovery);
+      const vault = row.with_recovery_key ? null : parseBlob(body.vault, 'vault', settings.limits.maxVaultBytes);
+      const user = getUser(row.user_id);
+
+      const authSalt = randomBytes(16);
+      const verifier = await scryptVerifier(authHash, authSalt);
+      const [recoveryVerifier, recoverySalt, recoveryWrapped] = await recoveryColumns(recovery);
+
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        sql.updateCredentials.run(verifier.toString('base64'), authSalt.toString('base64'), JSON.stringify(kdf), salt, JSON.stringify(wrappedVaultKey), user.id);
+        if (vault) {
+          sql.replaceVault.run(JSON.stringify(vault), now(), user.id);
+          // L'ancienne clé de secours ouvrait l'ancien coffre : elle est remplacée ou retirée
+          sql.updateRecovery.run(recoveryVerifier, recoverySalt, recoveryWrapped, user.id);
+        } else if (recovery) {
+          sql.updateRecovery.run(recoveryVerifier, recoverySalt, recoveryWrapped, user.id);
+        }
+        sql.deleteAllSessions.run(user.id);
+        sql.deleteRecoveryTokens.run(user.id);
+        sql.deleteEmailCode.run(user.id);
+        db.exec('COMMIT');
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
+
+      notify(ctx => (vault ? emails.vaultReset(ctx, now()) : emails.passwordChanged(ctx, now(), true)), user);
+      return { status: 200, body: { token: createSession(user.id), revision: readVault(user.id).revision } };
+    },
+
+    /* ── Administration ───────────────────────────────────────────────── */
+
+    'GET /api/v1/admin/settings': async req => {
+      requireAdmin(req);
+      return {
+        status: 200,
+        body: {
+          settings: publicSettings(settings),
+          stats: {
+            users: (sql.countUsers.get() as { count: number }).count,
+            twoFactorUsers: (sql.twoFactorUsers.get() as { count: number }).count,
+            storedBytes: (sql.vaultBytes.get() as { bytes: number }).bytes
+          },
+          version: SERVER_VERSION
+        }
+      };
+    },
+
+    'PUT /api/v1/admin/settings': async req => {
+      requireAdmin(req);
+      const body = await readJson(req, 16 * 1024);
+      try {
+        settings = parseSettingsUpdate(body, settings);
+      } catch (err) {
+        throw new HttpError(400, 'invalid_settings', err instanceof Error ? err.message : String(err));
+      }
+      writeSetting.run('settings', JSON.stringify(settings));
+      return { status: 200, body: { settings: publicSettings(settings) } };
+    },
+
+    'POST /api/v1/admin/smtp-test': async req => {
+      requireAdmin(req);
+      const body = await readJson(req, 4096);
+      const to = parseEmail(body.to);
+      if (!settings.smtp) throw new HttpError(400, 'smtp_disabled', 'Configurez d’abord le serveur SMTP');
+      try {
+        await mailerFactory(settings.smtp).send(emails.test(to, pickLocale(body.locale, req.headers['accept-language'])));
+      } catch (err) {
+        throw new HttpError(502, 'smtp_failed', `Envoi impossible : ${err instanceof Error ? err.message : err}`);
+      }
       return { status: 204 };
     }
   };
