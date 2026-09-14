@@ -7,10 +7,10 @@ BetterVault est conçu pour que le serveur, et toute personne y ayant accès, ne
 ## Clés
 
 ```text
-mot de passe maître
+mot de passe principal
         │  Argon2id (64 Mio, 3 itérations, 4 voies, sel aléatoire de 16 octets)
         ▼
-    clé maître (32 octets, jamais stockée)
+    clé principale (32 octets, jamais stockée)
         │  HKDF-SHA-256
         ├──────────────────────────────┐
         ▼                              ▼
@@ -24,7 +24,7 @@ clé du coffre (aléatoire)       vérificateur stocké sur le serveur
      coffre chiffré
 ```
 
-- La **clé du coffre** est aléatoire : changer le mot de passe maître ne re-chiffre que cette clé.
+- La **clé du coffre** est aléatoire : changer le mot de passe principal ne re-chiffre que cette clé.
 - La **preuve d'authentification** est dérivée indépendamment de la clé de chiffrement : la connaître ne permet pas de déchiffrer.
 - Les données chiffrées sont authentifiées (AES-GCM avec données associées) : toute altération est détectée.
 
@@ -67,9 +67,24 @@ clé du coffre (aléatoire)       vérificateur stocké sur le serveur
 ## Limites connues
 
 - Un appareil compromis (logiciel malveillant, extension malveillante) peut lire les données une fois le coffre déverrouillé.
-- La sécurité repose sur la robustesse du mot de passe maître face à une attaque hors ligne si le coffre chiffré est volé.
+- La sécurité repose sur la robustesse du mot de passe principal face à une attaque hors ligne si le coffre chiffré est volé.
 - Les métadonnées (email, taille du coffre, horaires de synchronisation) sont visibles par le serveur.
 
 ## Signaler une vulnérabilité
 
 Ne publiez pas de détails dans un ticket public. Contactez les mainteneurs en privé avec une description et, si possible, les étapes de reproduction.
+
+## Où le coffre est enregistré
+
+Le coffre reste toujours chiffré (AES-256-GCM) sur l'appareil.
+
+| Plateforme | Emplacement |
+| --- | --- |
+| Navigateur (site web) | localStorage du profil du navigateur, stockage persistant demandé |
+| Extension | localStorage de l'extension, dans le profil du navigateur |
+| Windows (Tauri) | `%APPDATA%\app.bettervault\bettervault-storage.json` |
+| macOS (Tauri) | `~/Library/Application Support/app.bettervault/bettervault-storage.json` |
+| Linux (Tauri) | `~/.local/share/app.bettervault/bettervault-storage.json` |
+| Android / iOS (Tauri) | stockage privé de l'application |
+
+Les données d'une version précédente enregistrées dans la webview sont reprises automatiquement au premier lancement.

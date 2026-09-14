@@ -4,7 +4,7 @@ import type { DatabaseSync } from 'node:sqlite';
 
 /**
  * API BetterVault : le serveur ne stocke que des données chiffrées côté client.
- * Il reçoit une preuve d'authentification dérivée (jamais le mot de passe maître)
+ * Il reçoit une preuve d'authentification dérivée (jamais le mot de passe principal)
  * et la protège à nouveau avec scrypt.
  */
 
@@ -305,7 +305,7 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
       const wrappedVaultKey = parseBlob(body.wrappedVaultKey, 'wrappedVaultKey', 64);
 
       const user = sql.userById.get(userId) as UserRow | undefined;
-      if (!(await verifyAuthHash(user, currentAuthHash))) throw new HttpError(403, 'invalid_credentials', 'Mot de passe maître actuel incorrect');
+      if (!(await verifyAuthHash(user, currentAuthHash))) throw new HttpError(403, 'invalid_credentials', 'Mot de passe principal actuel incorrect');
 
       const authSalt = randomBytes(16);
       const verifier = await scryptVerifier(newAuthHash, authSalt);

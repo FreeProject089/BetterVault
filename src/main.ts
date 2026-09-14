@@ -11,6 +11,7 @@ import { exportCredentialsAsCxf } from './import_export/cxf';
 import { normalizeTotpInput, parseOtpAuthUri } from './crypto/otpauthUri';
 import { CameraQrScanner, decodeQrFromFile } from './crypto/qrScanner';
 import { AccountService, type SyncStatus } from './account/accountService';
+import { createDeviceStorage } from './platform/storage';
 import type { UnlockedVaultData } from './types/vault';
 import {
   EisenhowerQuadrant,
@@ -53,7 +54,8 @@ const GENERATOR_PREFS_KEY = 'bettervault.generator-prefs';
 const REMINDER_CHECK_INTERVAL_MS = 30_000;
 const SYNC_INTERVAL_MS = 60_000;
 
-const accountService = new AccountService();
+// Créé au démarrage, une fois le stockage de l'appareil chargé (voir la fin du fichier)
+let accountService: AccountService;
 
 /* ════════════════════════════════════════════════════════════════════════════
    APP CONTROLLER — Zero-Knowledge Vault Manager
@@ -303,7 +305,7 @@ class AppController {
         this.showToast(label, 'success');
       }
     } catch (err) {
-      this.showToast('Erreur copie presse-papiers', 'error');
+      this.showToast(this.tr('Copie impossible', 'Copy failed'), 'error');
     }
   }
 
@@ -873,7 +875,7 @@ class AppController {
             ${cred.isFavorite ? '<span style="color:var(--accent-orange);font-size:10px;">&#9733;</span>' : ''}
             ${cred.title}
           </div>
-          <div class="record-sub">${cred.username || cred.domain || 'Sans login'}</div>
+          <div class="record-sub">${this.escapeHtml(cred.username || cred.domain || this.tr('Sans identifiant', 'No username'))}</div>
         </div>
         <div class="record-badges">
           ${cred.expiresAt && cred.expiresAt < Date.now() ? '<span class="badge" style="color:var(--accent-red);border-color:rgba(218,54,51,0.4);">EXP</span>' : ''}
@@ -1013,7 +1015,7 @@ class AppController {
 
         <div class="detail-content">
           <div class="field-group">
-            <div class="field-label">Statut & Priorité</div>
+            <div class="field-label">${this.tr('Statut et priorité', 'Status and priority')}</div>
             <div class="field-box">
               <span class="field-val" style="color:${statusColors[task.status]};">${statusLabels[task.status] || task.status}</span>
               <span class="badge priority-${task.priority}">${task.priority.toUpperCase()}</span>
@@ -1022,7 +1024,7 @@ class AppController {
 
           ${task.dueDate ? `
             <div class="field-group">
-              <div class="field-label">Échéance</div>
+              <div class="field-label">${this.tr('Échéance', 'Due date')}</div>
               <div class="field-box"><span class="field-val">${task.dueDate}</span></div>
             </div>
           ` : ''}
@@ -1038,13 +1040,13 @@ class AppController {
 
           ${linkedCred ? `
             <div class="field-group">
-              <div class="section-divider" style="margin-bottom:8px;">Identifiant lié</div>
+              <div class="section-divider" style="margin-bottom:8px;">${this.tr('Identifiant lié', 'Linked credential')}</div>
               <div class="field-box" style="cursor:pointer;" id="btn-goto-linked-cred">
                 <div style="display:flex;align-items:center;gap:10px;">
                   <span style="display:flex;">${getServiceIconSvg(linkedCred.website || linkedCred.title)}</span>
                   <span class="field-val" style="font-weight:600;">${linkedCred.title}</span>
                 </div>
-                <span style="font-size:11px;color:var(--accent-blue);">Ouvrir →</span>
+                <span style="font-size:11px;color:var(--accent-blue);">${this.tr('Ouvrir', 'Open')} →</span>
               </div>
             </div>
           ` : ''}
@@ -1061,23 +1063,23 @@ class AppController {
                     <input type="checkbox" class="subtask-checkbox" data-subtask-id="${s.id}" ${s.isDone ? 'checked' : ''}>
                     <span class="subtask-title ${s.isDone ? 'done' : ''}">${s.title}</span>
                   </label>
-                  <button class="icon-btn btn-del-subtask" data-subtask-id="${s.id}" title="Supprimer" style="color:var(--text-muted);padding:2px 4px;">
+                  <button class="icon-btn btn-del-subtask" data-subtask-id="${s.id}" title="${this.tr('Supprimer', 'Delete')}" style="color:var(--text-muted);padding:2px 4px;">
                     ✕
                   </button>
                 </div>
               `).join('')}
             </div>
             <div class="subtask-add-row">
-              <input class="form-input" id="input-new-subtask" type="text" placeholder="Ajouter une étape..." style="flex:1;font-size:12px;padding:6px 10px;">
-              <button class="btn-primary" id="btn-add-subtask" style="font-size:11px;padding:6px 12px;">Ajouter</button>
+              <input class="form-input" id="input-new-subtask" type="text" placeholder="${this.tr('Ajouter une étape…', 'Add a step…')}" style="flex:1;font-size:12px;padding:6px 10px;">
+              <button class="btn-primary" id="btn-add-subtask" style="font-size:11px;padding:6px 12px;">${this.tr('Ajouter', 'Add')}</button>
             </div>
           </div>
 
           <div class="field-group">
             <div class="section-divider" style="margin-bottom:8px;">Notes</div>
-            <textarea class="note-editor" id="task-notes" placeholder="Notes sur cette tâche...">${task.notes || ''}</textarea>
+            <textarea class="note-editor" id="task-notes" placeholder="${this.tr('Notes sur cette tâche…', 'Notes about this task…')}">${task.notes || ''}</textarea>
             <div style="display:flex;justify-content:flex-end;margin-top:6px;">
-              <button class="btn-primary" id="btn-save-task-notes" style="font-size:11px;padding:5px 14px;">Enregistrer</button>
+              <button class="btn-primary" id="btn-save-task-notes" style="font-size:11px;padding:5px 14px;">${this.tr('Enregistrer', 'Save')}</button>
             </div>
           </div>
         </div>
@@ -1148,7 +1150,7 @@ class AppController {
           vaultStore.deleteTask(task.id);
           this.selectedItemId = null;
           this.renderDetail(null);
-          this.showToast('Tâche supprimée', 'error');
+          this.showToast(this.tr('Tâche supprimée', 'Task deleted'), 'info');
         }
       });
 
@@ -1192,7 +1194,7 @@ class AppController {
         const notesEl = document.getElementById('task-notes') as HTMLTextAreaElement;
         if (notesEl) {
           vaultStore.updateTask(task.id, { notes: notesEl.value } as Partial<Task>);
-          this.showToast('Notes enregistrées', 'success');
+          this.showToast(this.tr('Notes enregistrées', 'Notes saved'), 'success');
         }
       });
       return;
@@ -1220,12 +1222,12 @@ class AppController {
             </div>
             <span class="badge priority-${t.priority}">${t.priority.charAt(0).toUpperCase()}</span>
           </div>`).join('')
-      : `<div style="font-size:12px;color:var(--text-muted);padding:6px 0;">Aucune tâche liée.</div>`;
+      : `<div style="font-size:12px;color:var(--text-muted);padding:6px 0;">${this.tr('Aucune tâche liée', 'No linked tasks')}</div>`;
 
     // Passkeys HTML
     const passkeysHTML = cred.passkeys && cred.passkeys.length > 0 ? `
       <div class="field-group">
-        <div class="field-label">Passkeys FIDO2 / WebAuthn (${cred.passkeys.length})</div>
+        <div class="field-label">Passkeys (${cred.passkeys.length})</div>
         ${cred.passkeys.map(pk => `
           <div class="field-box" style="margin-bottom:6px;">
             <div style="display:flex;align-items:center;gap:8px;min-width:0;">
@@ -1244,11 +1246,11 @@ class AppController {
     // TOTP Card HTML
     const totpHTML = cred.totpSecret ? `
       <div class="field-group">
-        <div class="field-label">Code 2FA Authenticator (RFC 6238)</div>
-        <div class="totp-card" id="detail-totp-container" style="cursor:pointer;" title="Cliquer pour copier">
+        <div class="field-label">${this.tr('Code 2FA', '2FA code')}</div>
+        <div class="totp-card" id="detail-totp-container" style="cursor:pointer;" title="${this.tr('Cliquer pour copier', 'Click to copy')}">
           <div>
             <div class="totp-code-display" id="detail-totp-code">--- ---</div>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Cliquer pour copier</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${this.tr('Cliquer pour copier', 'Click to copy')}</div>
           </div>
           <div class="totp-timer-ring">
             <svg width="42" height="42" viewBox="0 0 36 36">
@@ -1264,14 +1266,14 @@ class AppController {
     // Website HTML
     const websiteHTML = cred.website ? `
       <div class="field-group">
-        <div class="field-label">Site web</div>
+        <div class="field-label">${this.tr('Site web', 'Website')}</div>
         <div class="field-box">
           <a href="${cred.website}" target="_blank" rel="noopener noreferrer"
             style="color:var(--accent-blue);text-decoration:none;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;">
             ${cred.website}
           </a>
           <div class="field-actions">
-            <button class="icon-btn" title="Copier l'URL" id="btn-copy-url">
+            <button class="icon-btn" title="${this.tr('Copier le lien', 'Copy link')}" id="btn-copy-url">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
@@ -1318,17 +1320,17 @@ class AppController {
     container.innerHTML = `
       <div class="detail-header">
         <div class="detail-header-left">
-          <button class="detail-mobile-back" id="btn-detail-back-cred" title="Retour">
+          <button class="detail-mobile-back" id="btn-detail-back-cred" title="${this.tr('Retour', 'Back')}">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="19" y1="12" x2="5" y2="12"></line>
               <polyline points="12 19 5 12 12 5"></polyline>
             </svg>
-            <span>Retour</span>
+            <span>${this.tr('Retour', 'Back')}</span>
           </button>
           <div class="detail-main-icon">${getServiceIconSvg(cred.website || cred.title)}</div>
           <div>
             <div class="detail-title">${cred.title}</div>
-            <div class="detail-meta">${cred.domain || cred.website || 'Pas de domaine'}</div>
+            <div class="detail-meta">${this.escapeHtml(cred.domain || cred.website || this.tr('Aucun site', 'No website'))}</div>
             ${this.renderTagChips(cred.tags)}
           </div>
         </div>
@@ -1353,11 +1355,11 @@ class AppController {
         ${totpHTML}
 
         <div class="field-group">
-          <div class="field-label">Nom d'utilisateur / Email</div>
+          <div class="field-label">${this.tr('Identifiant', 'Username')}</div>
           <div class="field-box">
             <span class="field-val" id="text-username">${cred.username || '—'}</span>
             <div class="field-actions">
-              <button class="icon-btn" title="Copier" id="btn-copy-username">
+              <button class="icon-btn" title="${this.tr('Copier', 'Copy')}" id="btn-copy-username">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                   <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
@@ -1369,19 +1371,19 @@ class AppController {
 
         <div class="field-group">
           <div style="display:flex;justify-content:space-between;align-items:center;">
-            <span class="field-label">Mot de passe</span>
+            <span class="field-label">${this.tr('Mot de passe', 'Password')}</span>
             <span style="font-size:11px;color:${entropy.color};font-weight:600;">${entropy.label} &middot; ${entropy.bits} bits</span>
           </div>
           <div class="field-box">
             <span class="field-val" id="text-password" style="font-family:var(--font-mono);letter-spacing:1px;">&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;</span>
             <div class="field-actions">
-              <button class="icon-btn" title="Révéler" id="btn-toggle-password">
+              <button class="icon-btn" title="${this.tr('Afficher', 'Show')}" id="btn-toggle-password">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
                   <circle cx="12" cy="12" r="3"></circle>
                 </svg>
               </button>
-              <button class="icon-btn" title="Copier" id="btn-copy-password">
+              <button class="icon-btn" title="${this.tr('Copier', 'Copy')}" id="btn-copy-password">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                   <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
@@ -1397,14 +1399,14 @@ class AppController {
 
         ${cred.passwordHistory && cred.passwordHistory.length > 0 ? `
           <div class="field-group">
-            <div class="section-divider" style="margin-bottom:8px;">Historique des mots de passe (${cred.passwordHistory.length})</div>
+            <div class="section-divider" style="margin-bottom:8px;">${this.tr('Anciens mots de passe', 'Previous passwords')} (${cred.passwordHistory.length})</div>
             <div style="display:flex;flex-direction:column;gap:6px;">
               ${cred.passwordHistory.map(h => `
                 <div class="history-entry">
                   <span class="history-password">&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;</span>
                   <div style="display:flex;align-items:center;gap:8px;">
                     <span class="history-date">${new Date(h.changedAt).toLocaleDateString('fr-FR')}</span>
-                    <button class="icon-btn btn-copy-history" data-pwd="${h.password.replace(/"/g, '&quot;')}" title="Copier l'ancien mot de passe">
+                    <button class="icon-btn btn-copy-history" data-pwd="${h.password.replace(/"/g, '&quot;')}" title="${this.tr('Copier cet ancien mot de passe', 'Copy this previous password')}">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                     </button>
                   </div>
@@ -1416,7 +1418,7 @@ class AppController {
 
         <!-- Champs Personnalisés (Custom Fields) -->
         <div class="field-group">
-          <div class="section-divider" style="margin-bottom:8px;">Champs personnalisés (${(cred.fields || []).length})</div>
+          <div class="section-divider" style="margin-bottom:8px;">${this.tr('Champs personnalisés', 'Custom fields')} (${(cred.fields || []).length})</div>
           <div class="custom-fields-list" id="custom-fields-container">
             ${(cred.fields || []).map(f => `
               <div class="custom-field-row">
@@ -1427,14 +1429,14 @@ class AppController {
                   </span>
                   <div style="display:flex;gap:6px;">
                     ${f.isMasked ? `
-                      <button class="icon-btn btn-reveal-cf" data-cf-id="${f.id}" data-val="${f.value.replace(/"/g, '&quot;')}" title="Révéler">
+                      <button class="icon-btn btn-reveal-cf" data-cf-id="${f.id}" data-val="${f.value.replace(/"/g, '&quot;')}" title="${this.tr('Afficher', 'Show')}">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                       </button>
                     ` : ''}
-                    <button class="icon-btn btn-copy-cf" data-val="${f.value.replace(/"/g, '&quot;')}" title="Copier">
+                    <button class="icon-btn btn-copy-cf" data-val="${f.value.replace(/"/g, '&quot;')}" title="${this.tr('Copier', 'Copy')}">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                     </button>
-                    <button class="icon-btn btn-del-cf" data-cf-id="${f.id}" title="Supprimer" style="color:var(--text-muted);">
+                    <button class="icon-btn btn-del-cf" data-cf-id="${f.id}" title="${this.tr('Supprimer', 'Delete')}" style="color:var(--text-muted);">
                       ✕
                     </button>
                   </div>
@@ -1461,15 +1463,15 @@ class AppController {
         </div>
 
         <div class="field-group">
-          <div class="section-divider" style="margin-bottom:8px;">Tâches liées (${linkedTasks.length})</div>
+          <div class="section-divider" style="margin-bottom:8px;">${this.tr('Tâches liées', 'Linked tasks')} (${linkedTasks.length})</div>
           ${linkedTasksHTML}
         </div>
 
         <div class="field-group">
-          <div class="section-divider" style="margin-bottom:8px;">Notes sécurisées</div>
-          <textarea class="note-editor" id="inline-notes" placeholder="Codes de récupération, PIN, contexte...">${cred.notes || ''}</textarea>
+          <div class="section-divider" style="margin-bottom:8px;">Notes</div>
+          <textarea class="note-editor" id="inline-notes" placeholder="${this.tr('Codes de récupération, informations utiles…', 'Recovery codes, useful details…')}">${cred.notes || ''}</textarea>
           <div style="display:flex;justify-content:flex-end;margin-top:6px;">
-            <button class="btn-primary" id="btn-save-notes" style="font-size:11px;padding:5px 14px;">Enregistrer</button>
+            <button class="btn-primary" id="btn-save-notes" style="font-size:11px;padding:5px 14px;">${this.tr('Enregistrer', 'Save')}</button>
           </div>
         </div>
       </div>
@@ -1523,14 +1525,14 @@ class AppController {
 
     document.getElementById('btn-toggle-fav')?.addEventListener('click', () => {
       vaultStore.updateCredential(cred.id, { isFavorite: !cred.isFavorite });
-      this.showToast(cred.isFavorite ? 'Retiré des favoris' : 'Ajouté aux favoris', 'info');
+      this.showToast(cred.isFavorite ? this.tr('Retiré des favoris', 'Removed from favorites') : this.tr('Ajouté aux favoris', 'Added to favorites'), 'info');
     });
 
     document.getElementById('btn-save-notes')?.addEventListener('click', () => {
       const notesEl = document.getElementById('inline-notes') as HTMLTextAreaElement;
       if (notesEl) {
         vaultStore.updateCredential(cred.id, { notes: notesEl.value });
-        this.showToast('Notes enregistrées', 'success');
+        this.showToast(this.tr('Notes enregistrées', 'Notes saved'), 'success');
       }
     });
 
@@ -1560,7 +1562,7 @@ class AppController {
         vaultStore.deleteCredential(cred.id);
         this.selectedItemId = null;
         this.renderDetail(null);
-        this.showToast('Identifiant supprimé', 'error');
+        this.showToast(this.tr('Identifiant supprimé', 'Credential deleted'), 'info');
       }
     });
 
@@ -1574,7 +1576,7 @@ class AppController {
         const pwd = (el as HTMLElement).dataset.pwd;
         if (pwd) {
           await navigator.clipboard.writeText(pwd);
-          this.showToast('Ancien mot de passe copié', 'success');
+          this.showToast(this.tr('Ancien mot de passe copié', 'Previous password copied'), 'success');
         }
       });
     });
@@ -1607,7 +1609,7 @@ class AppController {
         };
         vaultStore.updateCredential(cred.id, { fields: [...currentFields, newField] });
         this.renderDetail(cred.id);
-        this.showToast('Champ personnalisé ajouté', 'success');
+        this.showToast(this.tr('Champ ajouté', 'Field added'), 'success');
       } else {
         this.showToast(this.tr('Le libellé et la valeur sont requis', 'Label and value are required'), 'error');
       }
@@ -1631,7 +1633,7 @@ class AppController {
         const val = (e.currentTarget as HTMLElement).dataset.val;
         if (val) {
           await navigator.clipboard.writeText(val);
-          this.showToast('Valeur copiée', 'success');
+          this.showToast(this.tr('Valeur copiée', 'Value copied'), 'success');
         }
       });
     });
@@ -1893,7 +1895,7 @@ class AppController {
 
     const box = this.openModal(`
       <div class="modal-header">
-        <div class="modal-title">${isEdit ? `Modifier "${existing?.title}"` : 'Nouvel identifiant'}</div>
+        <div class="modal-title">${isEdit ? this.tr('Modifier l’identifiant', 'Edit credential') : this.tr('Nouvel identifiant', 'New credential')}</div>
         <button class="modal-close" id="modal-close-btn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
@@ -1902,15 +1904,15 @@ class AppController {
       </div>
       <div class="modal-body">
         <div class="form-field">
-          <label class="form-label">Nom du service *</label>
-          <input class="form-input" id="field-title" type="text" placeholder="GitHub, Netflix, Gmail..." value="${existing?.title || ''}" autocomplete="off">
+          <label class="form-label">${this.tr('Nom *', 'Name *')}</label>
+          <input class="form-input" id="field-title" type="text" placeholder="GitHub, Netflix, Gmail…" value="${existing?.title || ''}" autocomplete="off">
         </div>
         <div class="form-field">
-          <label class="form-label">URL du site</label>
+          <label class="form-label">${this.tr('Site web', 'Website')}</label>
           <input class="form-input" id="field-website" type="url" placeholder="https://github.com" value="${existing?.website || ''}" autocomplete="off">
         </div>
         <div class="form-field">
-          <label class="form-label">Nom d'utilisateur / Email</label>
+          <label class="form-label">${this.tr('Identifiant ou email', 'Username or email')}</label>
           <input class="form-input" id="field-username" type="text" placeholder="user@example.com" value="${existing?.username || ''}" autocomplete="off">
         </div>
         <div class="form-field">
@@ -1929,9 +1931,9 @@ class AppController {
           <div id="cred-gen-panel" class="gen-inline" hidden></div>
         </div>
         <div class="form-field">
-          <label class="form-label">Secret TOTP (2FA) — optionnel</label>
+          <label class="form-label">${this.tr('Clé 2FA (facultatif)', '2FA key (optional)')}</label>
           <div style="display:flex;gap:8px;">
-            <input class="form-input" id="field-totp" type="text" placeholder="JBSWY3DPEHPK3PXP ou otpauth://totp/..." value="${existing?.totpSecret || ''}" autocomplete="off" style="flex:1;">
+            <input class="form-input" id="field-totp" type="text" placeholder="${this.tr('Clé ou lien otpauth://', 'Key or otpauth:// link')}" value="${existing?.totpSecret || ''}" autocomplete="off" style="flex:1;">
             <button class="btn-primary" id="btn-scan-qr" type="button" style="white-space:nowrap;font-size:11px;padding:0 12px;">${this.tr('Scanner QR', 'Scan QR')}</button>
           </div>
           <div id="qr-scan-panel" hidden>
@@ -1946,7 +1948,7 @@ class AppController {
           </div>
         </div>
         <div class="form-field">
-          <label class="form-label">Date d'expiration / Renouvellement — optionnel</label>
+          <label class="form-label">${this.tr('Date d’expiration (facultatif)', 'Expiration date (optional)')}</label>
           <input class="form-input" id="field-expires-at" type="date" value="${existing?.expiresAt ? new Date(existing.expiresAt).toISOString().split('T')[0] : ''}">
         </div>
         <div class="form-field">
@@ -1955,12 +1957,12 @@ class AppController {
         </div>
         <div class="form-field">
           <label class="form-label">Notes</label>
-          <textarea class="note-editor" id="field-notes" placeholder="Codes de récupération, informations supplémentaires...">${existing?.notes || ''}</textarea>
+          <textarea class="note-editor" id="field-notes" placeholder="${this.tr('Codes de récupération, informations utiles…', 'Recovery codes, useful details…')}">${existing?.notes || ''}</textarea>
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn-primary" id="modal-cancel" style="color:var(--text-muted);">Annuler</button>
-        <button class="btn-primary" id="modal-confirm">${isEdit ? 'Enregistrer les modifications' : "Créer l'identifiant"}</button>
+        <button class="btn-primary" id="modal-cancel">${this.tr('Annuler', 'Cancel')}</button>
+        <button class="btn-primary" id="modal-confirm">${isEdit ? this.tr('Enregistrer', 'Save') : this.tr('Créer', 'Create')}</button>
       </div>
     `);
 
@@ -2085,7 +2087,7 @@ class AppController {
       const title = (box.querySelector('#field-title') as HTMLInputElement)?.value.trim();
       const password = (box.querySelector('#field-password') as HTMLInputElement)?.value;
       if (!title || !password) {
-        this.showToast('Le nom et le mot de passe sont requis', 'error');
+        this.showToast(this.tr('Le nom et le mot de passe sont obligatoires', 'Name and password are required'), 'error');
         return;
       }
       const website = (box.querySelector('#field-website') as HTMLInputElement)?.value.trim();
@@ -2114,7 +2116,7 @@ class AppController {
           expiresAt
         });
         this.closeModal();
-        this.showToast('Identifiant mis à jour (historique conservé)', 'success');
+        this.showToast(this.tr('Identifiant enregistré', 'Credential saved'), 'success');
       } else {
         const data2 = vaultStore.getData();
         vaultStore.addCredential({
@@ -2131,7 +2133,7 @@ class AppController {
           expiresAt
         });
         this.closeModal();
-        this.showToast('Identifiant créé', 'success');
+        this.showToast(this.tr('Identifiant créé', 'Credential created'), 'success');
       }
     });
   }
@@ -2160,7 +2162,7 @@ class AppController {
 
     const box = this.openModal(`
       <div class="modal-header">
-        <div class="modal-title">${isEdit ? `Modifier "${existing?.title}"` : 'Nouvelle tâche'}</div>
+        <div class="modal-title">${isEdit ? this.tr('Modifier la tâche', 'Edit task') : this.tr('Nouvelle tâche', 'New task')}</div>
         <button class="modal-close" id="modal-close-btn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
@@ -2169,25 +2171,25 @@ class AppController {
       </div>
       <div class="modal-body">
         <div class="form-field">
-          <label class="form-label">Titre *</label>
-          <input class="form-input" id="task-title" type="text" placeholder="Renouveler le mot de passe GitHub..." value="${existing?.title || ''}" autocomplete="off">
+          <label class="form-label">${this.tr('Titre *', 'Title *')}</label>
+          <input class="form-input" id="task-title" type="text" placeholder="${this.tr('Renouveler le mot de passe GitHub…', 'Renew the GitHub password…')}" value="${existing?.title || ''}" autocomplete="off">
         </div>
         <div class="form-field">
           <label class="form-label">Description</label>
-          <textarea class="note-editor" id="task-desc" placeholder="Description optionnelle...">${existing?.description || ''}</textarea>
+          <textarea class="note-editor" id="task-desc" placeholder="${this.tr('Facultatif', 'Optional')}">${existing?.description || ''}</textarea>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
           <div class="form-field">
-            <label class="form-label">Priorité</label>
+            <label class="form-label">${this.tr('Priorité', 'Priority')}</label>
             <select class="form-input" id="task-priority">
-              <option value="low" ${existing?.priority === 'low' ? 'selected' : ''}>Basse</option>
-              <option value="medium" ${(!existing || existing?.priority === 'medium') ? 'selected' : ''}>Moyenne</option>
-              <option value="high" ${existing?.priority === 'high' ? 'selected' : ''}>Haute</option>
-              <option value="urgent" ${existing?.priority === 'urgent' ? 'selected' : ''}>Urgente</option>
+              <option value="low" ${existing?.priority === 'low' ? 'selected' : ''}>${i18n.t.common.low}</option>
+              <option value="medium" ${(!existing || existing?.priority === 'medium') ? 'selected' : ''}>${i18n.t.common.medium}</option>
+              <option value="high" ${existing?.priority === 'high' ? 'selected' : ''}>${i18n.t.common.high}</option>
+              <option value="urgent" ${existing?.priority === 'urgent' ? 'selected' : ''}>${i18n.t.common.urgent}</option>
             </select>
           </div>
           <div class="form-field">
-            <label class="form-label">Échéance</label>
+            <label class="form-label">${this.tr('Échéance', 'Due date')}</label>
             <input class="form-input" id="task-due" type="date" value="${existing?.dueDate || ''}">
           </div>
         </div>
@@ -2230,16 +2232,16 @@ class AppController {
           </div>` : ''}
         ${credOptions ? `
           <div class="form-field">
-            <label class="form-label">Identifiant lié (optionnel)</label>
+            <label class="form-label">${this.tr('Identifiant lié (facultatif)', 'Linked credential (optional)')}</label>
             <select class="form-input" id="task-cred">
-              <option value="">— Aucun —</option>
+              <option value="">${this.tr('Aucun', 'None')}</option>
               ${credOptions}
             </select>
           </div>` : ''}
       </div>
       <div class="modal-footer">
-        <button class="btn-primary" id="modal-cancel" style="color:var(--text-muted);">Annuler</button>
-        <button class="btn-primary" id="modal-confirm">${isEdit ? 'Enregistrer les modifications' : 'Créer la tâche'}</button>
+        <button class="btn-primary" id="modal-cancel">${this.tr('Annuler', 'Cancel')}</button>
+        <button class="btn-primary" id="modal-confirm">${isEdit ? this.tr('Enregistrer', 'Save') : this.tr('Créer', 'Create')}</button>
       </div>
     `);
 
@@ -2253,7 +2255,7 @@ class AppController {
 
     box.querySelector('#modal-confirm')?.addEventListener('click', () => {
       const title = (box.querySelector('#task-title') as HTMLInputElement)?.value.trim();
-      if (!title) { this.showToast('Le titre est requis', 'error'); return; }
+      if (!title) { this.showToast(this.tr('Le titre est obligatoire', 'Title is required'), 'error'); return; }
       const description = (box.querySelector('#task-desc') as HTMLTextAreaElement)?.value;
       const priority = (box.querySelector('#task-priority') as HTMLSelectElement)?.value as Task['priority'];
       const dueDate = (box.querySelector('#task-due') as HTMLInputElement)?.value;
@@ -2300,7 +2302,7 @@ class AppController {
           tags: taskTagInput.getTags()
         });
         this.closeModal();
-        this.showToast('Tâche mise à jour', 'success');
+        this.showToast(this.tr('Tâche enregistrée', 'Task saved'), 'success');
       } else {
         const data3 = vaultStore.getData();
         vaultStore.addTask({
@@ -2318,7 +2320,7 @@ class AppController {
           reminderSent: false
         });
         this.closeModal();
-        this.showToast('Tâche créée', 'success');
+        this.showToast(this.tr('Tâche créée', 'Task created'), 'success');
       }
     });
   }
@@ -2761,7 +2763,7 @@ class AppController {
           <p style="font-size:13px;color:var(--text-secondary);margin-bottom:14px;line-height:1.5;">
             ${i18n.t.importExport.supportedFormats}
           </p>
-          <div style="border:2px dashed var(--border-subtle);border-radius:var(--radius-lg);padding:28px;text-align:center;cursor:pointer;transition:border-color 0.2s;" id="drop-zone">
+          <div class="drop-zone" id="drop-zone" role="button" tabindex="0" aria-label="${this.tr('Choisir un fichier à importer', 'Choose a file to import')}">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5" style="margin:0 auto 10px;">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
               <polyline points="17 8 12 3 7 8"></polyline>
@@ -2769,8 +2771,8 @@ class AppController {
             </svg>
             <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">${i18n.t.importExport.dragDropLabel}</div>
             <div style="font-size:11px;color:var(--text-muted);">KDBX / 1PUX / CXF / JSON / CSV / XML</div>
-            <input type="file" id="import-file-input" accept=".json,.csv,.xml,.kdbx,.1pux" style="position:absolute;opacity:0;inset:0;cursor:pointer;">
           </div>
+          <input type="file" id="import-file-input" accept=".json,.csv,.xml,.kdbx,.1pux" hidden>
           <div id="import-status" style="margin-top:10px;font-size:12px;color:var(--text-secondary);min-height:20px;"></div>
           <div id="import-secret-panel" hidden>
             <div style="margin-top:10px;padding:12px;border:1px solid var(--border-subtle);border-radius:var(--radius-md);background:var(--bg-secondary);">
@@ -2902,7 +2904,7 @@ class AppController {
       protectedExportMode = mode;
       exportTitle.textContent = mode === 'encrypted'
         ? this.tr('Mot de passe dédié de l’export chiffré', 'Dedicated encrypted export password')
-        : this.tr('Mot de passe maître de la base KeePass', 'KeePass database master password');
+        : this.tr('Mot de passe de la base KeePass', 'KeePass database password');
       exportStatus.textContent = '';
       exportPanel.hidden = false;
       exportPwd.focus();
@@ -3002,7 +3004,7 @@ class AppController {
           secretPanel.hidden = false;
           keyFileRow.hidden = err.kind !== 'kdbx';
           secretLabel.textContent = err.kind === 'kdbx'
-            ? this.tr('Mot de passe maître KeePass', 'KeePass master password')
+            ? this.tr('Mot de passe de la base KeePass', 'KeePass database password')
             : this.tr('Mot de passe de l’export chiffré', 'Encrypted export password');
           setImportStatus(err.message, 'var(--accent-orange)');
           secretPwd.focus();
@@ -3038,17 +3040,28 @@ class AppController {
       if (e.key === 'Enter') unlockBtn.click();
     });
 
-    box.querySelector('#import-file-input')?.addEventListener('change', (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (file) handleFile(file);
+    const fileInput = box.querySelector('#import-file-input') as HTMLInputElement;
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files?.[0];
+      // Vidé après lecture : choisir à nouveau le même fichier redéclenche l'import
+      fileInput.value = '';
+      if (file) void handleFile(file);
     });
 
+    // Seule la zone de dépôt ouvre le sélecteur de fichier (clic ou clavier)
     const dropZone = box.querySelector('#drop-zone') as HTMLElement;
-    dropZone?.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = 'var(--accent-blue)'; });
-    dropZone?.addEventListener('dragleave', () => { dropZone.style.borderColor = 'var(--border-subtle)'; });
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        fileInput.click();
+      }
+    });
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragging'); });
+    dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('dragging'); });
     dropZone?.addEventListener('drop', (e) => {
       e.preventDefault();
-      dropZone.style.borderColor = 'var(--border-subtle)';
+      dropZone.classList.remove('dragging');
       const file = e.dataTransfer?.files[0];
       if (file) handleFile(file);
     });
@@ -3210,13 +3223,13 @@ class AppController {
           </div>` : `
           <section class="account-section">
             <h3 class="account-section-title">${this.tr('Activer la synchronisation', 'Enable sync')}</h3>
-            <p class="modal-text">${this.tr('Le coffre est envoyé chiffré. Le mot de passe maître et les données en clair ne quittent pas cet appareil.', 'The vault is uploaded encrypted. The master password and plaintext data never leave this device.')}</p>
+            <p class="modal-text">${this.tr('Le coffre est envoyé chiffré. Le mot de passe principal et les données en clair ne quittent pas cet appareil.', 'The vault is uploaded encrypted. The master password and plaintext data never leave this device.')}</p>
             <div class="form-field">
               <label class="form-label" for="account-server">${this.tr('Adresse du serveur', 'Server address')}</label>
               <input class="form-input" id="account-server" type="url" value="${this.escapeHtml(DEFAULT_SERVER_URL)}" autocomplete="url" spellcheck="false">
             </div>
             <div class="form-field">
-              <label class="form-label" for="account-connect-password">${this.tr('Mot de passe maître', 'Master password')}</label>
+              <label class="form-label" for="account-connect-password">${this.tr('Mot de passe principal', 'Master password')}</label>
               <input class="form-input" id="account-connect-password" type="password" autocomplete="current-password">
             </div>
             <div class="form-error" data-error="connect" role="alert" hidden></div>
@@ -3226,7 +3239,7 @@ class AppController {
           </section>`}
 
         <section class="account-section">
-          <h3 class="account-section-title">${this.tr('Changer le mot de passe maître', 'Change master password')}</h3>
+          <h3 class="account-section-title">${this.tr('Changer le mot de passe principal', 'Change master password')}</h3>
           <div class="form-field">
             <label class="form-label" for="account-current-password">${this.tr('Mot de passe actuel', 'Current password')}</label>
             <input class="form-input" id="account-current-password" type="password" autocomplete="current-password">
@@ -3260,7 +3273,7 @@ class AppController {
             <h3 class="account-section-title">${this.tr('Supprimer le compte en ligne', 'Delete online account')}</h3>
             <p class="modal-text">${this.tr('Supprime définitivement le coffre du serveur. Les données restent sur cet appareil.', 'Permanently deletes the vault from the server. Data stays on this device.')}</p>
             <div class="form-field">
-              <label class="form-label" for="account-delete-password">${this.tr('Mot de passe maître', 'Master password')}</label>
+              <label class="form-label" for="account-delete-password">${this.tr('Mot de passe principal', 'Master password')}</label>
               <input class="form-input" id="account-delete-password" type="password" autocomplete="current-password">
             </div>
             <div class="form-error" data-error="delete" role="alert" hidden></div>
@@ -3315,7 +3328,7 @@ class AppController {
     action('connect')?.addEventListener('click', event => {
       const password = (box.querySelector('#account-connect-password') as HTMLInputElement).value;
       const serverUrl = (box.querySelector('#account-server') as HTMLInputElement).value;
-      if (!password) return showError('connect', new Error(this.tr('Saisissez le mot de passe maître', 'Enter the master password')));
+      if (!password) return showError('connect', new Error(this.tr('Saisissez le mot de passe principal', 'Enter the master password')));
       void runBusy(event.currentTarget as HTMLButtonElement, this.tr('Envoi du coffre chiffré…', 'Uploading encrypted vault…'), async () => {
         try {
           await accountService.connectCloud(serverUrl, password);
@@ -3340,7 +3353,7 @@ class AppController {
         try {
           await accountService.changeMasterPassword(value('account-current-password'), value('account-new-password'));
           box.querySelectorAll<HTMLInputElement>('#account-current-password, #account-new-password, #account-new-password-confirm').forEach(input => { input.value = ''; });
-          this.showToast(this.tr('Mot de passe maître changé', 'Master password changed'), 'success', 4000);
+          this.showToast(this.tr('Mot de passe principal changé', 'Master password changed'), 'success', 4000);
         } catch (err) {
           showError('password', err);
         }
@@ -3353,7 +3366,7 @@ class AppController {
     action('delete')?.addEventListener('click', async event => {
       const button = event.currentTarget as HTMLButtonElement;
       const password = (box.querySelector('#account-delete-password') as HTMLInputElement).value;
-      if (!password) return showError('delete', new Error(this.tr('Saisissez le mot de passe maître', 'Enter the master password')));
+      if (!password) return showError('delete', new Error(this.tr('Saisissez le mot de passe principal', 'Enter the master password')));
       const confirmed = await this.confirmDialog({
         title: this.tr('Supprimer le compte en ligne ?', 'Delete online account?'),
         message: this.tr('Le coffre sera supprimé du serveur et vos autres appareils ne pourront plus se synchroniser. Cette action est définitive.', 'The vault will be deleted from the server and your other devices will stop syncing. This cannot be undone.'),
@@ -3665,14 +3678,11 @@ class AppController {
 /* ════════════════════════════════════════════════════════════════════════════
    BOOTSTRAP
    ════════════════════════════════════════════════════════════════════════════ */
-const app = new AppController();
-
-// Refresh TOTP global toutes les secondes
-setInterval(() => {
-  if (app.totpInterval === null) {
-    // TOTP géré par updateLiveTOTP
-  }
-}, 1000);
+// Le stockage de l'appareil est chargé avant l'interface : fichier natif sous Tauri, navigateur sinon
+void createDeviceStorage().then(storage => {
+  accountService = new AccountService({ storage });
+  new AppController();
+});
 
 // Enregistrement PWA Service Worker
 if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {

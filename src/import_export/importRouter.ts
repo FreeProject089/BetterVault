@@ -16,7 +16,7 @@ export class PasswordRequiredError extends Error {
 
   constructor(kind: ProtectedImportKind) {
     super(kind === 'kdbx'
-      ? 'Base KeePass chiffrée : mot de passe maître requis'
+      ? 'Base KeePass chiffrée : mot de passe requis'
       : 'Export chiffré : mot de passe requis');
     this.name = 'PasswordRequiredError';
     this.kind = kind;

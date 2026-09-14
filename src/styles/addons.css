@@ -1053,6 +1053,24 @@
   }
 }
 
+/* ── Zone de dépôt (import) ───────────────────────────────────────────── */
+.drop-zone {
+  padding: 28px;
+  text-align: center;
+  border: 2px dashed var(--border-subtle);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.drop-zone:hover,
+.drop-zone:focus-visible,
+.drop-zone.dragging {
+  border-color: var(--accent-blue);
+  background-color: rgba(88, 166, 255, 0.05);
+  outline: none;
+}
+
 /* ── Marque ───────────────────────────────────────────────────────────── */
 .brand-logo {
   width: 28px;

@@ -1,6 +1,6 @@
 # Import et export
 
-Ouvrez **Importer / Exporter**. Import et export portent sur le **coffre actif**.
+Ouvrez **Importer / exporter**. Import et export portent sur le **coffre actif**.
 
 ## Importer
 
@@ -8,7 +8,7 @@ Glissez un fichier dans la zone ou cliquez pour le choisir. Le format est détec
 
 | Source | Formats | Remarques |
 | --- | --- | --- |
-| KeePass / KeePassXC | `.kdbx` (3.1, 4.x), `.xml` | Mot de passe maître et fichier clé optionnel ; AES-256 et ChaCha20 |
+| KeePass / KeePassXC | `.kdbx` (3.1, 4.x), `.xml` | Mot de passe principal et fichier clé optionnel ; AES-256 et ChaCha20 |
 | 1Password | `.1pux`, CSV | |
 | Bitwarden | JSON, CSV | Passkeys et champs personnalisés inclus |
 | FIDO CXF | JSON | Identifiants, passkeys, 2FA, notes |
@@ -29,7 +29,7 @@ Pour un fichier protégé (KeePass, export chiffré), BetterVault demande le mot
     | **Export chiffré** | Sauvegarde BetterVault protégée par un mot de passe dédié (Argon2id + AES-256-GCM) |
     | **KeePass `.kdbx` 4** | Ouverture dans KeePass, KeePassXC, Strongbox |
 
-    Le mot de passe d'export doit contenir au moins 10 caractères. Il est distinct du mot de passe maître.
+    Le mot de passe d'export doit contenir au moins 10 caractères. Il est distinct du mot de passe principal.
 
 === "Formats en clair"
 

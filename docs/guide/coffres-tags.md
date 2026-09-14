@@ -2,9 +2,9 @@
 
 ## Coffres
 
-Un coffre regroupe des identifiants et des tâches : par exemple *Personnel*, *Travail*, *Famille*. Tous les coffres d'un compte sont chiffrés avec le même mot de passe maître.
+Un coffre regroupe des identifiants et des tâches : par exemple *Personnel*, *Travail*, *Famille*. Tous les coffres d'un compte sont chiffrés avec le même mot de passe principal.
 
-- **Créer** : bouton **+** à côté de *Coffres-forts*.
+- **Créer** : bouton **+** à côté de *Coffres*.
 - **Changer de coffre** : cliquez sur son nom.
 - **Renommer, changer le type, supprimer** : icône crayon au survol du coffre.
 

@@ -3,11 +3,11 @@ import { deriveArgon2idKey, type Argon2Params } from '../import_export/encrypted
 /**
  * Cryptographie du compte BetterVault.
  *
- * mot de passe maître ──Argon2id──▶ clé maître ──HKDF──┬─▶ clé de chiffrement (enveloppe la clé du coffre)
+ * mot de passe principal ──Argon2id──▶ clé principale ──HKDF──┬─▶ clé de chiffrement (enveloppe la clé du coffre)
  *                                                      └─▶ preuve d'authentification (seule valeur envoyée au serveur)
  *
  * Le coffre est chiffré avec une clé aléatoire indépendante du mot de passe ;
- * le serveur ne reçoit jamais ni le mot de passe, ni la clé maître, ni la clé du coffre.
+ * le serveur ne reçoit jamais ni le mot de passe, ni la clé principale, ni la clé du coffre.
  */
 
 export const ACCOUNT_KDF: Argon2Params = { t: 3, m: 65536, p: 4 };
@@ -24,7 +24,7 @@ export interface AccountKeys {
 }
 
 export class WrongPasswordError extends Error {
-  constructor(message = 'Mot de passe maître incorrect') {
+  constructor(message = 'Mot de passe principal incorrect') {
     super(message);
     this.name = 'WrongPasswordError';
   }
@@ -131,13 +131,13 @@ export async function unwrapVaultKey(encKey: CryptoKey, wrapped: EncryptedBlob, 
   }
 }
 
-/** Re-chiffre la clé du coffre avec une nouvelle clé (changement de mot de passe maître) sans toucher au coffre */
+/** Re-chiffre la clé du coffre avec une nouvelle clé (changement de mot de passe principal) sans toucher au coffre */
 export async function rewrapVaultKey(oldEncKey: CryptoKey, wrapped: EncryptedBlob, newEncKey: CryptoKey): Promise<EncryptedBlob> {
   let raw: Uint8Array;
   try {
     raw = await decryptBytes(oldEncKey, wrapped, AAD.vaultKey);
   } catch {
-    throw new WrongPasswordError('Mot de passe maître actuel incorrect');
+    throw new WrongPasswordError('Mot de passe principal actuel incorrect');
   }
   try {
     return await encryptBytes(newEncKey, raw, AAD.vaultKey);

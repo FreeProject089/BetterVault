@@ -23,7 +23,7 @@ Le bouton de copie place le mot de passe dans le presse-papiers. Il est effacé 
 
 Une date d'expiration affiche un badge **EXP** dans la liste : orange à moins de 14 jours, rouge une fois dépassée.
 
-## Codes 2FA (TOTP)
+## Codes 2FA
 
 ### Ajouter un secret 2FA
 
@@ -45,7 +45,7 @@ La catégorie **Codes 2FA** liste les identifiants qui ont un secret. Dans la fi
 
 ## Générateur
 
-Ouvrez **Générateur Sécurisé** (++ctrl+g++).
+Ouvrez **Générateur** (++ctrl+g++).
 
 === "Mot de passe"
 
@@ -62,7 +62,7 @@ La jauge indique l'entropie réelle : environ 12,9 bits par mot pour une phrase 
 
 ## Audit de sécurité
 
-**Audit de Sécurité** calcule un score à partir :
+**Audit de sécurité** calcule un score à partir :
 
 - des mots de passe faibles
 - des mots de passe réutilisés

@@ -5,16 +5,16 @@ Une seule interface pour le web, l'application de bureau, l'extension navigateur
 
 ## Sécurité
 
-- **Mot de passe maître** : dérivé avec Argon2id (64 Mio, 3 itérations), puis séparé par HKDF en une clé de chiffrement et une preuve d'authentification.
+- **Mot de passe principal** : dérivé avec Argon2id (64 Mio, 3 itérations), puis séparé par HKDF en une clé de chiffrement et une preuve d'authentification.
 - **Coffre** : chiffré en AES-256-GCM avec une clé aléatoire, elle-même chiffrée par la clé dérivée du mot de passe. Les données ne sont jamais écrites en clair sur l'appareil.
-- **Serveur** : ne reçoit que le coffre chiffré et la preuve d'authentification (protégée à nouveau par scrypt). Il ne voit ni le mot de passe maître, ni la clé du coffre, ni les données.
+- **Serveur** : ne reçoit que le coffre chiffré et la preuve d'authentification (protégée à nouveau par scrypt). Il ne voit ni le mot de passe principal, ni la clé du coffre, ni les données.
 - **Mot de passe oublié** : aucune récupération possible, par conception.
 - **Verrouillage** : manuel (`Ctrl+L`) ou après 5 minutes d'inactivité ; les clés sont effacées de la mémoire.
 
 ## Fonctionnalités
 
 - Identifiants avec historique des mots de passe, champs personnalisés, passkeys, date d'expiration
-- Codes 2FA (TOTP), import par QR code (caméra ou image)
+- Codes 2FA, import par QR code (caméra ou image)
 - Générateur de mots de passe et de phrases secrètes (liste EFF de 7 776 mots)
 - Audit : mots de passe faibles, réutilisés, sans 2FA, fuites Have I Been Pwned (k-anonymat)
 - Tâches : liste, Kanban, matrice d'Eisenhower, calendrier, sous-tâches, dépendances, récurrences, rappels
@@ -27,8 +27,8 @@ Une seule interface pour le web, l'application de bureau, l'extension navigateur
 
 À la création, deux modes :
 
-- **Cet appareil** : le coffre chiffré reste dans le stockage local. La synchronisation peut être activée plus tard depuis *Compte & synchronisation*.
-- **Synchronisé** : le coffre chiffré est envoyé à un serveur BetterVault. Les autres appareils s'y connectent avec le même email et le même mot de passe maître. Les modifications faites en parallèle sont fusionnées élément par élément.
+- **Cet appareil** : le coffre chiffré reste dans le stockage local. La synchronisation peut être activée plus tard depuis *Compte et synchronisation*.
+- **Synchronisé** : le coffre chiffré est envoyé à un serveur BetterVault. Les autres appareils s'y connectent avec le même email et le même mot de passe principal. Les modifications faites en parallèle sont fusionnées élément par élément.
 
 ## Développement
 

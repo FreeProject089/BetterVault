@@ -5,7 +5,7 @@
 Au premier lancement, BetterVault affiche l'écran **Créer un compte**.
 
 1. Saisissez votre adresse email.
-2. Choisissez un **mot de passe maître** d'au moins 10 caractères. La jauge indique sa robustesse ; une phrase de plusieurs mots est un bon choix.
+2. Choisissez un **mot de passe principal** d'au moins 10 caractères. La jauge indique sa robustesse ; une phrase de plusieurs mots est un bon choix.
 3. Confirmez le mot de passe.
 4. Choisissez le **stockage** :
 
@@ -18,17 +18,17 @@ Au premier lancement, BetterVault affiche l'écran **Créer un compte**.
 6. Cliquez sur **Créer le coffre**.
 
 !!! warning
-    Il n'existe aucune procédure de récupération du mot de passe maître. Notez-le dans un endroit sûr.
+    Il n'existe aucune procédure de récupération du mot de passe principal. Notez-le dans un endroit sûr.
 
 Un compte local peut être synchronisé plus tard : voir [Compte et synchronisation](synchronisation.md#activer-la-synchronisation).
 
 ## Se connecter sur un autre appareil
 
-Sur l'écran d'accueil, ouvrez l'onglet **Se connecter**, puis saisissez l'adresse du serveur, l'email et le mot de passe maître. Le coffre est téléchargé chiffré puis déchiffré sur l'appareil.
+Sur l'écran d'accueil, ouvrez l'onglet **Se connecter**, puis saisissez l'adresse du serveur, l'email et le mot de passe principal. Le coffre est téléchargé chiffré puis déchiffré sur l'appareil.
 
 ## Déverrouiller et verrouiller
 
-- À chaque ouverture, BetterVault demande le mot de passe maître.
+- À chaque ouverture, BetterVault demande le mot de passe principal.
 - Pour verrouiller : bouton cadenas en bas de la barre latérale, ou ++ctrl+l++.
 - Le verrouillage est automatique après **5 minutes** sans activité.
 

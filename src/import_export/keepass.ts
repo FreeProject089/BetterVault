@@ -24,7 +24,7 @@ const KDF_ARGON2D = 'ef636ddf8c29444b91f7a9a403e30a0c';
 const KDF_ARGON2ID = '9e298b1956db4773b23dfc3ec6f0a1e6';
 const SALSA20_IV = new Uint8Array([0xe8, 0x30, 0x09, 0x4b, 0x97, 0x20, 0x5d, 0x2a]);
 const KEEPASS_EPOCH_OFFSET_S = 62135596800; // secondes entre 0001-01-01 et 1970-01-01
-const WRONG_KEY = 'Mot de passe maître ou fichier clé incorrect';
+const WRONG_KEY = 'Mot de passe ou fichier clé incorrect';
 
 const utf8 = new TextEncoder();
 const utf8Decoder = new TextDecoder();
@@ -658,7 +658,7 @@ function hmacBlock(hmacBase: Uint8Array, index: bigint, data: Uint8Array): Uint8
 }
 
 export async function buildKdbx4(credentials: CredentialItem[], password: string, options: KdbxWriteOptions = {}): Promise<Uint8Array> {
-  if (!password) throw new KdbxError('Un mot de passe maître est requis pour l’export KeePass');
+  if (!password) throw new KdbxError('Un mot de passe est requis pour l’export KeePass');
 
   const random = (n: number) => crypto.getRandomValues(new Uint8Array(n));
   const masterSeed = random(32);

@@ -117,6 +117,35 @@ fn derive_key_argon2(
 
 /// Enregistre un export dans le dossier Téléchargements : les liens de téléchargement HTML
 /// ne fonctionnent pas dans la webview. Ne remplace jamais un fichier existant.
+/// Fichier du compte et du coffre chiffré, dans le dossier de données de l'application :
+/// Windows %APPDATA%\app.bettervault, macOS ~/Library/Application Support/app.bettervault,
+/// Linux ~/.local/share/app.bettervault, Android et iOS : stockage privé de l'application.
+fn storage_file(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("bettervault-storage.json"))
+}
+
+#[command]
+fn storage_read_all(app: tauri::AppHandle) -> Result<std::collections::HashMap<String, String>, String> {
+    let path = storage_file(&app)?;
+    match std::fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str(&text).map_err(|e| format!("Fichier de stockage illisible : {e}")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(std::collections::HashMap::new()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Écriture atomique : fichier temporaire puis renommage, pour ne jamais laisser un fichier à moitié écrit
+#[command]
+fn storage_write_all(app: tauri::AppHandle, entries: std::collections::HashMap<String, String>) -> Result<(), String> {
+    let path = storage_file(&app)?;
+    let temp = path.with_extension("json.tmp");
+    let json = serde_json::to_string(&entries).map_err(|e| e.to_string())?;
+    std::fs::write(&temp, json).map_err(|e| e.to_string())?;
+    std::fs::rename(&temp, &path).map_err(|e| e.to_string())
+}
+
 #[command]
 fn save_export_file(app: tauri::AppHandle, file_name: String, bytes: Vec<u8>) -> Result<String, String> {
     let cleaned: String = file_name
@@ -200,6 +229,8 @@ pub fn run() {
             keychain_delete_secret,
             derive_key_argon2,
             save_export_file,
+            storage_read_all,
+            storage_write_all,
             generate_secure_bytes,
             encrypt_data_aes_gcm,
             decrypt_data_aes_gcm

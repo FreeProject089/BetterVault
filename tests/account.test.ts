@@ -40,7 +40,7 @@ describe('Cryptographie du compte', () => {
 });
 
 describe('Compte local', () => {
-  it('ne stocke que des données chiffrées et se déverrouille avec le mot de passe maître', async () => {
+  it('ne stocke que des données chiffrées et se déverrouille avec le mot de passe principal', async () => {
     const { storage, service } = newService();
     const store = new VaultStore();
     store.load(createEmptyVaultData());
@@ -63,7 +63,7 @@ describe('Compte local', () => {
     expect(data.tagDefs.map(t => t.name)).toEqual(['Finances']);
   });
 
-  it('refuse un mot de passe maître trop court', async () => {
+  it('refuse un mot de passe principal trop court', async () => {
     const { service } = newService();
     await expect(service.createAccount({ email: 'a@b.fr', password: 'court', mode: 'local' }, createEmptyVaultData())).rejects.toThrow('10 caractères');
   });
@@ -307,9 +307,9 @@ describe('Serveur BetterVault + synchronisation multi-appareils', () => {
     expect(JSON.parse(storage.getItem('bettervault.vault.v1')!)).toMatchObject({ revision: 2, dirty: false });
   });
 
-  it('change le mot de passe maître sur tous les appareils', async () => {
+  it('change le mot de passe principal sur tous les appareils', async () => {
     const email = `mdp-${Date.now()}@exemple.fr`;
-    const NEW_PASSWORD = 'nouveau mot de passe maitre 2026';
+    const NEW_PASSWORD = 'nouveau mot de passe principal 2026';
     const deviceA = newService();
     const storeA = new VaultStore();
     storeA.load(createEmptyVaultData());

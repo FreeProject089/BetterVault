@@ -1,6 +1,6 @@
 # Tâches
 
-Ouvrez **Gestionnaire de Tâches** dans la barre latérale. Les tâches appartiennent au coffre actif.
+Ouvrez **Tâches** dans la barre latérale. Les tâches appartiennent au coffre actif.
 
 ## Créer une tâche
 

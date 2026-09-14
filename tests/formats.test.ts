@@ -90,7 +90,7 @@ describe('KeePass KDBX 4 & XML', () => {
     expect(creds[1].username).toBe('root');
   });
 
-  it('refuse un mot de passe maître incorrect', async () => {
+  it('refuse un mot de passe principal incorrect', async () => {
     const bytes = await buildKdbx4(sampleCredentials, 'bon', { kdf: 'aes', aesRounds: 10 });
     await expect(parseKdbx(bytes, 'mauvais')).rejects.toBeInstanceOf(KdbxError);
   });

@@ -90,7 +90,7 @@ export interface AccountServiceOptions {
 
 export function assertPasswordStrength(password: string): void {
   if (password.length < MIN_MASTER_PASSWORD_LENGTH) {
-    throw new Error(`Le mot de passe maître doit contenir au moins ${MIN_MASTER_PASSWORD_LENGTH} caractères`);
+    throw new Error(`Le mot de passe principal doit contenir au moins ${MIN_MASTER_PASSWORD_LENGTH} caractères`);
   }
 }
 
@@ -273,7 +273,7 @@ export class AccountService {
     return data;
   }
 
-  /** Reprend une session encore valide (extension) sans redemander le mot de passe maître */
+  /** Reprend une session encore valide (extension) sans redemander le mot de passe principal */
   async resumeSession(): Promise<UnlockedVaultData | null> {
     if (!this.sessionStore) return null;
     const account = this.getAccount();
@@ -480,7 +480,7 @@ export class AccountService {
       } catch (loginErr) {
         if (loginErr instanceof CloudError && loginErr.status === 401) {
           throw new CloudError(
-            'Le mot de passe maître a été modifié sur un autre appareil. Déconnectez-vous de cet appareil puis reconnectez-vous avec le nouveau mot de passe.',
+            'Le mot de passe principal a été modifié sur un autre appareil. Déconnectez-vous de cet appareil puis reconnectez-vous avec le nouveau mot de passe.',
             401,
             'password_changed'
           );
@@ -494,7 +494,7 @@ export class AccountService {
 
   /* ── Gestion du compte ─────────────────────────────────────────────── */
 
-  /** Change le mot de passe maître : seule la clé du coffre est re-chiffrée, le coffre reste inchangé */
+  /** Change le mot de passe principal : seule la clé du coffre est re-chiffrée, le coffre reste inchangé */
   async changeMasterPassword(currentPassword: string, newPassword: string): Promise<void> {
     const account = this.getAccount();
     if (!account) throw new Error('Aucun compte sur cet appareil');

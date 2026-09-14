@@ -26,5 +26,5 @@ La même interface fonctionne dans le navigateur, en application de bureau (Wind
 
 </div>
 
-!!! warning "Mot de passe maître"
-    Le mot de passe maître chiffre le coffre. Personne, pas même l'administrateur du serveur, ne peut le récupérer ni déchiffrer vos données sans lui.
+!!! warning "Mot de passe principal"
+    Le mot de passe principal chiffre le coffre. Personne, pas même l'administrateur du serveur, ne peut le récupérer ni déchiffrer vos données sans lui.

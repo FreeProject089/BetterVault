@@ -49,7 +49,7 @@ Crée un compte et son coffre.
 
 ### `PUT /accounts/password` (authentifiée)
 
-Change le mot de passe maître.
+Change le mot de passe principal.
 
 ```json
 {

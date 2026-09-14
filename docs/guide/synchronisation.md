@@ -1,6 +1,6 @@
 # Compte et synchronisation
 
-Ouvrez **Compte & synchronisation** dans la barre latérale, ou cliquez sur l'état de synchronisation en bas à gauche.
+Ouvrez **Compte et synchronisation** dans la barre latérale, ou cliquez sur l'état de synchronisation en bas à gauche.
 
 ## États de synchronisation
 
@@ -23,15 +23,15 @@ Chaque appareil garde une copie chiffrée du coffre et fonctionne hors ligne. Qu
 
 Pour un compte créé en mode **Cet appareil** :
 
-1. Ouvrez **Compte & synchronisation**.
-2. Section **Activer la synchronisation** : saisissez l'adresse du serveur et le mot de passe maître.
+1. Ouvrez **Compte et synchronisation**.
+2. Section **Activer la synchronisation** : saisissez l'adresse du serveur et le mot de passe principal.
 3. Cliquez sur **Activer**.
 
 Le coffre existant est envoyé chiffré. Les autres appareils peuvent ensuite se connecter.
 
-## Changer le mot de passe maître
+## Changer le mot de passe principal
 
-1. Section **Changer le mot de passe maître** : mot de passe actuel, nouveau mot de passe, confirmation.
+1. Section **Changer le mot de passe principal** : mot de passe actuel, nouveau mot de passe, confirmation.
 2. Cliquez sur **Changer le mot de passe**.
 
 Le coffre n'est pas re-chiffré : seule sa clé est protégée par le nouveau mot de passe. Pour un compte synchronisé, les autres appareils sont déconnectés et affichent un message demandant de se reconnecter avec le nouveau mot de passe (menu **Se déconnecter de cet appareil**, puis **Se connecter**).
@@ -45,4 +45,4 @@ Le coffre n'est pas re-chiffré : seule sa clé est protégée par le nouveau mo
 
 ## Supprimer le compte en ligne
 
-Section **Supprimer le compte en ligne** : après confirmation avec le mot de passe maître, le coffre est supprimé du serveur. Les données restent sur l'appareil, qui repasse en compte local.
+Section **Supprimer le compte en ligne** : après confirmation avec le mot de passe principal, le coffre est supprimé du serveur. Les données restent sur l'appareil, qui repasse en compte local.

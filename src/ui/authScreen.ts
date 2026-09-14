@@ -76,7 +76,7 @@ export function mountAuthScreen(root: HTMLElement, service: AccountService, onUn
           <p class="auth-sub">${escapeHtml(account?.email ?? '')} · ${account?.mode === 'cloud' ? tr('synchronisé', 'synced') : tr('sur cet appareil', 'on this device')}</p>
         </div>
         <form class="auth-form" data-form="unlock" novalidate>
-          ${passwordField('auth-password', tr('Mot de passe maître', 'Master password'), 'current-password')}
+          ${passwordField('auth-password', tr('Mot de passe principal', 'Master password'), 'current-password')}
           <div class="auth-error" role="alert" hidden></div>
           <button type="submit" class="btn-primary btn-accent auth-submit">${tr('Déverrouiller', 'Unlock')}</button>
         </form>
@@ -105,7 +105,7 @@ export function mountAuthScreen(root: HTMLElement, service: AccountService, onUn
       ${tabs('create')}
       <form class="auth-form" data-form="create" novalidate>
         ${emailField()}
-        ${passwordField('auth-password', tr('Mot de passe maître', 'Master password'), 'new-password')}
+        ${passwordField('auth-password', tr('Mot de passe principal', 'Master password'), 'new-password')}
         <div class="gen-strength" data-strength>
           <div class="strength-meter">${'<div class="strength-segment"></div>'.repeat(4)}</div>
           <span class="gen-strength-label"></span>
@@ -125,7 +125,7 @@ export function mountAuthScreen(root: HTMLElement, service: AccountService, onUn
           </label>
         </fieldset>
         ${serverField(true)}
-        <p class="auth-warning">${tr('Le mot de passe maître chiffre le coffre. En cas d’oubli, les données ne peuvent pas être récupérées.', 'The master password encrypts the vault. If you forget it, the data cannot be recovered.')}</p>
+        <p class="auth-warning">${tr('Le mot de passe principal chiffre le coffre. En cas d’oubli, les données ne peuvent pas être récupérées.', 'The master password encrypts the vault. If you forget it, the data cannot be recovered.')}</p>
         <div class="auth-error" role="alert" hidden></div>
         <button type="submit" class="btn-primary btn-accent auth-submit">${tr('Créer le coffre', 'Create vault')}</button>
       </form>`,
@@ -136,7 +136,7 @@ export function mountAuthScreen(root: HTMLElement, service: AccountService, onUn
       <form class="auth-form" data-form="signin" novalidate>
         ${serverField(false)}
         ${emailField()}
-        ${passwordField('auth-password', tr('Mot de passe maître', 'Master password'), 'current-password')}
+        ${passwordField('auth-password', tr('Mot de passe principal', 'Master password'), 'current-password')}
         <div class="auth-error" role="alert" hidden></div>
         <button type="submit" class="btn-primary btn-accent auth-submit">${tr('Se connecter', 'Sign in')}</button>
       </form>`
@@ -154,7 +154,7 @@ export function mountAuthScreen(root: HTMLElement, service: AccountService, onUn
     errorEl.hidden = true;
 
     const password = value('auth-password');
-    if (!password) return fail(tr('Saisissez le mot de passe maître', 'Enter the master password'));
+    if (!password) return fail(tr('Saisissez le mot de passe principal', 'Enter the master password'));
 
     let task: () => Promise<UnlockedVaultData>;
     if (kind === 'unlock') {
