@@ -8,13 +8,17 @@
 
   --border-subtle: #30363d;
   --border-muted: #21262d;
-  --border-focus: #58a6ff;
+  --border-focus: var(--accent);
 
   --text-primary: #e6edf3;
   --text-secondary: #8b949e;
   --text-muted: #6e7681;
 
-  --accent-blue: #58a6ff;
+  /* Violet du logo BetterVault */
+  --accent: #7773e8;
+  --accent-rgb: 119, 115, 232;
+  --accent-strong: #5754c7;
+  --accent-blue: var(--accent);
   --accent-green: #238636;
   --accent-green-bright: #2ea043;
   --accent-red: #da3633;
@@ -44,13 +48,16 @@
 
   --border-subtle: #d0d7de;
   --border-muted: #e1e4e8;
-  --border-focus: #0969da;
+  --border-focus: var(--accent);
 
   --text-primary: #1f2328;
   --text-secondary: #656d76;
   --text-muted: #8b949e;
 
-  --accent-blue: #0969da;
+  --accent: #5754c7;
+  --accent-rgb: 87, 84, 199;
+  --accent-strong: #4643a8;
+  --accent-blue: var(--accent);
   --accent-green: #1a7f37;
   --accent-green-bright: #2da44e;
   --accent-red: #cf222e;

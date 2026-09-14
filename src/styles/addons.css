@@ -175,7 +175,7 @@
 }
 
 .timeline-task-row.selected {
-  background-color: rgba(88, 166, 255, 0.1);
+  background-color: rgba(var(--accent-rgb), 0.1);
   border-left: 3px solid var(--accent-blue);
 }
 
@@ -191,8 +191,8 @@
   font-weight: 600;
   padding: 2px 7px;
   border-radius: 20px;
-  background-color: rgba(88, 166, 255, 0.1);
-  border: 1px solid rgba(88, 166, 255, 0.25);
+  background-color: rgba(var(--accent-rgb), 0.1);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
   color: var(--accent-blue);
   letter-spacing: 0.2px;
 }
@@ -288,9 +288,9 @@
 }
 
 .vault-type-badge.personal {
-  background-color: rgba(88, 166, 255, 0.12);
-  color: #58a6ff;
-  border: 1px solid rgba(88, 166, 255, 0.2);
+  background-color: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
 }
 
 .vault-type-badge.work {
@@ -715,7 +715,7 @@
 
 /* ── Light Theme Tweaks ──────────────────────────────────────────────── */
 :root[data-theme="light"] .brand-icon {
-  background: linear-gradient(135deg, #0969da, #8250df);
+  background: linear-gradient(135deg, #7773e8, #5754c7);
   color: #fff;
 }
 
@@ -947,7 +947,7 @@
 .gen-chip input:checked + span {
   color: var(--accent-blue);
   border-color: var(--accent-blue);
-  background-color: rgba(88, 166, 255, 0.1);
+  background-color: rgba(var(--accent-rgb), 0.1);
 }
 
 .gen-chip input:focus-visible + span {
@@ -1067,7 +1067,7 @@
 .drop-zone:focus-visible,
 .drop-zone.dragging {
   border-color: var(--accent-blue);
-  background-color: rgba(88, 166, 255, 0.05);
+  background-color: rgba(var(--accent-rgb), 0.05);
   outline: none;
 }
 
