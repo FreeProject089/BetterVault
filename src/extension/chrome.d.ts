@@ -9,6 +9,14 @@ declare namespace chrome {
     function create(properties: { url: string }): Promise<Tab>;
   }
 
+  namespace storage {
+    const session: {
+      get(key: string): Promise<Record<string, unknown>>;
+      set(items: Record<string, unknown>): Promise<void>;
+      remove(key: string): Promise<void>;
+    } | undefined;
+  }
+
   namespace runtime {
     function getURL(path: string): string;
   }

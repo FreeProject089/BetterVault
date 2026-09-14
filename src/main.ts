@@ -3226,6 +3226,28 @@ class AppController {
           </section>`}
 
         <section class="account-section">
+          <h3 class="account-section-title">${this.tr('Changer le mot de passe maître', 'Change master password')}</h3>
+          <div class="form-field">
+            <label class="form-label" for="account-current-password">${this.tr('Mot de passe actuel', 'Current password')}</label>
+            <input class="form-input" id="account-current-password" type="password" autocomplete="current-password">
+          </div>
+          <div class="form-row">
+            <div class="form-field">
+              <label class="form-label" for="account-new-password">${this.tr('Nouveau mot de passe', 'New password')}</label>
+              <input class="form-input" id="account-new-password" type="password" autocomplete="new-password">
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="account-new-password-confirm">${this.tr('Confirmer', 'Confirm')}</label>
+              <input class="form-input" id="account-new-password-confirm" type="password" autocomplete="new-password">
+            </div>
+          </div>
+          <div class="form-error" data-error="password" role="alert" hidden></div>
+          <div class="account-actions account-actions-end">
+            <button class="btn-primary" data-action="change-password">${this.tr('Changer le mot de passe', 'Change password')}</button>
+          </div>
+        </section>
+
+        <section class="account-section">
           <h3 class="account-section-title">${this.tr('Cet appareil', 'This device')}</h3>
           <div class="account-actions">
             <button class="btn-primary" data-action="lock">${this.tr('Verrouiller', 'Lock')}</button>
@@ -3302,6 +3324,25 @@ class AppController {
           this.showToast(this.tr('Synchronisation activée', 'Sync enabled'), 'success');
         } catch (err) {
           showError('connect', err);
+        }
+      });
+    });
+
+    action('change-password')?.addEventListener('click', event => {
+      const value = (id: string) => (box.querySelector(`#${id}`) as HTMLInputElement).value;
+      const errorEl = box.querySelector('[data-error="password"]') as HTMLElement;
+      errorEl.hidden = true;
+      if (!value('account-current-password')) return showError('password', new Error(this.tr('Saisissez le mot de passe actuel', 'Enter the current password')));
+      if (value('account-new-password') !== value('account-new-password-confirm')) {
+        return showError('password', new Error(this.tr('Les nouveaux mots de passe ne correspondent pas', 'New passwords do not match')));
+      }
+      void runBusy(event.currentTarget as HTMLButtonElement, this.tr('Changement en cours…', 'Changing…'), async () => {
+        try {
+          await accountService.changeMasterPassword(value('account-current-password'), value('account-new-password'));
+          box.querySelectorAll<HTMLInputElement>('#account-current-password, #account-new-password, #account-new-password-confirm').forEach(input => { input.value = ''; });
+          this.showToast(this.tr('Mot de passe maître changé', 'Master password changed'), 'success', 4000);
+        } catch (err) {
+          showError('password', err);
         }
       });
     });

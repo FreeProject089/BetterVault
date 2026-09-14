@@ -98,9 +98,18 @@ async function decryptBytes(key: CryptoKey, blob: EncryptedBlob, aad: string): P
   return new Uint8Array(plaintext);
 }
 
-export async function generateVaultKey(): Promise<{ key: CryptoKey; raw: Uint8Array }> {
+/** Importe une clé de coffre brute ; extractable uniquement pour la mémoriser dans une session d'extension */
+export function importVaultKey(raw: Uint8Array, extractable = false): Promise<CryptoKey> {
+  return crypto.subtle.importKey('raw', toBuffer(raw), 'AES-GCM', extractable, ['encrypt', 'decrypt']);
+}
+
+export async function exportVaultKey(key: CryptoKey): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.exportKey('raw', key));
+}
+
+export async function generateVaultKey(extractable = false): Promise<{ key: CryptoKey; raw: Uint8Array }> {
   const raw = crypto.getRandomValues(new Uint8Array(32));
-  const key = await crypto.subtle.importKey('raw', toBuffer(raw), 'AES-GCM', false, ['encrypt', 'decrypt']);
+  const key = await importVaultKey(raw, extractable);
   return { key, raw };
 }
 
@@ -108,7 +117,7 @@ export function wrapVaultKey(encKey: CryptoKey, rawVaultKey: Uint8Array): Promis
   return encryptBytes(encKey, rawVaultKey, AAD.vaultKey);
 }
 
-export async function unwrapVaultKey(encKey: CryptoKey, wrapped: EncryptedBlob): Promise<CryptoKey> {
+export async function unwrapVaultKey(encKey: CryptoKey, wrapped: EncryptedBlob, extractable = false): Promise<CryptoKey> {
   let raw: Uint8Array;
   try {
     raw = await decryptBytes(encKey, wrapped, AAD.vaultKey);
@@ -116,7 +125,22 @@ export async function unwrapVaultKey(encKey: CryptoKey, wrapped: EncryptedBlob):
     throw new WrongPasswordError();
   }
   try {
-    return await crypto.subtle.importKey('raw', toBuffer(raw), 'AES-GCM', false, ['encrypt', 'decrypt']);
+    return await importVaultKey(raw, extractable);
+  } finally {
+    raw.fill(0);
+  }
+}
+
+/** Re-chiffre la clé du coffre avec une nouvelle clé (changement de mot de passe maître) sans toucher au coffre */
+export async function rewrapVaultKey(oldEncKey: CryptoKey, wrapped: EncryptedBlob, newEncKey: CryptoKey): Promise<EncryptedBlob> {
+  let raw: Uint8Array;
+  try {
+    raw = await decryptBytes(oldEncKey, wrapped, AAD.vaultKey);
+  } catch {
+    throw new WrongPasswordError('Mot de passe maître actuel incorrect');
+  }
+  try {
+    return await encryptBytes(newEncKey, raw, AAD.vaultKey);
   } finally {
     raw.fill(0);
   }

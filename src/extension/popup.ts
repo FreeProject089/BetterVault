@@ -1,4 +1,4 @@
-import { AccountService } from '../account/accountService';
+import { AccountService, type SessionKeyRecord, type SessionKeyStore } from '../account/accountService';
 import { generateTOTP } from '../crypto/totpEngine';
 import { i18n } from '../i18n';
 import { getServiceIconSvg } from '../icons/serviceIcons';
@@ -16,7 +16,16 @@ const ICONS = {
   user: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>'
 };
 
-const service = new AccountService();
+// Clé du coffre gardée en mémoire de session du navigateur (effacée au verrouillage, à l'expiration ou à la fermeture du navigateur)
+const SESSION_KEY = 'bettervault.session-key';
+const sessionArea = typeof chrome !== 'undefined' ? chrome.storage?.session : undefined;
+const sessionStore: SessionKeyStore | undefined = sessionArea && {
+  load: async () => ((await sessionArea.get(SESSION_KEY))[SESSION_KEY] as SessionKeyRecord | undefined) ?? null,
+  save: record => sessionArea.set({ [SESSION_KEY]: record }),
+  clear: () => sessionArea.remove(SESSION_KEY)
+};
+
+const service = new AccountService({ sessionStore });
 const authRoot = document.getElementById('auth-screen') as HTMLElement;
 const appRoot = document.getElementById('popup-app') as HTMLElement;
 const listEl = document.getElementById('popup-list') as HTMLElement;
@@ -204,7 +213,14 @@ async function init(): Promise<void> {
   });
 
   window.setInterval(refreshTotpCodes, 1000);
-  auth.show();
+
+  const resumed = await service.resumeSession();
+  if (resumed) {
+    showVault(resumed);
+    void service.syncNow();
+  } else {
+    auth.show();
+  }
 }
 
 void init();

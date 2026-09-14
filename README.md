@@ -129,7 +129,7 @@ Charger le dossier `dist-extension` :
 - Chrome / Edge : `chrome://extensions`, activer le mode développeur, *Charger l'extension non empaquetée*
 - Firefox : `about:debugging`, *Charger un module complémentaire temporaire*, choisir `dist-extension/manifest.json`
 
-Le popup affiche les identifiants du site ouvert. Le remplissage n'est injecté qu'au clic et est refusé si le domaine de la page ne correspond pas à celui de l'identifiant. L'extension se connecte au même compte que l'application (mode synchronisé recommandé). Le coffre doit être déverrouillé à chaque ouverture du popup.
+Le popup affiche les identifiants du site ouvert. Le remplissage n'est injecté qu'au clic et est refusé si le domaine de la page ne correspond pas à celui de l'identifiant. L'extension se connecte au même compte que l'application (mode synchronisé recommandé). Après déverrouillage, la clé du coffre reste en mémoire de session du navigateur pendant 15 minutes d'inactivité ; elle est effacée au verrouillage et à la fermeture du navigateur.
 
 ## Structure
 

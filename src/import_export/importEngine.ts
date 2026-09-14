@@ -102,15 +102,13 @@ export function parseImportFile(fileContent: string, fileName = ''): ImportResul
   }
 
   // 2. Format CSV (Bitwarden, 1Password, Chrome, Firefox)
-  const lines = trimmed.split(/\r?\n/).filter(line => line.trim().length > 0);
-  if (lines.length > 1) {
-    const header = lines[0].toLowerCase();
-    const rows = lines.slice(1);
+  const firstLine = trimmed.split(/\r?\n/, 1)[0] ?? '';
+  const delimiter = firstLine.includes(';') && !firstLine.includes(',') ? ';' : ',';
+  const table = parseCsv(trimmed, delimiter).filter(row => row.some(cell => cell.trim()));
+  if (table.length > 1) {
+    const rows = table.slice(1);
     const credentials: Partial<CredentialItem>[] = [];
-
-    // Séparateur (virgule ou point-virgule)
-    const delimiter = header.includes(';') ? ';' : ',';
-    const headerCols = header.split(delimiter).map(c => c.replace(/"/g, '').trim());
+    const headerCols = table[0].map(c => c.trim().toLowerCase());
 
     // Détection des index de colonnes avec précision
     // Priorité aux colonnes exactes : chez Dashlane, "username" précède "title" et contient "name"
@@ -121,10 +119,11 @@ export function parseImportFile(fileContent: string, fileName = ''): ImportResul
     const passIdx = headerCols.findIndex(c => c === 'login_password' || c === 'password' || c.includes('password') || c.includes('pass'));
     const totpIdx = headerCols.findIndex(c => c.includes('totp') || c.includes('otp') || c.includes('2fa'));
     const notesIdx = headerCols.findIndex(c => c.includes('note') || c.includes('comment') || c === 'extra');
+    const tagsIdx = headerCols.findIndex(c => c === 'tags' || c === 'tag');
 
     for (const row of rows) {
       // Parse CSV basique avec gestion des guillemets
-      const cols = parseCsvLine(row, delimiter);
+      const cols = row;
       if (cols.length >= 2) {
         credentials.push({
           title: (titleIdx >= 0 ? cols[titleIdx] : cols[0]) || 'Compte sans titre',
@@ -132,7 +131,8 @@ export function parseImportFile(fileContent: string, fileName = ''): ImportResul
           username: userIdx >= 0 ? cols[userIdx] : '',
           password: passIdx >= 0 ? cols[passIdx] : '',
           totpSecret: totpIdx >= 0 ? cols[totpIdx] : undefined,
-          notes: notesIdx >= 0 ? cols[notesIdx] : ''
+          notes: notesIdx >= 0 ? cols[notesIdx] : '',
+          tags: tagsIdx >= 0 && cols[tagsIdx] ? cols[tagsIdx].split(/[;,]/).map(t => t.trim()).filter(Boolean) : undefined
         });
       }
     }
@@ -150,24 +150,42 @@ export function parseImportFile(fileContent: string, fileName = ''): ImportResul
   throw new Error('Format de fichier non reconnu. Formats pris en charge : KeePass, 1Password, Bitwarden, FIDO CXF, BetterVault, CSV.');
 }
 
-function parseCsvLine(text: string, delimiter: string): string[] {
-  const result: string[] = [];
-  let cur = '';
+/** Lecteur CSV RFC 4180 : guillemets doublés, séparateurs et retours à la ligne à l'intérieur des champs entre guillemets */
+function parseCsv(text: string, delimiter: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
   let inQuotes = false;
 
   for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-    if (char === '"') {
-      inQuotes = !inQuotes;
-    } else if (char === delimiter && !inQuotes) {
-      result.push(cur.trim());
-      cur = '';
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"' && text[i + 1] === '"') {
+        field += '"';
+        i++;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        field += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === delimiter) {
+      row.push(field);
+      field = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
     } else {
-      cur += char;
+      field += ch;
     }
   }
-  result.push(cur.trim());
-  return result;
+  row.push(field);
+  rows.push(row);
+  return rows;
 }
 
 /**
@@ -188,7 +206,8 @@ export function exportVaultAsJson(credentials: CredentialItem[], tasks: Task[]):
  * Exporte les identifiants au format CSV universel (compatible Bitwarden / Chrome / 1Password)
  */
 export function exportVaultAsCsv(credentials: CredentialItem[]): string {
-  const headers = ['folder', 'favorite', 'type', 'name', 'notes', 'fields', 'reprompt', 'login_uri', 'login_username', 'login_password', 'login_totp'];
+  // Colonnes Bitwarden, plus « tags » en dernier (ignorée par les autres gestionnaires, relue par BetterVault)
+  const headers = ['folder', 'favorite', 'type', 'name', 'notes', 'fields', 'reprompt', 'login_uri', 'login_username', 'login_password', 'login_totp', 'tags'];
   const rows = credentials.map(c => {
     const sanitize = (val?: string) => `"${(val || '').replace(/"/g, '""')}"`;
     return [
@@ -202,7 +221,8 @@ export function exportVaultAsCsv(credentials: CredentialItem[]): string {
       sanitize(c.website),
       sanitize(c.username),
       sanitize(c.password),
-      sanitize(c.totpSecret)
+      sanitize(c.totpSecret),
+      sanitize((c.tags ?? []).join(';'))
     ].join(',');
   });
 

@@ -118,4 +118,15 @@ describe('Import & Export Engine (Bitwarden, 1Password, CSV, JSON)', () => {
     expect(csv).toContain('"quoted@test.com"');
     expect(csv).toContain('"https://example.com"');
   });
+
+  it('conserve les tags lors d’un aller-retour CSV', () => {
+    const now = Date.now();
+    const csv = exportVaultAsCsv([{
+      id: 'c1', vaultId: 'v1', title: 'Banque', username: 'moi', password: 'p@ss, "x"', website: 'https://banque.fr', domain: 'banque.fr',
+      notes: 'Ligne 1\nLigne 2, avec "guillemets"', tags: ['Finances', 'Perso'], createdAt: now, updatedAt: now
+    }]);
+    const { credentials } = parseImportFile(csv, 'export.csv');
+    expect(credentials).toHaveLength(1);
+    expect(credentials[0]).toMatchObject({ title: 'Banque', username: 'moi', password: 'p@ss, "x"', notes: 'Ligne 1\nLigne 2, avec "guillemets"', tags: ['Finances', 'Perso'] });
+  });
 });

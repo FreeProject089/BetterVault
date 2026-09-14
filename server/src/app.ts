@@ -144,6 +144,8 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
     userById: db.prepare('SELECT * FROM users WHERE id = ?'),
     insertUser: db.prepare('INSERT INTO users (id, email, auth_verifier, auth_salt, kdf, salt, wrapped_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
     deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
+    updateCredentials: db.prepare('UPDATE users SET auth_verifier = ?, auth_salt = ?, kdf = ?, salt = ?, wrapped_key = ? WHERE id = ?'),
+    deleteOtherSessions: db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?'),
     insertVault: db.prepare('INSERT INTO vaults (user_id, revision, blob, updated_at) VALUES (?, ?, ?, ?)'),
     vaultByUser: db.prepare('SELECT revision, blob, updated_at FROM vaults WHERE user_id = ?'),
     updateVault: db.prepare('UPDATE vaults SET revision = ?, blob = ?, updated_at = ? WHERE user_id = ? AND revision = ?'),
@@ -283,6 +285,27 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
         throw new HttpError(409, 'conflict', 'Le coffre a été modifié sur un autre appareil', readVault(userId));
       }
       return { status: 200, body: { revision: (baseRevision as number) + 1, updatedAt } };
+    },
+
+    'PUT /api/v1/accounts/password': async req => {
+      const { userId, tokenHash } = authenticate(req);
+      limit(req, 'password');
+      const body = await readJson(req, 4096);
+      const currentAuthHash = parseBase64(body.currentAuthHash, 'currentAuthHash', { exact: 32 });
+      const newAuthHash = parseBase64(body.newAuthHash, 'newAuthHash', { exact: 32 });
+      const kdf = parseKdf(body.kdf, minKdfMemory);
+      const salt = parseBase64(body.salt, 'salt', { exact: 16 });
+      const wrappedVaultKey = parseBlob(body.wrappedVaultKey, 'wrappedVaultKey', 64);
+
+      const user = sql.userById.get(userId) as UserRow | undefined;
+      if (!(await verifyAuthHash(user, currentAuthHash))) throw new HttpError(403, 'invalid_credentials', 'Mot de passe maître actuel incorrect');
+
+      const authSalt = randomBytes(16);
+      const verifier = await scryptVerifier(newAuthHash, authSalt);
+      sql.updateCredentials.run(verifier.toString('base64'), authSalt.toString('base64'), JSON.stringify(kdf), salt, JSON.stringify(wrappedVaultKey), userId);
+      // Les autres appareils devront se reconnecter avec le nouveau mot de passe
+      sql.deleteOtherSessions.run(userId, tokenHash);
+      return { status: 204 };
     },
 
     'DELETE /api/v1/accounts': async req => {

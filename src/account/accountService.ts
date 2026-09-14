@@ -6,10 +6,13 @@ import {
   decryptVaultData,
   deriveAccountKeys,
   encryptVaultJson,
+  exportVaultKey,
   fromBase64,
   generateVaultKey,
+  importVaultKey,
   isValidEmail,
   normalizeEmail,
+  rewrapVaultKey,
   toBase64,
   unwrapVaultKey,
   wrapVaultKey,
@@ -65,10 +68,24 @@ export interface KeyValueStorage {
   removeItem(key: string): void;
 }
 
+export interface SessionKeyRecord {
+  key: string;
+  expiresAt: number;
+}
+
+/** Stockage mémoire de session (ex. chrome.storage.session) pour éviter de redériver la clé à chaque ouverture */
+export interface SessionKeyStore {
+  load(): Promise<SessionKeyRecord | null>;
+  save(record: SessionKeyRecord): Promise<void>;
+  clear(): Promise<void>;
+}
+
 export interface AccountServiceOptions {
   storage?: KeyValueStorage;
   kdf?: Argon2Params;
   pushDelayMs?: number;
+  sessionStore?: SessionKeyStore;
+  sessionTtlMs?: number;
 }
 
 export function assertPasswordStrength(password: string): void {
@@ -85,6 +102,8 @@ export class AccountService {
   private readonly storage: KeyValueStorage;
   private readonly kdf: Argon2Params;
   private readonly pushDelayMs: number;
+  private readonly sessionStore: SessionKeyStore | null;
+  private readonly sessionTtlMs: number;
 
   private vaultKey: CryptoKey | null = null;
   private authHash: string | null = null;
@@ -103,6 +122,8 @@ export class AccountService {
     this.storage = options.storage ?? globalThis.localStorage;
     this.kdf = options.kdf ?? ACCOUNT_KDF;
     this.pushDelayMs = options.pushDelayMs ?? 1500;
+    this.sessionStore = options.sessionStore ?? null;
+    this.sessionTtlMs = options.sessionTtlMs ?? 15 * 60 * 1000;
     if (this.getAccount()?.mode === 'cloud') {
       this.syncState = {
         status: this.readStoredVault()?.dirty ? 'pending' : 'synced',
@@ -152,7 +173,7 @@ export class AccountService {
 
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const keys = await deriveAccountKeys(input.password, salt, this.kdf);
-    const { key: vaultKey, raw } = await generateVaultKey();
+    const { key: vaultKey, raw } = await generateVaultKey(!!this.sessionStore);
     const wrappedVaultKey = await wrapVaultKey(keys.encKey, raw);
     raw.fill(0);
     const blob = await encryptVaultJson(vaultKey, JSON.stringify(initialData));
@@ -183,6 +204,7 @@ export class AccountService {
     this.vaultKey = vaultKey;
     this.authHash = keys.authHash;
     this.latestData = initialData;
+    await this.rememberSession(vaultKey);
     this.setSyncState(input.mode === 'cloud' ? { status: 'synced', lastSyncAt: Date.now() } : { status: 'local', lastSyncAt: null });
   }
 
@@ -203,7 +225,7 @@ export class AccountService {
       throw err;
     }
 
-    const vaultKey = await unwrapVaultKey(keys.encKey, session.wrappedVaultKey);
+    const vaultKey = await unwrapVaultKey(keys.encKey, session.wrappedVaultKey, !!this.sessionStore);
     const remote = await client.getVault();
     if (!remote.blob) throw new Error('Coffre distant introuvable');
     const data = await decryptVaultData<UnlockedVaultData>(vaultKey, remote.blob);
@@ -226,6 +248,7 @@ export class AccountService {
     this.vaultKey = vaultKey;
     this.authHash = keys.authHash;
     this.latestData = data;
+    await this.rememberSession(vaultKey);
     this.setSyncState({ status: 'synced', lastSyncAt: Date.now() });
     return data;
   }
@@ -235,7 +258,7 @@ export class AccountService {
     if (!account) throw new Error('Aucun compte sur cet appareil');
 
     const keys = await deriveAccountKeys(password, fromBase64(account.salt), account.kdf);
-    const vaultKey = await unwrapVaultKey(keys.encKey, account.wrappedVaultKey);
+    const vaultKey = await unwrapVaultKey(keys.encKey, account.wrappedVaultKey, !!this.sessionStore);
     const stored = this.readStoredVault();
     if (!stored) throw new Error('Données du coffre introuvables sur cet appareil');
     const data = await decryptVaultData<UnlockedVaultData>(vaultKey, stored.blob);
@@ -246,10 +269,49 @@ export class AccountService {
     if (account.mode === 'cloud' && account.serverUrl) {
       this.cloud = new CloudClient(account.serverUrl, this.readSession()?.token ?? null);
     }
+    await this.rememberSession(vaultKey);
     return data;
   }
 
+  /** Reprend une session encore valide (extension) sans redemander le mot de passe maître */
+  async resumeSession(): Promise<UnlockedVaultData | null> {
+    if (!this.sessionStore) return null;
+    const account = this.getAccount();
+    const stored = this.readStoredVault();
+    const session = await this.sessionStore.load();
+    if (!account || !stored || !session || session.expiresAt <= Date.now()) {
+      await this.sessionStore.clear();
+      return null;
+    }
+
+    try {
+      const vaultKey = await importVaultKey(fromBase64(session.key), true);
+      const data = await decryptVaultData<UnlockedVaultData>(vaultKey, stored.blob);
+      this.vaultKey = vaultKey;
+      this.latestData = data;
+      if (account.mode === 'cloud' && account.serverUrl) {
+        this.cloud = new CloudClient(account.serverUrl, this.readSession()?.token ?? null);
+      }
+      await this.sessionStore.save({ key: session.key, expiresAt: Date.now() + this.sessionTtlMs });
+      return data;
+    } catch {
+      await this.sessionStore.clear();
+      return null;
+    }
+  }
+
+  private async rememberSession(vaultKey: CryptoKey): Promise<void> {
+    if (!this.sessionStore || !vaultKey.extractable) return;
+    const raw = await exportVaultKey(vaultKey);
+    try {
+      await this.sessionStore.save({ key: toBase64(raw), expiresAt: Date.now() + this.sessionTtlMs });
+    } finally {
+      raw.fill(0);
+    }
+  }
+
   lock(): void {
+    void this.sessionStore?.clear();
     if (this.pushTimer) clearTimeout(this.pushTimer);
     this.pushTimer = null;
     this.vaultKey = null;
@@ -412,13 +474,54 @@ export class AccountService {
     } catch (err) {
       const account = this.getAccount();
       if (!(err instanceof CloudError) || err.status !== 401 || !this.authHash || !this.cloud || !account) throw err;
-      const session = await this.cloud.login(account.email, this.authHash);
+      let session;
+      try {
+        session = await this.cloud.login(account.email, this.authHash);
+      } catch (loginErr) {
+        if (loginErr instanceof CloudError && loginErr.status === 401) {
+          throw new CloudError(
+            'Le mot de passe maître a été modifié sur un autre appareil. Déconnectez-vous de cet appareil puis reconnectez-vous avec le nouveau mot de passe.',
+            401,
+            'password_changed'
+          );
+        }
+        throw loginErr;
+      }
       this.writeSession({ token: session.token, lastSyncAt: this.readSession()?.lastSyncAt ?? null });
       return operation();
     }
   }
 
   /* ── Gestion du compte ─────────────────────────────────────────────── */
+
+  /** Change le mot de passe maître : seule la clé du coffre est re-chiffrée, le coffre reste inchangé */
+  async changeMasterPassword(currentPassword: string, newPassword: string): Promise<void> {
+    const account = this.getAccount();
+    if (!account) throw new Error('Aucun compte sur cet appareil');
+    if (!this.vaultKey) throw new Error('Coffre verrouillé');
+    assertPasswordStrength(newPassword);
+    if (currentPassword === newPassword) throw new Error('Le nouveau mot de passe doit être différent de l’actuel');
+
+    const oldKeys = await deriveAccountKeys(currentPassword, fromBase64(account.salt), account.kdf);
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const newKeys = await deriveAccountKeys(newPassword, salt, this.kdf);
+    const wrappedVaultKey = await rewrapVaultKey(oldKeys.encKey, account.wrappedVaultKey, newKeys.encKey);
+    const updated: AccountRecord = { ...account, kdf: { ...this.kdf }, salt: toBase64(salt), wrappedVaultKey };
+
+    if (account.mode === 'cloud' && account.serverUrl) {
+      const client = this.cloud ?? new CloudClient(account.serverUrl, this.readSession()?.token ?? null);
+      await this.withSessionRetry(() => client.changePassword({
+        currentAuthHash: oldKeys.authHash,
+        newAuthHash: newKeys.authHash,
+        kdf: updated.kdf,
+        salt: updated.salt,
+        wrappedVaultKey
+      }));
+    }
+
+    this.writeJson(STORAGE_KEYS.account, updated);
+    this.authHash = newKeys.authHash;
+  }
 
   /** Passe un compte local en compte synchronisé en envoyant le coffre chiffré existant */
   async connectCloud(serverUrl: string, password: string): Promise<void> {

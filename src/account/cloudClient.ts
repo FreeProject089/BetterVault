@@ -139,6 +139,10 @@ export class CloudClient {
     return this.request('PUT', '/api/v1/vault', { baseRevision, blob });
   }
 
+  async changePassword(payload: { currentAuthHash: string; newAuthHash: string; kdf: Argon2Params; salt: string; wrappedVaultKey: EncryptedBlob }): Promise<void> {
+    await this.request('PUT', '/api/v1/accounts/password', payload);
+  }
+
   async deleteAccount(authHash: string): Promise<void> {
     await this.request('DELETE', '/api/v1/accounts', { authHash });
     this.token = null;

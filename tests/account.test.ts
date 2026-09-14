@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { openDatabase } from '../server/src/db.ts';
 import { createApp } from '../server/src/app.ts';
-import { AccountService, type KeyValueStorage } from '../src/account/accountService';
+import { AccountService, type KeyValueStorage, type SessionKeyRecord, type SessionKeyStore } from '../src/account/accountService';
 import { WrongPasswordError, deriveAccountKeys, generateVaultKey, unwrapVaultKey, wrapVaultKey } from '../src/account/accountCrypto';
 import { mergeVaultData } from '../src/account/merge';
 import { VaultStore, createEmptyVaultData, normalizeVaultData } from '../src/store/vaultStore';
@@ -66,6 +66,46 @@ describe('Compte local', () => {
   it('refuse un mot de passe maître trop court', async () => {
     const { service } = newService();
     await expect(service.createAccount({ email: 'a@b.fr', password: 'court', mode: 'local' }, createEmptyVaultData())).rejects.toThrow('10 caractères');
+  });
+});
+
+describe('Session de l’extension', () => {
+  it('reprend le coffre sans mot de passe tant que la session est valide, puis l’oublie au verrouillage', async () => {
+    let record: SessionKeyRecord | null = null;
+    const sessionStore: SessionKeyStore = {
+      load: async () => record,
+      save: async value => { record = value; },
+      clear: async () => { record = null; }
+    };
+    const storage = new MemoryStorage();
+    const popup = new AccountService({ storage, kdf: FAST_KDF, sessionStore, sessionTtlMs: 60_000 });
+    const data = createEmptyVaultData();
+    await popup.createAccount({ email: 'ext@exemple.fr', password: PASSWORD, mode: 'local' }, data);
+    expect(record).not.toBeNull();
+    expect(storage.dump()).not.toContain(record!.key);
+
+    // Nouvelle ouverture du popup : nouvelle instance, même stockage et même session
+    const reopened = new AccountService({ storage, kdf: FAST_KDF, sessionStore });
+    const resumed = await reopened.resumeSession();
+    expect(resumed?.activeVaultId).toBe(data.activeVaultId);
+    expect(reopened.isUnlocked()).toBe(true);
+
+    reopened.lock();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(record).toBeNull();
+    expect(await new AccountService({ storage, kdf: FAST_KDF, sessionStore }).resumeSession()).toBeNull();
+
+    // Session expirée
+    await reopened.unlock(PASSWORD);
+    record = { ...record!, expiresAt: Date.now() - 1 };
+    expect(await new AccountService({ storage, kdf: FAST_KDF, sessionStore }).resumeSession()).toBeNull();
+    expect(record).toBeNull();
+  });
+
+  it('ne mémorise rien sans stockage de session (application web)', async () => {
+    const { service } = newService();
+    await service.createAccount({ email: 'web@exemple.fr', password: PASSWORD, mode: 'local' }, createEmptyVaultData());
+    expect(await service.resumeSession()).toBeNull();
   });
 });
 
@@ -265,6 +305,36 @@ describe('Serveur BetterVault + synchronisation multi-appareils', () => {
     const lastSynced = statuses.lastIndexOf('synced');
     expect(statuses.slice(lastSynced + 1)).toEqual([]);
     expect(JSON.parse(storage.getItem('bettervault.vault.v1')!)).toMatchObject({ revision: 2, dirty: false });
+  });
+
+  it('change le mot de passe maître sur tous les appareils', async () => {
+    const email = `mdp-${Date.now()}@exemple.fr`;
+    const NEW_PASSWORD = 'nouveau mot de passe maitre 2026';
+    const deviceA = newService();
+    const storeA = new VaultStore();
+    storeA.load(createEmptyVaultData());
+    await deviceA.service.createAccount({ email, password: PASSWORD, mode: 'cloud', serverUrl }, storeA.getData());
+    storeA.setPersistence(data => void deviceA.service.save(data));
+    storeA.addCredential({ vaultId: storeA.getData().activeVaultId, title: 'Conservé', username: '', password: 'x', website: '', domain: '', tags: [] });
+    await deviceA.service.syncNow();
+
+    const deviceB = newService();
+    await deviceB.service.signIn(serverUrl, email, PASSWORD);
+
+    await expect(deviceA.service.changeMasterPassword('mauvais mot de passe', NEW_PASSWORD)).rejects.toBeInstanceOf(WrongPasswordError);
+    await expect(deviceA.service.changeMasterPassword(PASSWORD, 'court')).rejects.toThrow('10 caractères');
+    await deviceA.service.changeMasterPassword(PASSWORD, NEW_PASSWORD);
+
+    deviceA.service.lock();
+    await expect(deviceA.service.unlock(PASSWORD)).rejects.toBeInstanceOf(WrongPasswordError);
+    expect((await deviceA.service.unlock(NEW_PASSWORD)).credentials.map(c => c.title)).toEqual(['Conservé']);
+
+    await expect(newService().service.signIn(serverUrl, email, PASSWORD)).rejects.toBeInstanceOf(WrongPasswordError);
+    expect((await newService().service.signIn(serverUrl, email, NEW_PASSWORD)).credentials.map(c => c.title)).toEqual(['Conservé']);
+
+    await deviceB.service.syncNow();
+    expect(deviceB.service.getSyncState()).toMatchObject({ status: 'error' });
+    expect(deviceB.service.getSyncState().message).toContain('modifié sur un autre appareil');
   });
 
   it('refuse une adresse qui ne répond pas comme un serveur BetterVault', async () => {
