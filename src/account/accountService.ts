@@ -79,6 +79,8 @@ export interface SyncState {
   status: SyncStatus;
   lastSyncAt: number | null;
   message?: string;
+  /** Code d'erreur du serveur (ex. « totp_required » quand la session doit être renouvelée avec un code) */
+  code?: string;
 }
 
 export interface KeyValueStorage {
@@ -504,7 +506,8 @@ export class AccountService {
       this.setSyncState({
         ...this.syncState,
         status: offline ? 'offline' : 'error',
-        message: err instanceof Error ? err.message : String(err)
+        message: err instanceof Error ? err.message : String(err),
+        code: err instanceof CloudError ? err.code : undefined
       });
     }
   }

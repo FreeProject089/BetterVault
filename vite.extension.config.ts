@@ -1,6 +1,7 @@
 import { defineConfig, type Plugin } from 'vite';
 import { copyFileSync, cpSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { iconDataPlugin } from './build/iconDataPlugin.ts';
 
 /**
  * Extension navigateur (Chrome, Edge, Firefox — Manifest V3) :
@@ -37,5 +38,5 @@ export default defineConfig({
       }
     }
   },
-  plugins: [extensionFiles()]
+  plugins: [iconDataPlugin(root), extensionFiles()]
 });

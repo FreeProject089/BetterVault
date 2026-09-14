@@ -1,4 +1,5 @@
 import type { CredentialItem, Task, TagDef, UnlockedVaultData, VaultMetadata } from '../types/vault';
+import { normalizeItemIcon } from '../icons/iconLibrary';
 
 export const DEFAULT_VAULT_NAME = 'Personnel';
 export const MAX_TAG_LENGTH = 32;
@@ -37,11 +38,17 @@ export function normalizeVaultData(input: Partial<UnlockedVaultData> | null | un
       id: v.id,
       name: v.name,
       type: v.type,
+      ...(normalizeItemIcon(v.icon) ? { icon: normalizeItemIcon(v.icon) } : {}),
       createdAt: v.createdAt ?? now,
       updatedAt: v.updatedAt ?? now
     })),
     activeVaultId: source.activeVaultId ?? '',
-    credentials: (Array.isArray(source.credentials) ? source.credentials : []).map(c => ({ ...c, tags: Array.isArray(c.tags) ? c.tags : [] })),
+    // Les icônes viennent aussi d'imports et d'autres appareils : leur SVG est toujours re-nettoyé
+    credentials: (Array.isArray(source.credentials) ? source.credentials : []).map(c => {
+      const { icon, ...rest } = c;
+      const clean = normalizeItemIcon(icon);
+      return { ...rest, ...(clean ? { icon: clean } : {}), tags: Array.isArray(c.tags) ? c.tags : [] };
+    }),
     tasks: (Array.isArray(source.tasks) ? source.tasks : []).map(t => ({ ...t, tags: Array.isArray(t.tags) ? t.tags : [] })),
     tagDefs: Array.isArray(source.tagDefs) ? [...source.tagDefs] : [],
     deleted: source.deleted && typeof source.deleted === 'object' ? { ...source.deleted } : {}
@@ -131,19 +138,26 @@ export class VaultStore {
     this.emit();
   }
 
-  addVault(name: string, type: VaultMetadata['type']): string {
+  addVault(name: string, type: VaultMetadata['type'], icon?: VaultMetadata['icon']): string {
     const vault = createVault(name.trim(), type, Date.now());
+    const cleanIcon = normalizeItemIcon(icon);
+    if (cleanIcon) vault.icon = cleanIcon;
     this.data.vaults.push(vault);
     this.data.activeVaultId = vault.id;
     this.commit();
     return vault.id;
   }
 
-  updateVault(vaultId: string, updates: Partial<Pick<VaultMetadata, 'name' | 'type'>>): void {
+  updateVault(vaultId: string, updates: Partial<Pick<VaultMetadata, 'name' | 'type' | 'icon'>>): void {
     const vault = this.data.vaults.find(v => v.id === vaultId);
     if (!vault) return;
     if (updates.name !== undefined) vault.name = updates.name.trim() || vault.name;
     if (updates.type !== undefined) vault.type = updates.type;
+    if ('icon' in updates) {
+      const icon = normalizeItemIcon(updates.icon);
+      if (icon) vault.icon = icon;
+      else delete vault.icon;
+    }
     vault.updatedAt = Date.now();
     this.commit();
   }
