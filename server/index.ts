@@ -64,6 +64,17 @@ const server = createServer((req, res) => {
   void api(req, res);
 });
 
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Le port ${port} est déjà utilisé sur ${host}. Arrêtez l'autre processus ou changez PORT (server/.env ou .env).`);
+  } else if (err.code === 'EACCES') {
+    console.error(`Accès refusé au port ${port} sur ${host}. Choisissez un port supérieur à 1024.`);
+  } else {
+    console.error(err);
+  }
+  process.exit(1);
+});
+
 server.listen(port, host, () => {
   console.log(`BetterVault server: http://${host}:${port}${staticDir ? ` (application ${staticDir})` : ''} (base ${dbPath})`);
 });
