@@ -68,15 +68,13 @@ npm run typecheck
 
 ## Documentation
 
-La documentation complète (guide, déploiement, sécurité, API) est dans `docs/` :
+La documentation complète (guide, déploiement, sécurité, API) est dans `docs/`. Avec [uv](https://docs.astral.sh/uv/) installé :
 
 ```bash
-pip install -r docs/requirements.txt
+npm run docs
 ```
 
-```bash
-mkdocs serve
-```
+Elle est servie sur http://127.0.0.1:8000.
 
 ## Docker
 

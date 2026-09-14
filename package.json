@@ -10,6 +10,8 @@
     "preview": "vite preview",
     "server": "node --env-file-if-exists=server/.env server/index.ts",
     "typecheck": "tsc --noEmit -p . && tsc -p server",
+    "docs": "uv run --no-project --with-requirements docs/requirements.txt mkdocs serve",
+    "docs:build": "uv run --no-project --with-requirements docs/requirements.txt mkdocs build --strict",
     "tauri": "tauri",
     "test": "vitest run"
   },

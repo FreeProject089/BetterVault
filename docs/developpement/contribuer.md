@@ -38,6 +38,8 @@ L'application est sur http://localhost:3000. Vite transmet les appels `/api` au 
 | `npm run typecheck` | Vérification des types (application et serveur) |
 | `npm run build` | Application web de production (`dist/`) |
 | `npm run build:extension` | Extension (`dist-extension/`) |
+| `npm run docs` | Documentation avec rechargement automatique (uv) |
+| `npm run docs:build` | Site de documentation statique (`site/`) |
 | `npm run tauri dev` | Application de bureau |
 
 ## Tests
@@ -57,20 +59,42 @@ npm test
 
 ## Documentation
 
-La documentation utilise [MkDocs Material](https://squidfunk.github.io/mkdocs-material/).
+La documentation utilise [MkDocs Material](https://squidfunk.github.io/mkdocs-material/) et [uv](https://docs.astral.sh/uv/) pour gérer Python : aucune installation globale n'est nécessaire, uv crée un environnement temporaire à partir de `docs/requirements.txt`.
+
+Installer uv si besoin :
+
+=== "Windows"
+
+    ```powershell
+    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+    ```
+
+=== "macOS / Linux"
+
+    ```bash
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    ```
+
+Prévisualiser la documentation avec rechargement automatique :
 
 ```bash
-pip install -r docs/requirements.txt
+npm run docs
+```
+
+Elle est disponible sur http://127.0.0.1:8000. Pour générer le site statique dans `site/` (en mode strict : tout lien cassé fait échouer la génération) :
+
+```bash
+npm run docs:build
+```
+
+Sans npm, les commandes équivalentes sont :
+
+```bash
+uv run --no-project --with-requirements docs/requirements.txt mkdocs serve
 ```
 
 ```bash
-mkdocs serve
-```
-
-Elle est disponible sur http://127.0.0.1:8000. Pour générer le site statique dans `site/` :
-
-```bash
-mkdocs build
+uv run --no-project --with-requirements docs/requirements.txt mkdocs build --strict
 ```
 
 ## Conventions
