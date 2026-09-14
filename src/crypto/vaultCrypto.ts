@@ -54,26 +54,56 @@ export function secureRandomIndex(max: number): number {
 /**
  * Générateur de Passphrase Diceware (liste EFF, tirage cryptographique non biaisé)
  */
-export function generatePassphrase(options: {
+export type PassphraseCase = 'lower' | 'title' | 'upper' | 'random';
+
+export const PASSPHRASE_SYMBOLS = '!#$%&*+-=?@^_~';
+export const MAX_PASSPHRASE_WORDS = 20;
+
+export interface PassphraseOptions {
   wordCount: number;
   separator: string;
-  capitalize: boolean;
+  /** Ancienne option : équivaut à wordCase « title » */
+  capitalize?: boolean;
+  wordCase?: PassphraseCase;
   includeNumber: boolean;
-}): string {
+  /** Nombre de chiffres du nombre ajouté (1 à 6, 2 par défaut) */
+  numberDigits?: number;
+  includeSymbol?: boolean;
+}
+
+export function generatePassphrase(options: PassphraseOptions): string {
+  const count = Math.min(MAX_PASSPHRASE_WORDS, Math.max(1, Math.floor(options.wordCount)));
+  const wordCase: PassphraseCase = options.wordCase ?? (options.capitalize ? 'title' : 'lower');
   const words: string[] = [];
-  for (let i = 0; i < options.wordCount; i++) {
-    let word = PASSPHRASE_WORDLIST[secureRandomIndex(PASSPHRASE_WORDLIST.length)];
-    if (options.capitalize) {
-      word = word.charAt(0).toUpperCase() + word.slice(1);
-    }
-    words.push(word);
+  for (let i = 0; i < count; i++) {
+    const word = PASSPHRASE_WORDLIST[secureRandomIndex(PASSPHRASE_WORDLIST.length)];
+    const style = wordCase === 'random' ? (['lower', 'title', 'upper'] as const)[secureRandomIndex(3)] : wordCase;
+    words.push(style === 'upper' ? word.toUpperCase() : style === 'title' ? word.charAt(0).toUpperCase() + word.slice(1) : word);
   }
 
-  let result = words.join(options.separator);
+  const parts = [...words];
   if (options.includeNumber) {
-    result += options.separator + (10 + secureRandomIndex(90));
+    const digits = Math.min(6, Math.max(1, options.numberDigits ?? 2));
+    // Nombre à longueur fixe : 10^(digits-1) à 10^digits - 1 (2 chiffres : 10 à 99)
+    const min = digits === 1 ? 0 : 10 ** (digits - 1);
+    parts.push(String(min + secureRandomIndex(10 ** digits - min)));
   }
-  return result;
+  if (options.includeSymbol) parts.push(PASSPHRASE_SYMBOLS[secureRandomIndex(PASSPHRASE_SYMBOLS.length)]);
+  return parts.join(options.separator);
+}
+
+/** Entropie réelle d'une phrase générée (tirages aléatoires, pas longueur des caractères) */
+export function passphraseEntropyBits(options: PassphraseOptions): number {
+  const count = Math.min(MAX_PASSPHRASE_WORDS, Math.max(1, Math.floor(options.wordCount)));
+  const wordCase = options.wordCase ?? (options.capitalize ? 'title' : 'lower');
+  let bits = count * Math.log2(PASSPHRASE_WORDLIST.length);
+  if (wordCase === 'random') bits += count * Math.log2(3);
+  if (options.includeNumber) {
+    const digits = Math.min(6, Math.max(1, options.numberDigits ?? 2));
+    bits += Math.log2(10 ** digits - (digits === 1 ? 0 : 10 ** (digits - 1)));
+  }
+  if (options.includeSymbol) bits += Math.log2(PASSPHRASE_SYMBOLS.length);
+  return Math.round(bits);
 }
 
 /**
@@ -86,54 +116,40 @@ export function generateStrongPassword(options: {
   numbers: boolean;
   symbols: boolean;
   avoidAmbiguous: boolean;
+  /** Caractères à ne jamais utiliser (ex. refusés par un site) */
+  exclude?: string;
 }): string {
-  const lower = options.avoidAmbiguous ? 'abcdefghijkmnpqrstuvwxyz' : 'abcdefghijklmnopqrstuvwxyz';
-  const upper = options.avoidAmbiguous ? 'ABCDEFGHJKLMNPQRSTUVWXYZ' : 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  const digits = options.avoidAmbiguous ? '23456789' : '0123456789';
-  const syms = '!@#$%^&*()-_=+[]{}|;:,.<>?';
+  const excluded = new Set(options.exclude ?? '');
+  const keep = (set: string) => Array.from(set).filter(ch => !excluded.has(ch)).join('');
+  const lower = keep(options.avoidAmbiguous ? 'abcdefghijkmnpqrstuvwxyz' : 'abcdefghijklmnopqrstuvwxyz');
+  const upper = keep(options.avoidAmbiguous ? 'ABCDEFGHJKLMNPQRSTUVWXYZ' : 'ABCDEFGHIJKLMNOPQRSTUVWXYZ');
+  const digits = keep(options.avoidAmbiguous ? '23456789' : '0123456789');
+  const syms = keep('!@#$%^&*()-_=+[]{}|;:,.<>?');
 
   const requiredChars: string[] = [];
   let allChars = '';
 
-  const pickRandom = (set: string) => {
-    const buf = new Uint32Array(1);
-    crypto.getRandomValues(buf);
-    return set[buf[0] % set.length];
-  };
+  const pickRandom = (set: string) => set[secureRandomIndex(set.length)];
 
-  if (options.lowercase) {
-    allChars += lower;
-    requiredChars.push(pickRandom(lower));
-  }
-  if (options.uppercase) {
-    allChars += upper;
-    requiredChars.push(pickRandom(upper));
-  }
-  if (options.numbers) {
-    allChars += digits;
-    requiredChars.push(pickRandom(digits));
-  }
-  if (options.symbols) {
-    allChars += syms;
-    requiredChars.push(pickRandom(syms));
+  for (const [enabled, set] of [[options.lowercase, lower], [options.uppercase, upper], [options.numbers, digits], [options.symbols, syms]] as const) {
+    if (enabled && set) {
+      allChars += set;
+      requiredChars.push(pickRandom(set));
+    }
   }
 
-  if (!allChars) allChars = lower + upper + digits;
+  if (!allChars) allChars = keep('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+  if (!allChars) throw new Error('Tous les caractères sont exclus');
 
   const remainingLength = Math.max(0, options.length - requiredChars.length);
-  const randomArray = new Uint32Array(remainingLength);
-  crypto.getRandomValues(randomArray);
-
   const resultList = [...requiredChars];
   for (let i = 0; i < remainingLength; i++) {
-    resultList.push(allChars[randomArray[i] % allChars.length]);
+    resultList.push(pickRandom(allChars));
   }
 
-  // Mélange cryptographique (Fisher-Yates)
-  const shuffleBuf = new Uint32Array(resultList.length);
-  crypto.getRandomValues(shuffleBuf);
+  // Mélange cryptographique non biaisé (Fisher-Yates)
   for (let i = resultList.length - 1; i > 0; i--) {
-    const j = shuffleBuf[i] % (i + 1);
+    const j = secureRandomIndex(i + 1);
     [resultList[i], resultList[j]] = [resultList[j], resultList[i]];
   }
 

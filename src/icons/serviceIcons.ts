@@ -193,7 +193,7 @@ export function extractDomain(url: string): string {
  * Retourne le SVG vectoriel depuis le registre statique ou le fallback globe.
  * Zéro import de simple-icons au runtime — bundle réduit de ~5 MB à ~0 KB.
  */
-export function getServiceIconSvg(domainOrTitle: string, customColor = '#E6EDF3'): string {
+export function getServiceIconSvg(domainOrTitle: string, customColor = 'currentColor'): string {
   const domain = extractDomain(domainOrTitle);
 
   let iconSlug = DOMAIN_TO_SLUG[domain];

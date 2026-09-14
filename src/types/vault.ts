@@ -1,3 +1,5 @@
+import type { ItemIcon } from '../icons/iconLibrary';
+
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';
 export type TaskStatus = 'todo' | 'in_progress' | 'completed' | 'blocked';
 
@@ -70,6 +72,8 @@ export interface CredentialItem {
   fields?: CredentialField[];
   passwordHistory?: { password: string; changedAt: number }[];
   isFavorite?: boolean;
+  /** Icône choisie (sinon détectée depuis le site) */
+  icon?: ItemIcon;
   tags: string[];
   expiresAt?: number; // Timestamp d'expiration ou de rappel de renouvellement
   createdAt: number;
@@ -80,6 +84,7 @@ export interface VaultMetadata {
   id: string;
   name: string;
   type: 'personal' | 'work' | 'team';
+  icon?: ItemIcon;
   createdAt: number;
   updatedAt: number;
 }

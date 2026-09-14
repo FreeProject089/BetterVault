@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite';
+import { iconDataPlugin } from './build/iconDataPlugin.ts';
 
 export default defineConfig({
+  plugins: [iconDataPlugin(import.meta.dirname)],
   server: {
     port: 3000,
     open: false,
@@ -15,7 +17,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes('node_modules')) {
+          // Les bibliothèques d'icônes restent dans leurs propres fichiers, chargés à l'ouverture du sélecteur
+          if (id.includes('node_modules') && !id.includes('node_modules/lucide')) {
             return 'vendor';
           }
         }

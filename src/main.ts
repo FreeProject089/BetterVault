@@ -1,8 +1,21 @@
 import { TAG_COLORS, vaultStore } from './store/vaultStore';
-import { Task } from './types/vault';
-import { getServiceIconSvg } from './icons/serviceIcons';
+import type { CredentialItem, Task } from './types/vault';
+import { extractDomain, getServiceIconSvg } from './icons/serviceIcons';
+import { renderItemIcon, type ItemIcon } from './icons/iconLibrary';
+import BRAND_ICONS from 'virtual:bettervault-icons/brands';
 import { generateTOTP } from './crypto/totpEngine';
-import { calculatePasswordEntropy, generateStrongPassword, generatePassphrase, auditVaultSecurity, checkPasswordPwnedHIBP, HibpUnavailableError, PASSPHRASE_WORDLIST } from './crypto/vaultCrypto';
+import {
+  calculatePasswordEntropy,
+  generateStrongPassword,
+  generatePassphrase,
+  auditVaultSecurity,
+  checkPasswordPwnedHIBP,
+  HibpUnavailableError,
+  MAX_PASSPHRASE_WORDS,
+  passphraseEntropyBits,
+  secureRandomIndex,
+  type PassphraseCase
+} from './crypto/vaultCrypto';
 import { exportVaultAsJson, exportVaultAsCsv, downloadExportFile } from './import_export/importEngine';
 import { parseImportData, PasswordRequiredError, ImportSecrets } from './import_export/importRouter';
 import { encryptExport, MIN_EXPORT_PASSWORD_LENGTH } from './import_export/encryptedExport';
@@ -27,6 +40,15 @@ import {
 import type { RecurrenceFrequency, TaskRecurrence } from './types/vault';
 import { accountErrorMessage, DEFAULT_SERVER_URL, mountAuthScreen } from './ui/authScreen';
 import { mountTagInput } from './ui/tagInput';
+import { mountIconPicker } from './ui/iconPicker';
+import { mountColorPicker } from './ui/colorPicker';
+import { mountDateField } from './ui/dateField';
+import { showToast as pushToast } from './ui/toast';
+import { EXPIRY_SOON_DAYS, expiryInfo, renderExpiryBadge } from './ui/expiry';
+import { formatRecoveryKey, recoveryKeyFile } from './ui/recoveryKey';
+import { CREDENTIAL_FILTERS, countByFilter, queryCredentials, reusedPasswords, type CredentialFilter, type CredentialSort } from './store/credentialFilters';
+import { checkCredential, remainingCapacity } from './account/limits';
+import { renderSVG } from 'uqr';
 import { i18n } from './i18n';
 
 type ActiveView = 'all-credentials' | '2fa-tokens' | 'tasks';
@@ -54,6 +76,10 @@ const GEN_ICONS = {
 const GENERATOR_PREFS_KEY = 'bettervault.generator-prefs';
 const REMINDER_CHECK_INTERVAL_MS = 30_000;
 const SYNC_INTERVAL_MS = 60_000;
+const LIST_PREFS_KEY = 'bettervault.list-prefs';
+
+const VAULT_ICON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
+const GENERIC_FILE_ICON = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>';
 
 // Créé au démarrage, une fois le stockage de l'appareil chargé (voir la fin du fichier)
 let accountService: AccountService;
@@ -72,8 +98,13 @@ class AppController {
   private clipboardClearTimer: number | null = null;
   private activeTag: string | null = null;
   private authScreen: { show(): void } | null = null;
+  private credentialFilters = new Set<CredentialFilter>();
+  private credentialSort: CredentialSort = 'name';
+  /** Faux pour une fenêtre qui ne doit pas se fermer par Échap ou clic sur le fond (clé de secours) */
+  private modalDismissible = true;
 
   constructor() {
+    this.loadListPrefs();
     this.initTheme();
     this.initReminders();
     this.initEventListeners();
@@ -168,7 +199,6 @@ class AppController {
       const meta = document.querySelector('meta[name="theme-color"]');
       if (meta) meta.setAttribute('content', next === 'light' ? '#f6f8fa' : '#161b22');
       this.updateThemeIcons();
-      this.showToast(next === 'light' ? 'Light mode' : 'Dark mode', 'info', 1500);
     });
   }
 
@@ -265,21 +295,37 @@ class AppController {
     });
   }
 
-  /* ── Toast System ──────────────────────────────────────────────────────── */
-  public showToast(message: string, type: 'success' | 'info' | 'error' = 'info', durationMs = 2500): void {
-    const container = document.getElementById('toast-container');
-    if (!container) return;
-    const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    const icons = { success: '✓', error: '✕', info: 'ℹ' };
-    toast.innerHTML = `<span style="font-size:14px;font-weight:700;">${icons[type]}</span><span>${message}</span>`;
-    container.appendChild(toast);
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transform = 'translateY(8px)';
-      toast.style.transition = 'all 0.25s ease';
-      setTimeout(() => toast.remove(), 300);
-    }, durationMs);
+  /* ── Notifications ─────────────────────────────────────────────────────── */
+  public showToast(message: string, type: 'success' | 'info' | 'error' | 'warning' = 'info', durationMs?: number): void {
+    pushToast(message, { kind: type, duration: durationMs, closeLabel: this.tr('Fermer', 'Close') });
+  }
+
+  private dateLocale(): string {
+    return i18n.getLocale() === 'fr' ? 'fr-FR' : 'en-US';
+  }
+
+  /** Icône choisie pour l'identifiant, sinon logo détecté depuis le site */
+  private credentialIcon(cred: { icon?: ItemIcon; website: string; title: string }, size = 20): string {
+    if (cred.icon) return renderItemIcon(cred.icon, size);
+    return getServiceIconSvg(cred.website || cred.title).replace('width="20" height="20"', `width="${size}" height="${size}"`);
+  }
+
+  private loadListPrefs(): void {
+    try {
+      const prefs = JSON.parse(localStorage.getItem(LIST_PREFS_KEY) ?? '{}') as { filters?: string[]; sort?: string };
+      this.credentialFilters = new Set((prefs.filters ?? []).filter((f): f is CredentialFilter => CREDENTIAL_FILTERS.includes(f as CredentialFilter)));
+      if (prefs.sort === 'name' || prefs.sort === 'recent' || prefs.sort === 'updated' || prefs.sort === 'expiry') this.credentialSort = prefs.sort;
+    } catch {
+      // Préférences illisibles : valeurs par défaut
+    }
+  }
+
+  private saveListPrefs(): void {
+    try {
+      localStorage.setItem(LIST_PREFS_KEY, JSON.stringify({ filters: [...this.credentialFilters], sort: this.credentialSort }));
+    } catch {
+      // Stockage indisponible
+    }
   }
 
   /* ── Clipboard Auto-Clear (Zero-Knowledge Hygiene) ────────────────────── */
@@ -288,7 +334,7 @@ class AppController {
       await navigator.clipboard.writeText(text);
       if (isSensitive) {
         if (this.clipboardClearTimer) window.clearTimeout(this.clipboardClearTimer);
-        const clearNotice = i18n.getLocale() === 'fr' ? `${label} (effacé dans 30s)` : `${label} (cleared in 30s)`;
+        const clearNotice = this.tr(`${label}, effacé du presse-papiers dans 30 s`, `${label}, cleared from clipboard in 30 s`);
         this.showToast(clearNotice, 'success');
 
         this.clipboardClearTimer = window.setTimeout(async () => {
@@ -296,7 +342,7 @@ class AppController {
             const currentClip = await navigator.clipboard.readText().catch(() => '');
             if (currentClip === text) {
               await navigator.clipboard.writeText('');
-              this.showToast(i18n.getLocale() === 'fr' ? 'Presse-papiers vidé par sécurité' : 'Clipboard cleared for security', 'info', 2000);
+              this.showToast(this.tr('Presse-papiers vidé', 'Clipboard cleared'), 'info', 2000);
             }
           } catch {
             // Ignorer si permission non accordée
@@ -399,7 +445,7 @@ class AppController {
       // Touche 'Escape' : Fermer la modale ouverte
       if (e.key === 'Escape') {
         const overlay = document.getElementById('modal-overlay');
-        if (overlay) {
+        if (overlay && this.modalDismissible) {
           e.preventDefault();
           this.closeModal();
           return;
@@ -501,11 +547,7 @@ class AppController {
       li.tabIndex = 0;
       li.innerHTML = `
         <span class="nav-item-left">
-          <span class="nav-item-icon">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-            </svg>
-          </span>
+          <span class="nav-vault-icon">${vault.icon ? renderItemIcon(vault.icon, 15) : VAULT_ICON}</span>
           <span>${this.escapeHtml(vault.name)}</span>
         </span>
         <span class="nav-item-right">
@@ -560,6 +602,8 @@ class AppController {
     }
 
     if (this.activeView === 'tasks') {
+      const filterBar = document.getElementById('filter-bar');
+      if (filterBar) filterBar.hidden = true;
       if (listTitle) listTitle.textContent = withTag(i18n.t.tasks.title);
       let tasks = data.tasks.filter(t => t.vaultId === data.activeVaultId && matchesTag(t));
 
@@ -834,29 +878,36 @@ class AppController {
     // Vue Credentials ou 2FA
     if (listTitle) listTitle.textContent = withTag(this.activeView === '2fa-tokens' ? i18n.t.nav.twoFactorTokens : i18n.t.credentials.title);
 
-    let creds = data.credentials.filter(c => c.vaultId === data.activeVaultId && matchesTag(c));
-    if (this.activeView === '2fa-tokens') {
-      creds = creds.filter(c => !!c.totpSecret);
-    }
-
-    if (this.searchQuery) {
-      creds = creds.filter(c =>
-        c.title.toLowerCase().includes(this.searchQuery) ||
-        c.username.toLowerCase().includes(this.searchQuery) ||
-        c.website.toLowerCase().includes(this.searchQuery)
-      );
-    }
+    const vaultCreds = data.credentials.filter(c => c.vaultId === data.activeVaultId && (this.activeView !== '2fa-tokens' || !!c.totpSecret));
+    const creds = queryCredentials(vaultCreds, {
+      search: this.searchQuery,
+      filters: this.credentialFilters,
+      sort: this.credentialSort,
+      tag: this.activeTag
+    });
+    this.renderFilterBar(vaultCreds);
 
     if (creds.length === 0) {
+      const filtered = this.credentialFilters.size > 0;
+      const title = filtered
+        ? this.tr('Aucun identifiant pour ces filtres', 'No credentials match these filters')
+        : this.searchQuery ? i18n.t.common.noResultsTitle : i18n.t.common.emptyVaultTitle;
+      const sub = filtered ? '' : this.searchQuery ? i18n.t.common.noResultsSub : i18n.t.common.emptyVaultSub;
       container.innerHTML = `
         <div class="empty-state">
           <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
             <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
           </svg>
-          <div class="empty-state-title">${this.searchQuery ? i18n.t.common.noResultsTitle : i18n.t.common.emptyVaultTitle}</div>
-          <div class="empty-state-sub">${this.searchQuery ? i18n.t.common.noResultsSub : i18n.t.common.emptyVaultSub}</div>
+          <div class="empty-state-title">${title}</div>
+          ${sub ? `<div class="empty-state-sub">${sub}</div>` : ''}
+          ${filtered ? `<button class="btn-primary" type="button" data-action="reset-filters">${this.tr('Retirer les filtres', 'Clear filters')}</button>` : ''}
         </div>`;
+      container.querySelector('[data-action="reset-filters"]')?.addEventListener('click', () => {
+        this.credentialFilters.clear();
+        this.saveListPrefs();
+        this.renderList();
+      });
       return;
     }
 
@@ -865,35 +916,102 @@ class AppController {
       this.renderDetail(creds[0].id);
     }
 
+    const now = Date.now();
+    const locale = this.dateLocale();
+    const tr = (fr: string, en: string) => this.tr(fr, en);
+
     creds.forEach(cred => {
       const row = document.createElement('div');
       row.className = `record-row ${this.selectedItemId === cred.id ? 'selected' : ''}`;
+      row.tabIndex = 0;
+      const expiry = renderExpiryBadge(expiryInfo(cred.expiresAt, tr, locale, now), { hideOk: true });
 
       row.innerHTML = `
-        <div class="record-icon">${getServiceIconSvg(cred.website || cred.title)}</div>
+        <div class="record-icon">${this.credentialIcon(cred)}</div>
         <div class="record-info">
-          <div class="record-title" style="display:flex;align-items:center;gap:6px;">
-            ${cred.isFavorite ? '<span style="color:var(--accent-orange);font-size:10px;">&#9733;</span>' : ''}
-            ${cred.title}
-          </div>
+          <div class="record-title">${cred.isFavorite ? `<span class="record-fav" title="${this.tr('Favori', 'Favorite')}">★</span>` : ''}${this.escapeHtml(cred.title)}</div>
           <div class="record-sub">${this.escapeHtml(cred.username || cred.domain || this.tr('Sans identifiant', 'No username'))}</div>
         </div>
         <div class="record-badges">
-          ${cred.expiresAt && cred.expiresAt < Date.now() ? '<span class="badge" style="color:var(--accent-red);border-color:rgba(218,54,51,0.4);">EXP</span>' : ''}
-          ${cred.expiresAt && cred.expiresAt >= Date.now() && cred.expiresAt - Date.now() <= 14 * 86400000 ? '<span class="badge" style="color:var(--accent-orange);border-color:rgba(210,153,34,0.4);">EXP</span>' : ''}
-          ${cred.totpSecret ? '<span class="badge" style="color:var(--accent-blue);border-color:rgba(var(--accent-rgb),0.3);">2FA</span>' : ''}
-          ${cred.passkeys && cred.passkeys.length > 0 ? '<span class="badge" style="color:var(--accent-purple);">PK</span>' : ''}
+          ${expiry}
+          ${cred.totpSecret ? '<span class="badge badge-accent">2FA</span>' : ''}
+          ${cred.passkeys && cred.passkeys.length > 0 ? '<span class="badge">Passkey</span>' : ''}
         </div>
       `;
 
-      row.addEventListener('click', () => {
+      const open = () => {
         this.selectedItemId = cred.id;
         this.renderList();
         this.renderDetail(cred.id);
         document.getElementById('detail-container')?.classList.add('mobile-active');
+      };
+      row.addEventListener('click', open);
+      row.addEventListener('keydown', e => {
+        if (e.key === 'Enter') open();
       });
       container.appendChild(row);
     });
+  }
+
+  /* ── Filtres et tri de la liste ─────────────────────────────────────── */
+  private renderFilterBar(creds: CredentialItem[]): void {
+    const bar = document.getElementById('filter-bar');
+    if (!bar) return;
+    bar.hidden = creds.length === 0 && this.credentialFilters.size === 0;
+    if (bar.hidden) return;
+
+    const counts = countByFilter(creds);
+    const labels: Record<CredentialFilter, string> = {
+      favorites: this.tr('Favoris', 'Favorites'),
+      totp: '2FA',
+      passkeys: 'Passkeys',
+      expiring: this.tr('Expire bientôt', 'Expiring soon'),
+      expired: this.tr('Expirés', 'Expired'),
+      weak: this.tr('Faibles', 'Weak'),
+      reused: this.tr('Réutilisés', 'Reused'),
+      noPassword: this.tr('Sans mot de passe', 'No password')
+    };
+    const visible = CREDENTIAL_FILTERS
+      .filter(f => this.activeView !== '2fa-tokens' || f !== 'totp')
+      .filter(f => counts[f] > 0 || this.credentialFilters.has(f));
+    const sorts: Array<[CredentialSort, string]> = [
+      ['name', this.tr('Trier : nom', 'Sort: name')],
+      ['updated', this.tr('Trier : modifiés', 'Sort: updated')],
+      ['recent', this.tr('Trier : ajoutés', 'Sort: added')],
+      ['expiry', this.tr('Trier : expiration', 'Sort: expiry')]
+    ];
+
+    bar.innerHTML = `
+      ${visible.map(f => {
+        const active = this.credentialFilters.has(f);
+        return `<button type="button" class="filter-chip ${active ? 'active' : ''}" data-filter="${f}" aria-pressed="${active}">${labels[f]}<span class="filter-chip-count">${counts[f]}</span></button>`;
+      }).join('')}
+      ${this.credentialFilters.size ? `<button type="button" class="btn-primary btn-ghost filter-reset" data-action="reset">${this.tr('Effacer', 'Clear')}</button>` : ''}
+      <select class="form-input filter-sort" aria-label="${this.tr('Trier', 'Sort')}">
+        ${sorts.map(([value, label]) => `<option value="${value}" ${value === this.credentialSort ? 'selected' : ''}>${label}</option>`).join('')}
+      </select>`;
+
+    bar.onclick = e => {
+      const target = e.target as HTMLElement;
+      const filter = target.closest<HTMLElement>('[data-filter]')?.dataset.filter as CredentialFilter | undefined;
+      if (filter) {
+        if (this.credentialFilters.has(filter)) this.credentialFilters.delete(filter);
+        else this.credentialFilters.add(filter);
+      } else if (target.closest('[data-action="reset"]')) {
+        this.credentialFilters.clear();
+      } else {
+        return;
+      }
+      this.selectedItemId = null;
+      this.saveListPrefs();
+      this.renderList();
+      this.renderDetail(this.selectedItemId);
+    };
+    (bar.querySelector('.filter-sort') as HTMLSelectElement).onchange = e => {
+      this.credentialSort = (e.target as HTMLSelectElement).value as CredentialSort;
+      this.saveListPrefs();
+      this.renderList();
+    };
   }
 
   /* ── Detail Panel ─────────────────────────────────────────────────────── */
@@ -1044,8 +1162,8 @@ class AppController {
               <div class="section-divider" style="margin-bottom:8px;">${this.tr('Identifiant lié', 'Linked credential')}</div>
               <div class="field-box" style="cursor:pointer;" id="btn-goto-linked-cred">
                 <div style="display:flex;align-items:center;gap:10px;">
-                  <span style="display:flex;">${getServiceIconSvg(linkedCred.website || linkedCred.title)}</span>
-                  <span class="field-val" style="font-weight:600;">${linkedCred.title}</span>
+                  <span style="display:flex;">${this.credentialIcon(linkedCred)}</span>
+                  <span class="field-val" style="font-weight:600;">${this.escapeHtml(linkedCred.title)}</span>
                 </div>
                 <span style="font-size:11px;color:var(--accent-blue);">${this.tr('Ouvrir', 'Open')} →</span>
               </div>
@@ -1288,34 +1406,27 @@ class AppController {
     const favColor = cred.isFavorite ? 'var(--accent-orange)' : 'var(--text-muted)';
     const favTitle = cred.isFavorite ? 'Retirer des favoris' : 'Ajouter aux favoris';
 
-    // Calcul de l'état d'expiration
+    // Expiration : carte dont la couleur et la barre indiquent l'urgence
     let expiryAlertHTML = '';
-    if (cred.expiresAt) {
-      const now = Date.now();
-      const diffDays = Math.ceil((cred.expiresAt - now) / (1000 * 60 * 60 * 24));
-      const formattedDate = new Date(cred.expiresAt).toLocaleDateString(i18n.getLocale() === 'fr' ? 'fr-FR' : 'en-US');
-      if (diffDays < 0) {
-        expiryAlertHTML = `
-          <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(218,54,51,0.12);border:1px solid rgba(218,54,51,0.3);border-radius:var(--radius-md);color:var(--accent-red);font-size:12px;margin-bottom:12px;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-            <span>${i18n.getLocale() === 'fr' ? `Mot de passe expiré le ${formattedDate}. Renouvellement urgent conseillé.` : `Password expired on ${formattedDate}. Renewal recommended.`}</span>
+    const expiry = expiryInfo(cred.expiresAt, (fr, en) => this.tr(fr, en), this.dateLocale());
+    if (expiry) {
+      const title = expiry.state === 'expired'
+        ? this.tr('Mot de passe expiré', 'Password expired')
+        : expiry.state === 'ok' ? this.tr('Renouvellement prévu', 'Renewal planned') : this.tr('À renouveler bientôt', 'Renew soon');
+      const elapsed = expiry.days <= 0 ? 100 : Math.max(6, Math.min(100, 100 - (expiry.days / 30) * 100));
+      expiryAlertHTML = `
+        <div class="expiry-card expiry-${expiry.state}">
+          <span class="expiry-card-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          </span>
+          <div class="expiry-card-text">
+            <div class="expiry-card-title">${title}</div>
+            <div class="expiry-card-sub">${expiry.long}</div>
+            ${expiry.state !== 'ok' ? `<div class="expiry-card-bar"><span style="width:${elapsed}%"></span></div>` : ''}
           </div>
-        `;
-      } else if (diffDays <= 14) {
-        expiryAlertHTML = `
-          <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(210,153,34,0.12);border:1px solid rgba(210,153,34,0.3);border-radius:var(--radius-md);color:var(--accent-orange);font-size:12px;margin-bottom:12px;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-            <span>${i18n.getLocale() === 'fr' ? `Expire dans ${diffDays} jour(s) (${formattedDate}).` : `Expires in ${diffDays} day(s) (${formattedDate}).`}</span>
-          </div>
-        `;
-      } else {
-        expiryAlertHTML = `
-          <div style="display:flex;align-items:center;gap:8px;padding:6px 12px;background:var(--bg-tertiary);border:1px solid var(--border-subtle);border-radius:var(--radius-md);color:var(--text-secondary);font-size:11px;margin-bottom:12px;">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
-            <span>${i18n.getLocale() === 'fr' ? `Renouvellement prévu le ${formattedDate}` : `Renewal scheduled on ${formattedDate}`}</span>
-          </div>
-        `;
-      }
+          ${expiry.state !== 'ok' ? `<button class="btn-primary" type="button" id="btn-renew-cred">${this.tr('Renouveler', 'Renew')}</button>` : ''}
+        </div>
+      `;
     }
 
     container.innerHTML = `
@@ -1328,9 +1439,9 @@ class AppController {
             </svg>
             <span>${this.tr('Retour', 'Back')}</span>
           </button>
-          <div class="detail-main-icon">${getServiceIconSvg(cred.website || cred.title)}</div>
+          <div class="detail-main-icon">${this.credentialIcon(cred, 24)}</div>
           <div>
-            <div class="detail-title">${cred.title}</div>
+            <div class="detail-title">${this.escapeHtml(cred.title)}</div>
             <div class="detail-meta">${this.escapeHtml(cred.domain || cred.website || this.tr('Aucun site', 'No website'))}</div>
             ${this.renderTagChips(cred.tags)}
           </div>
@@ -1571,6 +1682,10 @@ class AppController {
       this.openCreateCredentialModal(cred.id);
     });
 
+    document.getElementById('btn-renew-cred')?.addEventListener('click', () => {
+      this.openCreateCredentialModal(cred.id, { renew: true });
+    });
+
     document.querySelectorAll('.btn-copy-history').forEach(el => {
       el.addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -1697,10 +1812,11 @@ class AppController {
    * Ouvre une modale avec le comportement commun à toutes :
    * clic sur le fond, croix / [data-close], Entrée → action [data-primary], focus piégé et restauré.
    */
-  private openModal(htmlContent: string): HTMLElement {
+  private openModal(htmlContent: string, options: { dismissible?: boolean } = {}): HTMLElement {
     const container = document.getElementById('modal-container');
     if (!container) return document.createElement('div');
     if (!container.firstElementChild) this.modalReturnFocus = document.activeElement as HTMLElement | null;
+    this.modalDismissible = options.dismissible !== false;
 
     container.innerHTML = `
       <div class="modal-overlay" id="modal-overlay">
@@ -1722,7 +1838,7 @@ class AppController {
     let pressedOnBackdrop = false;
     overlay.addEventListener('mousedown', e => { pressedOnBackdrop = e.target === overlay; });
     overlay.addEventListener('click', e => {
-      if (pressedOnBackdrop && e.target === overlay) this.closeModal();
+      if (pressedOnBackdrop && e.target === overlay && this.modalDismissible) this.closeModal();
       pressedOnBackdrop = false;
     });
 
@@ -1889,99 +2005,201 @@ class AppController {
   }
 
   /* ── Créer ou Modifier un Identifiant ────────────────────────────────── */
-  private openCreateCredentialModal(existingCredId?: string): void {
+  private openCreateCredentialModal(existingCredId?: string, options: { renew?: boolean } = {}): void {
     const data = vaultStore.getData();
     const existing = existingCredId ? data.credentials.find(c => c.id === existingCredId) : null;
     const isEdit = !!existing;
+    const limits = accountService.getLimits();
+    const tr = (fr: string, en: string) => this.tr(fr, en);
+    const attr = (value?: string) => this.escapeHtml(value ?? '');
+
+    if (!isEdit && remainingCapacity(data, data.activeVaultId, limits).credentials === 0) {
+      this.showToast(tr(`Ce coffre contient déjà ${limits.maxCredentialsPerVault} identifiants, la limite du serveur`, `This vault already holds ${limits.maxCredentialsPerVault} credentials, the server limit`), 'error');
+      return;
+    }
+
+    const SECTION = {
+      login: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></svg>',
+      shield: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>',
+      folder: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z"/><circle cx="7" cy="7" r="1.5"/></svg>',
+      note: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>',
+      scan: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10"/></svg>'
+    };
+
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const expiresValue = existing?.expiresAt
+      ? (() => { const d = new Date(existing.expiresAt!); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; })()
+      : '';
 
     const box = this.openModal(`
       <div class="modal-header">
-        <div class="modal-title">${isEdit ? this.tr('Modifier l’identifiant', 'Edit credential') : this.tr('Nouvel identifiant', 'New credential')}</div>
-        <button class="modal-close" id="modal-close-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
+        <div class="modal-title">${isEdit ? tr('Modifier l’identifiant', 'Edit credential') : tr('Nouvel identifiant', 'New credential')}</div>
+        <button class="modal-close" type="button">${GEN_ICONS.close}</button>
       </div>
       <div class="modal-body">
-        <div class="form-field">
-          <label class="form-label">${this.tr('Nom *', 'Name *')}</label>
-          <input class="form-input" id="field-title" type="text" placeholder="GitHub, Netflix, Gmail…" value="${existing?.title || ''}" autocomplete="off">
-        </div>
-        <div class="form-field">
-          <label class="form-label">${this.tr('Site web', 'Website')}</label>
-          <input class="form-input" id="field-website" type="url" placeholder="https://github.com" value="${existing?.website || ''}" autocomplete="off">
-        </div>
-        <div class="form-field">
-          <label class="form-label">${this.tr('Identifiant ou email', 'Username or email')}</label>
-          <input class="form-input" id="field-username" type="text" placeholder="user@example.com" value="${existing?.username || ''}" autocomplete="off">
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="field-password">${this.tr('Mot de passe *', 'Password *')}</label>
-          <div class="input-with-actions">
-            <input class="form-input" id="field-password" type="password" placeholder="${this.tr('Mot de passe fort…', 'Strong password…')}" value="${this.escapeHtml(existing?.password || '')}" autocomplete="new-password" spellcheck="false">
-            <button type="button" class="icon-btn" id="btn-toggle-field-password" aria-pressed="false" title="${this.tr('Afficher', 'Show')}">${GEN_ICONS.eye}</button>
-          </div>
-          <div class="field-inline-row">
-            <div class="gen-strength" id="field-password-strength">
-              <div class="strength-meter">${'<div class="strength-segment"></div>'.repeat(4)}</div>
-              <span class="gen-strength-label"></span>
-            </div>
-            <button type="button" class="btn-primary btn-ghost" id="btn-gen-pwd" aria-expanded="false" aria-controls="cred-gen-panel">${GEN_ICONS.bolt}<span>${this.tr('Générer', 'Generate')}</span></button>
-          </div>
-          <div id="cred-gen-panel" class="gen-inline" hidden></div>
-        </div>
-        <div class="form-field">
-          <label class="form-label">${this.tr('Clé 2FA (facultatif)', '2FA key (optional)')}</label>
-          <div style="display:flex;gap:8px;">
-            <input class="form-input" id="field-totp" type="text" placeholder="${this.tr('Clé ou lien otpauth://', 'Key or otpauth:// link')}" value="${existing?.totpSecret || ''}" autocomplete="off" style="flex:1;">
-            <button class="btn-primary" id="btn-scan-qr" type="button" style="white-space:nowrap;font-size:11px;padding:0 12px;">${this.tr('Scanner QR', 'Scan QR')}</button>
-          </div>
-          <div id="qr-scan-panel" hidden>
-            <video id="qr-video" playsinline muted style="width:100%;max-height:220px;margin-top:8px;border-radius:var(--radius-md);background:#000;object-fit:cover;"></video>
-            <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;">
-              <label class="btn-primary" style="font-size:11px;padding:5px 12px;cursor:pointer;">
-                ${this.tr('Importer une image', 'Upload an image')}
-                <input type="file" id="qr-image-input" accept="image/*" hidden>
-              </label>
-              <span id="qr-scan-status" style="font-size:11px;color:var(--text-muted);"></span>
+        <div class="cred-form">
+          <div class="cred-identity">
+            <button type="button" class="cred-icon-button" id="cred-icon-btn" aria-expanded="false" aria-controls="cred-icon-panel" title="${tr('Choisir une icône', 'Choose an icon')}" aria-label="${tr('Choisir une icône', 'Choose an icon')}">
+              <span id="cred-icon-preview" style="display:flex;"></span>
+              <span class="cred-icon-edit">${ACTION_ICONS.edit}</span>
+            </button>
+            <div class="form-field">
+              <label class="form-label" for="field-title">${tr('Nom', 'Name')}</label>
+              <input class="form-input cred-title-input" id="field-title" type="text" maxlength="${limits.maxTitleLength}" placeholder="GitHub, Netflix, Banque…" value="${attr(existing?.title)}" autocomplete="off" data-autofocus>
             </div>
           </div>
-        </div>
-        <div class="form-field">
-          <label class="form-label">${this.tr('Date d’expiration (facultatif)', 'Expiration date (optional)')}</label>
-          <input class="form-input" id="field-expires-at" type="date" value="${existing?.expiresAt ? new Date(existing.expiresAt).toISOString().split('T')[0] : ''}">
-        </div>
-        <div class="form-field">
-          <label class="form-label">Tags</label>
-          <div id="field-tags"></div>
-        </div>
-        <div class="form-field">
-          <label class="form-label">Notes</label>
-          <textarea class="note-editor" id="field-notes" placeholder="${this.tr('Codes de récupération, informations utiles…', 'Recovery codes, useful details…')}">${existing?.notes || ''}</textarea>
+          <div id="cred-icon-panel" hidden></div>
+
+          <section class="form-section">
+            <div class="form-section-title">${SECTION.login}${tr('Connexion', 'Sign-in')}</div>
+            <div class="form-row">
+              <div class="form-field">
+                <label class="form-label" for="field-username">${tr('Identifiant ou email', 'Username or email')}</label>
+                <input class="form-input" id="field-username" type="text" maxlength="${limits.maxUsernameLength}" placeholder="nom@exemple.fr" value="${attr(existing?.username)}" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="field-website">${tr('Site web', 'Website')}</label>
+                <input class="form-input" id="field-website" type="url" maxlength="${limits.maxUrlLength}" placeholder="https://exemple.fr" value="${attr(existing?.website)}" autocomplete="off" spellcheck="false">
+              </div>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="field-password">${tr('Mot de passe', 'Password')}</label>
+              <div class="input-with-actions">
+                <input class="form-input" id="field-password" type="password" maxlength="${limits.maxPasswordLength}" value="${attr(existing?.password)}" autocomplete="new-password" spellcheck="false">
+                <button type="button" class="icon-btn" id="btn-toggle-field-password" aria-pressed="false" title="${tr('Afficher', 'Show')}">${GEN_ICONS.eye}</button>
+              </div>
+              <div class="field-inline-row">
+                <div class="gen-strength" id="field-password-strength">
+                  <div class="strength-meter">${'<div class="strength-segment"></div>'.repeat(4)}</div>
+                  <span class="gen-strength-label"></span>
+                </div>
+                <button type="button" class="btn-primary btn-ghost" id="btn-gen-pwd" aria-expanded="false" aria-controls="cred-gen-panel">${GEN_ICONS.bolt}<span>${tr('Générer', 'Generate')}</span></button>
+              </div>
+              <div id="cred-gen-panel" class="gen-inline" hidden></div>
+            </div>
+          </section>
+
+          <section class="form-section">
+            <div class="form-section-head">
+              <div class="form-section-title">${SECTION.shield}${tr('Double authentification', 'Two-factor authentication')}</div>
+              <button class="btn-primary btn-ghost" id="btn-scan-qr" type="button">${SECTION.scan}<span>${tr('Scanner un QR code', 'Scan a QR code')}</span></button>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="field-totp">${tr('Clé de configuration', 'Setup key')}</label>
+              <input class="form-input" id="field-totp" type="text" placeholder="${tr('Clé ou lien otpauth://', 'Key or otpauth:// link')}" value="${attr(existing?.totpSecret)}" autocomplete="off" spellcheck="false">
+              <div class="totp-preview" id="totp-preview" hidden></div>
+            </div>
+            <div id="qr-scan-panel" hidden>
+              <video id="qr-video" playsinline muted style="width:100%;max-height:220px;border-radius:var(--radius-md);background:#000;object-fit:cover;"></video>
+              <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">
+                <label class="btn-primary" style="cursor:pointer;">
+                  ${tr('Importer une image', 'Upload an image')}
+                  <input type="file" id="qr-image-input" accept="image/*" hidden>
+                </label>
+                <span id="qr-scan-status" class="field-hint"></span>
+              </div>
+            </div>
+          </section>
+
+          <section class="form-section">
+            <div class="form-section-title">${SECTION.folder}${tr('Organisation', 'Organization')}</div>
+            <div class="form-row">
+              <div class="form-field">
+                <label class="form-label">Tags</label>
+                <div id="field-tags"></div>
+              </div>
+              <div class="form-field">
+                <label class="form-label">${tr('Expiration du mot de passe', 'Password expiry')}</label>
+                <div id="field-expires"></div>
+              </div>
+            </div>
+            <label class="switch-row">
+              <span>${tr('Favori', 'Favorite')}<small>${tr('Affiché en haut de la liste', 'Shown at the top of the list')}</small></span>
+              <input type="checkbox" class="switch" id="field-favorite" ${existing?.isFavorite ? 'checked' : ''}>
+            </label>
+          </section>
+
+          <section class="form-section">
+            <div class="form-section-title">${SECTION.note}Notes</div>
+            <textarea class="note-editor" id="field-notes" placeholder="${tr('Codes de récupération, questions de sécurité…', 'Recovery codes, security questions…')}">${attr(existing?.notes)}</textarea>
+            <span class="char-counter" id="notes-counter"></span>
+          </section>
+
+          <div class="form-error" id="cred-form-error" role="alert" hidden></div>
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn-primary" id="modal-cancel">${this.tr('Annuler', 'Cancel')}</button>
-        <button class="btn-primary" id="modal-confirm">${isEdit ? this.tr('Enregistrer', 'Save') : this.tr('Créer', 'Create')}</button>
+        <button class="btn-primary" type="button" data-close>${tr('Annuler', 'Cancel')}</button>
+        <button class="btn-primary" type="button" id="modal-confirm">${isEdit ? tr('Enregistrer', 'Save') : tr('Ajouter', 'Add')}</button>
       </div>
     `);
+    box.classList.add('modal-lg');
 
-    box.querySelector('#modal-close-btn')?.addEventListener('click', () => this.closeModal());
-    box.querySelector('#modal-cancel')?.addEventListener('click', () => this.closeModal());
+    const $ = <T extends HTMLElement>(selector: string) => box.querySelector(selector) as T;
+    const titleInput = $<HTMLInputElement>('#field-title');
+    const websiteInput = $<HTMLInputElement>('#field-website');
+    const usernameInput = $<HTMLInputElement>('#field-username');
+    const totpInput = $<HTMLInputElement>('#field-totp');
+    const notesInput = $<HTMLTextAreaElement>('#field-notes');
+    const errorEl = $<HTMLElement>('#cred-form-error');
 
-    const tagInput = mountTagInput(box.querySelector('#field-tags') as HTMLElement, {
+    // Icône : choisie dans une bibliothèque ou détectée depuis le site
+    let chosenIcon: ItemIcon | undefined = existing?.icon;
+    const iconButton = $<HTMLButtonElement>('#cred-icon-btn');
+    const iconPanel = $<HTMLElement>('#cred-icon-panel');
+    const updateIconPreview = () => {
+      $<HTMLElement>('#cred-icon-preview').innerHTML = this.credentialIcon({ icon: chosenIcon, website: websiteInput.value, title: titleInput.value }, 28);
+    };
+    const closeIconPanel = () => {
+      iconPanel.hidden = true;
+      iconPanel.innerHTML = '';
+      iconPanel.className = '';
+      iconButton.setAttribute('aria-expanded', 'false');
+    };
+    iconButton.addEventListener('click', () => {
+      if (!iconPanel.hidden) return closeIconPanel();
+      iconPanel.hidden = false;
+      iconButton.setAttribute('aria-expanded', 'true');
+      const suggestion = chosenIcon ? '' : (extractDomain(websiteInput.value).split('.').slice(-2, -1)[0] || titleInput.value.trim());
+      const picker = mountIconPicker(iconPanel, {
+        tr,
+        current: chosenIcon,
+        initialQuery: suggestion,
+        onPick: icon => {
+          chosenIcon = icon;
+          updateIconPreview();
+          closeIconPanel();
+          iconButton.focus();
+        }
+      });
+      picker.focus();
+    });
+    titleInput.addEventListener('input', () => { if (!chosenIcon) updateIconPreview(); });
+    websiteInput.addEventListener('input', () => { if (!chosenIcon) updateIconPreview(); });
+    updateIconPreview();
+
+    const tagInput = mountTagInput($<HTMLElement>('#field-tags'), {
       initial: existing?.tags ?? [],
       suggestions: vaultStore.getTags(),
-      placeholder: this.tr('Ajouter un tag…', 'Add a tag…')
+      placeholder: tr('Ajouter un tag…', 'Add a tag…')
+    });
+
+    const expiresField = mountDateField($<HTMLElement>('#field-expires'), {
+      value: expiresValue,
+      label: tr('Expiration du mot de passe', 'Password expiry'),
+      tr,
+      locale: this.dateLocale(),
+      describe: (days, formatted) => days < 0
+        ? tr(`Expiré depuis ${-days} jour${days < -1 ? 's' : ''}`, `Expired ${-days} day${days < -1 ? 's' : ''} ago`)
+        : days === 0 ? tr('Expire aujourd’hui', 'Expires today') : tr(`Expire dans ${days} jour${days > 1 ? 's' : ''} · ${formatted}`, `Expires in ${days} day${days > 1 ? 's' : ''} · ${formatted}`)
     });
 
     // Mot de passe : visibilité, force en direct et générateur intégré
-    const pwdField = box.querySelector('#field-password') as HTMLInputElement;
-    const pwdStrength = box.querySelector('#field-password-strength') as HTMLElement;
-    const pwdVisibility = box.querySelector('#btn-toggle-field-password') as HTMLButtonElement;
-    const genPanel = box.querySelector('#cred-gen-panel') as HTMLElement;
-    const genToggle = box.querySelector('#btn-gen-pwd') as HTMLButtonElement;
+    const pwdField = $<HTMLInputElement>('#field-password');
+    const pwdStrength = $<HTMLElement>('#field-password-strength');
+    const pwdVisibility = $<HTMLButtonElement>('#btn-toggle-field-password');
+    const genPanel = $<HTMLElement>('#cred-gen-panel');
+    const genToggle = $<HTMLButtonElement>('#btn-gen-pwd');
 
     const updatePasswordStrength = () => {
       const s = calculatePasswordEntropy(pwdField.value);
@@ -1996,15 +2214,9 @@ class AppController {
       pwdField.type = visible ? 'text' : 'password';
       pwdVisibility.innerHTML = visible ? GEN_ICONS.eyeOff : GEN_ICONS.eye;
       pwdVisibility.setAttribute('aria-pressed', String(visible));
-      pwdVisibility.title = visible ? this.tr('Masquer', 'Hide') : this.tr('Afficher', 'Show');
+      pwdVisibility.title = visible ? tr('Masquer', 'Hide') : tr('Afficher', 'Show');
     };
-
-    pwdField.addEventListener('input', updatePasswordStrength);
-    pwdVisibility.addEventListener('click', () => setPasswordVisible(pwdField.type === 'password'));
-    updatePasswordStrength();
-
-    genToggle.addEventListener('click', () => {
-      const open = genPanel.hidden;
+    const toggleGenerator = (open: boolean) => {
       genPanel.hidden = !open;
       genToggle.setAttribute('aria-expanded', String(open));
       if (open && genPanel.childElementCount === 0) {
@@ -2013,128 +2225,163 @@ class AppController {
             pwdField.value = value;
             setPasswordVisible(true);
             updatePasswordStrength();
-            genPanel.hidden = true;
-            genToggle.setAttribute('aria-expanded', 'false');
+            toggleGenerator(false);
             pwdField.focus();
           }
         });
       }
-    });
+    };
 
-    // Scan QR code 2FA (caméra ou image, décodage 100 % local)
-    const qrPanel = box.querySelector('#qr-scan-panel') as HTMLElement;
-    const qrVideo = box.querySelector('#qr-video') as HTMLVideoElement;
-    const qrStatus = box.querySelector('#qr-scan-status') as HTMLElement;
+    pwdField.addEventListener('input', updatePasswordStrength);
+    pwdVisibility.addEventListener('click', () => setPasswordVisible(pwdField.type === 'password'));
+    genToggle.addEventListener('click', () => toggleGenerator(genPanel.hidden === true));
+    updatePasswordStrength();
+    if (options.renew) {
+      toggleGenerator(true);
+      expiresField.setValue('');
+    }
+
+    // Aperçu du code 2FA dès qu'une clé valide est saisie
+    const totpPreview = $<HTMLElement>('#totp-preview');
+    const updateTotpPreview = () => {
+      const raw = totpInput.value.trim();
+      if (!raw) {
+        totpPreview.hidden = true;
+        return;
+      }
+      const secret = normalizeTotpInput(raw);
+      const code = secret ? generateTOTP(secret) : null;
+      totpPreview.hidden = false;
+      totpPreview.innerHTML = code
+        ? `${tr('Code actuel', 'Current code')} <strong>${code.token.slice(0, 3)} ${code.token.slice(3)}</strong>`
+        : `<span class="field-hint error">${tr('Clé non reconnue : collez la clé Base32 ou le lien otpauth://', 'Key not recognized: paste the Base32 key or the otpauth:// link')}</span>`;
+    };
+    totpInput.addEventListener('input', updateTotpPreview);
+    const totpTimer = window.setInterval(() => {
+      if (!box.isConnected) return window.clearInterval(totpTimer);
+      if (!totpPreview.hidden) updateTotpPreview();
+    }, 1000);
+    updateTotpPreview();
+
+    // Scan QR code 2FA (caméra ou image, décodage local)
+    const qrPanel = $<HTMLElement>('#qr-scan-panel');
+    const qrVideo = $<HTMLVideoElement>('#qr-video');
+    const qrStatus = $<HTMLElement>('#qr-scan-status');
     let qrScanner: CameraQrScanner | null = null;
 
     const applyScannedOtp = (text: string): boolean => {
       const normalized = normalizeTotpInput(text);
       if (!normalized) {
-        qrStatus.textContent = this.tr('QR code non reconnu comme secret 2FA (otpauth://totp)', 'QR code is not a 2FA secret (otpauth://totp)');
-        qrStatus.style.color = 'var(--accent-red)';
+        qrStatus.textContent = tr('Ce QR code ne contient pas de clé 2FA', 'This QR code has no 2FA key');
+        qrStatus.classList.add('error');
         return false;
       }
-      (box.querySelector('#field-totp') as HTMLInputElement).value = normalized;
+      totpInput.value = normalized;
       const info = parseOtpAuthUri(text);
-      const titleInput = box.querySelector('#field-title') as HTMLInputElement;
-      const usernameInput = box.querySelector('#field-username') as HTMLInputElement;
       if (info?.issuer && !titleInput.value) titleInput.value = info.issuer;
       if (info?.account && !usernameInput.value) usernameInput.value = info.account;
       qrScanner?.stop();
       qrPanel.hidden = true;
-      this.showToast(this.tr('Secret 2FA importé depuis le QR code', '2FA secret imported from QR code'), 'success');
+      updateTotpPreview();
+      updateIconPreview();
       return true;
     };
 
-    box.querySelector('#btn-scan-qr')?.addEventListener('click', async () => {
+    $<HTMLButtonElement>('#btn-scan-qr').addEventListener('click', async () => {
       if (!qrPanel.hidden) {
         qrScanner?.stop();
         qrPanel.hidden = true;
         return;
       }
       qrPanel.hidden = false;
-      qrStatus.style.color = 'var(--text-muted)';
-      qrStatus.textContent = this.tr('Présentez le QR code à la caméra…', 'Point the camera at the QR code…');
+      qrStatus.classList.remove('error');
+      qrStatus.textContent = tr('Présentez le QR code à la caméra', 'Point the camera at the QR code');
       qrScanner = new CameraQrScanner(qrVideo);
       try {
-        await qrScanner.start(text => {
-          if (!applyScannedOtp(text)) {
-            qrStatus.textContent += ' — ' + this.tr('importez une image', 'upload an image');
-          }
-        });
+        await qrScanner.start(text => { applyScannedOtp(text); });
       } catch {
-        qrStatus.textContent = this.tr('Caméra indisponible — importez une capture du QR code.', 'Camera unavailable — upload a screenshot of the QR code.');
+        qrStatus.textContent = tr('Caméra indisponible : importez une capture du QR code', 'Camera unavailable: upload a screenshot of the QR code');
       }
     });
 
-    box.querySelector('#qr-image-input')?.addEventListener('change', async (e) => {
+    $<HTMLInputElement>('#qr-image-input').addEventListener('change', async e => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
       try {
         const text = await decodeQrFromFile(file);
-        if (text) {
-          applyScannedOtp(text);
-        } else {
-          qrStatus.textContent = this.tr('Aucun QR code détecté dans l’image', 'No QR code found in the image');
-          qrStatus.style.color = 'var(--accent-red)';
+        if (!text || !applyScannedOtp(text)) {
+          qrStatus.textContent = tr('Aucun QR code 2FA trouvé dans l’image', 'No 2FA QR code found in the image');
+          qrStatus.classList.add('error');
         }
       } catch {
-        qrStatus.textContent = this.tr('Image illisible', 'Unreadable image');
-        qrStatus.style.color = 'var(--accent-red)';
+        qrStatus.textContent = tr('Image illisible', 'Unreadable image');
+        qrStatus.classList.add('error');
       }
     });
 
-    box.querySelector('#modal-confirm')?.addEventListener('click', () => {
-      const title = (box.querySelector('#field-title') as HTMLInputElement)?.value.trim();
-      const password = (box.querySelector('#field-password') as HTMLInputElement)?.value;
-      if (!title || !password) {
-        this.showToast(this.tr('Le nom et le mot de passe sont obligatoires', 'Name and password are required'), 'error');
-        return;
-      }
-      const website = (box.querySelector('#field-website') as HTMLInputElement)?.value.trim();
-      const username = (box.querySelector('#field-username') as HTMLInputElement)?.value.trim();
-      const totpRaw = (box.querySelector('#field-totp') as HTMLInputElement)?.value.trim();
-      const totpSecret = totpRaw ? normalizeTotpInput(totpRaw) : null;
-      if (totpRaw && !totpSecret) {
-        this.showToast(this.tr('Secret 2FA invalide (Base32 ou URI otpauth://totp attendu)', 'Invalid 2FA secret (Base32 or otpauth://totp URI expected)'), 'error');
-        return;
-      }
-      qrScanner?.stop();
-      const notes = (box.querySelector('#field-notes') as HTMLTextAreaElement)?.value;
-      const expiresVal = (box.querySelector('#field-expires-at') as HTMLInputElement)?.value;
-      const expiresAt = expiresVal ? new Date(expiresVal).getTime() : undefined;
+    // Compteur de caractères des notes (limite du serveur)
+    const counter = $<HTMLElement>('#notes-counter');
+    const updateCounter = () => {
+      const length = notesInput.value.length;
+      counter.textContent = `${length.toLocaleString(this.dateLocale())} / ${limits.maxNoteLength.toLocaleString(this.dateLocale())}`;
+      counter.classList.toggle('over', length > limits.maxNoteLength);
+      counter.hidden = length < limits.maxNoteLength * 0.5;
+    };
+    notesInput.addEventListener('input', updateCounter);
+    updateCounter();
 
+    const fail = (message: string, focus?: HTMLElement) => {
+      errorEl.textContent = message;
+      errorEl.hidden = false;
+      focus?.focus();
+    };
+
+    const stopScanner = () => qrScanner?.stop();
+    box.closest('.modal-overlay')?.addEventListener('click', e => {
+      if ((e.target as HTMLElement).closest('.modal-close, [data-close]')) stopScanner();
+    });
+
+    $<HTMLButtonElement>('#modal-confirm').addEventListener('click', () => {
+      errorEl.hidden = true;
+      const title = titleInput.value.trim();
+      if (!title) return fail(tr('Donnez un nom à cet identifiant', 'Give this credential a name'), titleInput);
+
+      const website = websiteInput.value.trim();
+      const totpRaw = totpInput.value.trim();
+      const totpSecret = totpRaw ? normalizeTotpInput(totpRaw) : null;
+      if (totpRaw && !totpSecret) return fail(tr('La clé 2FA n’est pas valide', 'The 2FA key is not valid'), totpInput);
+
+      const expiresDate = expiresField.getValue();
+      const [y, m, d] = expiresDate ? expiresDate.split('-').map(Number) : [];
+      const item = {
+        title,
+        website,
+        username: usernameInput.value.trim(),
+        password: pwdField.value,
+        domain: extractDomain(website),
+        totpSecret: totpSecret || undefined,
+        notes: notesInput.value,
+        tags: tagInput.getTags(),
+        isFavorite: $<HTMLInputElement>('#field-favorite').checked,
+        expiresAt: expiresDate ? new Date(y, m - 1, d, 12).getTime() : undefined,
+        icon: chosenIcon
+      };
+
+      const problem = checkCredential({ ...item, fields: existing?.fields }, limits, tr);
+      if (problem) return fail(problem);
+
+      stopScanner();
       if (isEdit && existing) {
-        vaultStore.updateCredential(existing.id, {
-          title,
-          website: website || '',
-          username: username || '',
-          password,
-          domain: website ? (website.replace(/^https?:\/\//, '').split('/')[0]) : '',
-          totpSecret: totpSecret || undefined,
-          notes: notes || '',
-          tags: tagInput.getTags(),
-          expiresAt
-        });
+        vaultStore.updateCredential(existing.id, item);
         this.closeModal();
-        this.showToast(this.tr('Identifiant enregistré', 'Credential saved'), 'success');
+        this.showToast(tr('Modifications enregistrées', 'Changes saved'), 'success');
       } else {
-        const data2 = vaultStore.getData();
-        vaultStore.addCredential({
-          vaultId: data2.activeVaultId,
-          title,
-          website: website || '',
-          username: username || '',
-          password,
-          domain: website ? (website.replace(/^https?:\/\//, '').split('/')[0]) : '',
-          totpSecret: totpSecret || undefined,
-          notes: notes || '',
-          tags: tagInput.getTags(),
-          isFavorite: false,
-          expiresAt
-        });
+        const id = vaultStore.addCredential({ ...item, vaultId: vaultStore.getData().activeVaultId });
         this.closeModal();
-        this.showToast(this.tr('Identifiant créé', 'Credential created'), 'success');
+        this.selectedItemId = id;
+        this.renderList();
+        this.renderDetail(id);
+        this.showToast(tr(`${title} ajouté`, `${title} added`), 'success');
       }
     });
   }
@@ -2330,12 +2577,12 @@ class AppController {
   private openGeneratorModal(): void {
     const box = this.openModal(`
       <div class="modal-header">
-        <div class="modal-title" style="display:flex;align-items:center;gap:8px;">${GEN_ICONS.bolt}${this.tr('Générateur de secrets', 'Secret generator')}</div>
+        <div class="modal-title" style="display:flex;align-items:center;gap:8px;">${GEN_ICONS.bolt}${this.tr('Générateur', 'Generator')}</div>
         <button class="modal-close">${GEN_ICONS.close}</button>
       </div>
       <div class="modal-body" data-generator-host></div>
       <div class="modal-footer">
-        <span class="modal-footer-hint"><kbd>R</kbd> ${this.tr('régénérer', 'regenerate')} · <kbd>Échap</kbd> ${this.tr('fermer', 'close')}</span>
+        <span class="modal-footer-hint"><kbd>R</kbd> ${this.tr('régénérer', 'regenerate')}</span>
         <button class="btn-primary btn-ghost" data-close>${this.tr('Fermer', 'Close')}</button>
         <button class="btn-primary btn-accent" data-primary data-autofocus data-gen-copy>${GEN_ICONS.copy}<span>${this.tr('Copier', 'Copy')}</span></button>
       </div>
@@ -2346,26 +2593,36 @@ class AppController {
 
   /** Générateur réutilisable : modale dédiée ou panneau intégré au formulaire d'identifiant */
   private mountGenerator(host: HTMLElement, options: { onUse?: (value: string) => void } = {}): { copy: () => Promise<void> } {
+    type GeneratorMode = 'password' | 'passphrase' | 'pin';
     type GeneratorPrefs = {
-      mode: 'password' | 'passphrase';
+      mode: GeneratorMode;
       length: number;
       uppercase: boolean;
       lowercase: boolean;
       numbers: boolean;
       symbols: boolean;
       avoidAmbiguous: boolean;
+      exclude: string;
       words: number;
       separator: string;
-      capitalize: boolean;
-      includeNumber: boolean;
+      customSeparator: string;
+      wordCase: PassphraseCase;
+      numberDigits: number;
+      includeSymbol: boolean;
+      pinLength: number;
     };
     const defaults: GeneratorPrefs = {
-      mode: 'password', length: 20, uppercase: true, lowercase: true, numbers: true, symbols: true, avoidAmbiguous: false,
-      words: 5, separator: '-', capitalize: true, includeNumber: true
+      mode: 'password', length: 20, uppercase: true, lowercase: true, numbers: true, symbols: true, avoidAmbiguous: false, exclude: '',
+      words: 5, separator: '-', customSeparator: '', wordCase: 'title', numberDigits: 2, includeSymbol: false,
+      pinLength: 6
     };
     let prefs: GeneratorPrefs = { ...defaults };
     try {
-      prefs = { ...defaults, ...JSON.parse(localStorage.getItem(GENERATOR_PREFS_KEY) ?? '{}') };
+      const saved = JSON.parse(localStorage.getItem(GENERATOR_PREFS_KEY) ?? '{}') as Partial<GeneratorPrefs> & { capitalize?: boolean; includeNumber?: boolean };
+      prefs = { ...defaults, ...saved };
+      // Anciennes préférences
+      if (saved.wordCase === undefined && saved.capitalize === false) prefs.wordCase = 'lower';
+      if (saved.numberDigits === undefined && saved.includeNumber === false) prefs.numberDigits = 0;
     } catch {
       // Préférences illisibles : valeurs par défaut
     }
@@ -2377,23 +2634,30 @@ class AppController {
       }
     };
 
+    const BOUNDS: Record<'length' | 'words' | 'pinLength', [number, number]> = {
+      length: [8, 128],
+      words: [3, MAX_PASSPHRASE_WORDS],
+      pinLength: [4, 12]
+    };
+
     const chip = (key: keyof GeneratorPrefs, label: string, hint: string) => `
       <label class="gen-chip" title="${hint}">
         <input type="checkbox" data-pref="${key}" ${prefs[key] ? 'checked' : ''}>
         <span>${label}</span>
       </label>`;
-    const slider = (key: 'length' | 'words', label: string, min: number, max: number) => `
+    const slider = (key: keyof typeof BOUNDS, label: string) => `
       <div class="gen-slider-row">
         <span class="form-label">${label}</span>
-        <input type="range" min="${min}" max="${max}" value="${prefs[key]}" data-pref="${key}" aria-label="${label}">
-        <input type="number" class="form-input gen-number" min="${min}" max="${max}" value="${prefs[key]}" data-pref="${key}" aria-label="${label}">
+        <input type="range" min="${BOUNDS[key][0]}" max="${BOUNDS[key][1]}" value="${prefs[key]}" data-pref="${key}" aria-label="${label}">
+        <input type="number" class="form-input gen-number" min="${BOUNDS[key][0]}" max="${BOUNDS[key][1]}" value="${prefs[key]}" data-pref="${key}" aria-label="${label}">
       </div>`;
-    const separators: Array<[string, string]> = [
-      ['-', this.tr('Tiret  -', 'Dash  -')],
-      [' ', this.tr('Espace', 'Space')],
-      ['.', this.tr('Point  .', 'Dot  .')],
-      ['_', this.tr('Tiret bas  _', 'Underscore  _')]
-    ];
+    const select = (key: keyof GeneratorPrefs, label: string, choices: Array<[string | number, string]>) => `
+      <div class="form-field">
+        <label class="form-label">${label}</label>
+        <select class="form-input" data-pref="${key}" aria-label="${label}">
+          ${choices.map(([value, text]) => `<option value="${value}" ${String(prefs[key]) === String(value) ? 'selected' : ''}>${text}</option>`).join('')}
+        </select>
+      </div>`;
 
     host.innerHTML = `
       <div class="gen">
@@ -2411,9 +2675,11 @@ class AppController {
         <div class="tab-btn-group" role="tablist">
           <button type="button" class="tab-btn" role="tab" data-mode="password">${this.tr('Mot de passe', 'Password')}</button>
           <button type="button" class="tab-btn" role="tab" data-mode="passphrase">${this.tr('Phrase secrète', 'Passphrase')}</button>
+          <button type="button" class="tab-btn" role="tab" data-mode="pin">${this.tr('Code PIN', 'PIN')}</button>
         </div>
+
         <div class="gen-section" data-section="password">
-          ${slider('length', this.tr('Longueur', 'Length'), 8, 64)}
+          ${slider('length', this.tr('Longueur', 'Length'))}
           <div class="gen-chips">
             ${chip('uppercase', 'A–Z', this.tr('Majuscules', 'Uppercase'))}
             ${chip('lowercase', 'a–z', this.tr('Minuscules', 'Lowercase'))}
@@ -2421,20 +2687,56 @@ class AppController {
             ${chip('symbols', '!@#$', this.tr('Symboles', 'Symbols'))}
             ${chip('avoidAmbiguous', this.tr('Sans ambigus', 'No look-alikes'), this.tr('Exclut 0/O, 1/l/I', 'Excludes 0/O, 1/l/I'))}
           </div>
-        </div>
-        <div class="gen-section" data-section="passphrase">
-          ${slider('words', this.tr('Mots', 'Words'), 3, 10)}
-          <div class="gen-chips">
-            <select class="form-input gen-select" data-pref="separator" aria-label="${this.tr('Séparateur', 'Separator')}">
-              ${separators.map(([value, label]) => `<option value="${value}" ${prefs.separator === value ? 'selected' : ''}>${label}</option>`).join('')}
-            </select>
-            ${chip('capitalize', this.tr('Majuscule initiale', 'Capitalize'), this.tr('Première lettre de chaque mot en majuscule', 'Capitalize each word'))}
-            ${chip('includeNumber', this.tr('+ nombre', '+ number'), this.tr('Ajoute un nombre à la fin', 'Append a number'))}
+          <div class="form-field">
+            <label class="form-label">${this.tr('Caractères à exclure', 'Characters to exclude')}</label>
+            <input class="form-input" type="text" data-pref="exclude" value="${this.escapeHtml(prefs.exclude)}" placeholder="${this.tr('Ex. : {}[]<>"\'', 'E.g. {}[]<>"\'')}" spellcheck="false" autocomplete="off" style="font-family:var(--font-mono);">
           </div>
         </div>
+
+        <div class="gen-section" data-section="passphrase">
+          ${slider('words', this.tr('Mots', 'Words'))}
+          <div class="gen-grid">
+            ${select('separator', this.tr('Séparateur', 'Separator'), [
+              ['-', this.tr('Tiret  -', 'Dash  -')],
+              [' ', this.tr('Espace', 'Space')],
+              ['.', this.tr('Point  .', 'Dot  .')],
+              [',', this.tr('Virgule  ,', 'Comma  ,')],
+              ['_', this.tr('Tiret bas  _', 'Underscore  _')],
+              ['', this.tr('Aucun', 'None')],
+              ['custom', this.tr('Personnalisé', 'Custom')]
+            ])}
+            <div class="form-field" data-custom-separator>
+              <label class="form-label">${this.tr('Séparateur personnalisé', 'Custom separator')}</label>
+              <input class="form-input" type="text" maxlength="5" data-pref="customSeparator" value="${this.escapeHtml(prefs.customSeparator)}" spellcheck="false" autocomplete="off" style="font-family:var(--font-mono);">
+            </div>
+            ${select('wordCase', this.tr('Casse des mots', 'Word case'), [
+              ['lower', this.tr('minuscules', 'lowercase')],
+              ['title', this.tr('Majuscule initiale', 'Capitalized')],
+              ['upper', this.tr('MAJUSCULES', 'UPPERCASE')],
+              ['random', this.tr('Aléatoire', 'Random')]
+            ])}
+            ${select('numberDigits', this.tr('Nombre ajouté', 'Added number'), [
+              [0, this.tr('Aucun', 'None')],
+              [1, this.tr('1 chiffre', '1 digit')],
+              [2, this.tr('2 chiffres', '2 digits')],
+              [3, this.tr('3 chiffres', '3 digits')],
+              [4, this.tr('4 chiffres', '4 digits')]
+            ])}
+          </div>
+          <div class="gen-chips">
+            ${chip('includeSymbol', this.tr('+ symbole', '+ symbol'), this.tr('Ajoute un symbole à la fin', 'Append a symbol'))}
+          </div>
+          <p class="gen-mode-hint">${this.tr('Mots tirés de la liste EFF (7 776 mots) : chaque mot ajoute environ 12,9 bits. Facile à retenir et à taper.', 'Words from the EFF list (7,776 words): each word adds about 12.9 bits. Easy to remember and type.')}</p>
+        </div>
+
+        <div class="gen-section" data-section="pin">
+          ${slider('pinLength', this.tr('Chiffres', 'Digits'))}
+          <p class="gen-mode-hint">${this.tr('Pour un téléphone, une carte ou un cadenas. Trop court pour protéger un compte en ligne.', 'For a phone, a card or a lock. Too short to protect an online account.')}</p>
+        </div>
+
         ${options.onUse ? `
           <div class="gen-use-row">
-            <button type="button" class="btn-primary btn-accent" data-gen="use">${this.tr('Utiliser ce mot de passe', 'Use this password')}</button>
+            <button type="button" class="btn-primary btn-accent" data-gen="use">${this.tr('Utiliser', 'Use')}</button>
           </div>` : ''}
       </div>`;
 
@@ -2443,10 +2745,18 @@ class AppController {
     const charsetKeys: Array<keyof GeneratorPrefs> = ['uppercase', 'lowercase', 'numbers', 'symbols'];
     let value = '';
 
+    const passphraseOptions = () => ({
+      wordCount: prefs.words,
+      separator: prefs.separator === 'custom' ? prefs.customSeparator : prefs.separator,
+      wordCase: prefs.wordCase,
+      includeNumber: prefs.numberDigits > 0,
+      numberDigits: prefs.numberDigits,
+      includeSymbol: prefs.includeSymbol
+    });
+
     const strength = () => {
       if (prefs.mode === 'password') return calculatePasswordEntropy(value);
-      // Entropie réelle d'une phrase : nombre de mots de la liste, pas la longueur des caractères
-      const bits = Math.round(prefs.words * Math.log2(PASSPHRASE_WORDLIST.length) + (prefs.includeNumber ? Math.log2(90) : 0));
+      const bits = prefs.mode === 'pin' ? Math.round(prefs.pinLength * Math.log2(10)) : passphraseEntropyBits(passphraseOptions());
       const score = bits >= 75 ? 4 : bits >= 55 ? 3 : bits >= 36 ? 2 : 1;
       const labels = ['', this.tr('Faible', 'Weak'), this.tr('Moyen', 'Fair'), this.tr('Fort', 'Strong'), this.tr('Excellent', 'Excellent')];
       const colors = ['', '#DA3633', '#D29922', '#2EA043', '#238636'];
@@ -2464,21 +2774,31 @@ class AppController {
         segment.style.backgroundColor = i < s.score ? s.color : '';
       });
       const label = query('[data-gen="strength"]');
-      label.textContent = `${s.label} · ≈ ${s.bits} bits`;
+      label.textContent = value ? `${s.label} · ≈ ${s.bits} bits` : '';
       label.style.color = s.color;
     };
 
     const generate = () => {
-      value = prefs.mode === 'password'
-        ? generateStrongPassword({
+      try {
+        if (prefs.mode === 'password') {
+          value = generateStrongPassword({
             length: prefs.length,
             uppercase: prefs.uppercase,
             lowercase: prefs.lowercase,
             numbers: prefs.numbers,
             symbols: prefs.symbols,
-            avoidAmbiguous: prefs.avoidAmbiguous
-          })
-        : generatePassphrase({ wordCount: prefs.words, separator: prefs.separator, capitalize: prefs.capitalize, includeNumber: prefs.includeNumber });
+            avoidAmbiguous: prefs.avoidAmbiguous,
+            exclude: prefs.exclude
+          });
+        } else if (prefs.mode === 'passphrase') {
+          value = generatePassphrase(passphraseOptions());
+        } else {
+          value = Array.from({ length: prefs.pinLength }, () => String(secureRandomIndex(10))).join('');
+        }
+      } catch {
+        value = '';
+        this.showToast(this.tr('Trop de caractères exclus', 'Too many excluded characters'), 'error');
+      }
       render();
       output.classList.remove('gen-flash');
       void output.offsetWidth;
@@ -2494,13 +2814,15 @@ class AppController {
       host.querySelectorAll<HTMLElement>('[data-section]').forEach(section => {
         section.hidden = section.dataset.section !== prefs.mode;
       });
-      host.querySelectorAll<HTMLInputElement>('input[data-pref="length"]').forEach(input => { input.value = String(prefs.length); });
-      host.querySelectorAll<HTMLInputElement>('input[data-pref="words"]').forEach(input => { input.value = String(prefs.words); });
+      (Object.keys(BOUNDS) as Array<keyof typeof BOUNDS>).forEach(key => {
+        host.querySelectorAll<HTMLInputElement>(`input[data-pref="${key}"]`).forEach(input => { input.value = String(prefs[key]); });
+      });
+      query('[data-custom-separator]').hidden = prefs.separator !== 'custom';
     };
 
     host.querySelectorAll<HTMLElement>('[data-mode]').forEach(button => {
       button.addEventListener('click', () => {
-        prefs.mode = button.dataset.mode as GeneratorPrefs['mode'];
+        prefs.mode = button.dataset.mode as GeneratorMode;
         syncControls();
         savePrefs();
         generate();
@@ -2515,16 +2837,18 @@ class AppController {
         if (control instanceof HTMLInputElement && control.type === 'checkbox') {
           if (charsetKeys.includes(key) && !control.checked && charsetKeys.every(k => k === key || !prefs[k])) {
             control.checked = true;
-            this.showToast(this.tr('Gardez au moins un type de caractères', 'Keep at least one character set'), 'info', 1800);
+            this.showToast(this.tr('Gardez au moins un type de caractères', 'Keep at least one character type'), 'info', 1800);
             return;
           }
           (prefs as Record<string, unknown>)[key] = control.checked;
-        } else if (key === 'length' || key === 'words') {
-          const [min, max] = key === 'length' ? [8, 64] : [3, 10];
+        } else if (key === 'length' || key === 'words' || key === 'pinLength') {
+          const [min, max] = BOUNDS[key];
           const n = parseInt(control.value, 10);
           // Saisie en cours dans le champ numérique (ex. « 1 » avant « 16 ») : on attend une valeur valide
           if (!Number.isFinite(n) || (isNumberField && (n < min || n > max))) return;
           prefs[key] = Math.min(max, Math.max(min, n));
+        } else if (key === 'numberDigits') {
+          prefs.numberDigits = parseInt(control.value, 10) || 0;
         } else {
           (prefs as Record<string, unknown>)[key] = control.value;
         }
@@ -2539,7 +2863,7 @@ class AppController {
 
     const copy = async () => {
       if (!value) return;
-      await this.copyToClipboardWithAutoClear(value, this.tr('Secret copié', 'Secret copied'), true);
+      await this.copyToClipboardWithAutoClear(value, this.tr('Copié', 'Copied'), true);
       const button = query('[data-gen="copy"]');
       button.classList.add('copied');
       setTimeout(() => button.classList.remove('copied'), 500);
@@ -2548,11 +2872,11 @@ class AppController {
     query('[data-gen="refresh"]').addEventListener('click', generate);
     query('[data-gen="copy"]').addEventListener('click', () => void copy());
     output.addEventListener('click', () => void copy());
-    if (options.onUse) query('[data-gen="use"]').addEventListener('click', () => options.onUse?.(value));
+    if (options.onUse) query('[data-gen="use"]').addEventListener('click', () => { if (value) options.onUse?.(value); });
 
     host.addEventListener('keydown', e => {
       const target = e.target as HTMLElement;
-      const typing = target instanceof HTMLSelectElement || (target instanceof HTMLInputElement && target.type === 'number');
+      const typing = target instanceof HTMLSelectElement || (target instanceof HTMLInputElement && ['number', 'text'].includes(target.type));
       if ((e.key === 'r' || e.key === 'R') && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         generate();
@@ -2574,167 +2898,177 @@ class AppController {
     const data = vaultStore.getData();
     const creds = data.credentials.filter(c => c.vaultId === data.activeVaultId);
     const report = auditVaultSecurity(creds);
+    const now = Date.now();
+    const reused = reusedPasswords(creds);
 
-    const scoreColor = report.score >= 80 ? 'var(--accent-green)' : report.score >= 50 ? 'var(--accent-orange)' : 'var(--accent-red)';
+    const groups = {
+      weak: { label: this.tr('Mots de passe faibles', 'Weak passwords'), tone: 'var(--accent-red)', items: creds.filter(c => !c.password || calculatePasswordEntropy(c.password).score <= 2) },
+      reused: { label: this.tr('Réutilisés', 'Reused'), tone: 'var(--accent-orange)', items: creds.filter(c => c.password && reused.has(c.password)) },
+      no2fa: { label: this.tr('Sans 2FA', 'No 2FA'), tone: 'var(--accent)', items: creds.filter(c => !c.totpSecret) },
+      expiry: { label: this.tr('À renouveler', 'To renew'), tone: '#f0883e', items: creds.filter(c => c.expiresAt && c.expiresAt - now <= EXPIRY_SOON_DAYS * 86_400_000) }
+    };
+    type GroupKey = keyof typeof groups;
 
-    let reusedDetailsHTML = '';
-    report.reusedMap.forEach((titles) => {
-      reusedDetailsHTML += `
-        <div class="audit-issue-row">
-          <div style="font-size:12px;font-weight:600;color:var(--text-primary);">${titles.join(' & ')}</div>
-          <span class="badge" style="color:var(--accent-red);border-color:rgba(218,54,51,0.3);">${i18n.t.audit.reusedCount} (${titles.length})</span>
-        </div>
-      `;
-    });
+    const scoreTone = report.score >= 80 ? 'var(--accent-green-bright)' : report.score >= 50 ? 'var(--accent-orange)' : 'var(--accent-red)';
+    const scoreLabel = creds.length === 0
+      ? this.tr('Rien à analyser', 'Nothing to check')
+      : report.score >= 80 ? this.tr('Bonne santé', 'Healthy') : report.score >= 50 ? this.tr('À améliorer', 'Needs work') : this.tr('À risque', 'At risk');
+    const radius = 40;
+    const circumference = 2 * Math.PI * radius;
+
+    const itemRow = (cred: CredentialItem, sub: string) => `
+      <button type="button" class="audit-item" data-cred-id="${cred.id}">
+        <span class="record-icon">${this.credentialIcon(cred, 16)}</span>
+        <span class="audit-item-text">
+          <span class="audit-item-title" style="display:block;">${this.escapeHtml(cred.title)}</span>
+          <span class="audit-item-sub">${sub}</span>
+        </span>
+      </button>`;
+
+    const describe = (key: GroupKey, cred: CredentialItem) => {
+      if (key === 'weak') {
+        if (!cred.password) return this.tr('Aucun mot de passe', 'No password');
+        const s = calculatePasswordEntropy(cred.password);
+        return `${s.label} · ${s.bits} bits`;
+      }
+      if (key === 'reused') {
+        const count = creds.filter(c => c.password === cred.password).length;
+        return this.tr(`Utilisé par ${count} identifiants`, `Used by ${count} credentials`);
+      }
+      if (key === 'no2fa') return this.escapeHtml(cred.username || cred.domain || '');
+      return expiryInfo(cred.expiresAt, (fr, en) => this.tr(fr, en), this.dateLocale())?.long ?? '';
+    };
 
     const box = this.openModal(`
       <div class="modal-header">
-        <div class="modal-title" style="display:flex;align-items:center;gap:8px;">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-          </svg>
-          ${i18n.t.audit.title}
-        </div>
-        <button class="modal-close" id="modal-close-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
+        <div class="modal-title">${i18n.t.audit.title}</div>
+        <button class="modal-close">${GEN_ICONS.close}</button>
       </div>
-      <div class="modal-body" style="max-height:70vh;overflow-y:auto;">
-        <div class="audit-score-card">
+      <div class="modal-body">
+        <div class="audit-hero">
+          <div class="audit-ring" role="img" aria-label="${this.tr('Score', 'Score')} ${report.score} / 100">
+            <svg width="92" height="92" viewBox="0 0 92 92">
+              <circle cx="46" cy="46" r="${radius}" fill="none" stroke="var(--bg-tertiary)" stroke-width="8"></circle>
+              <circle cx="46" cy="46" r="${radius}" fill="none" stroke="${scoreTone}" stroke-width="8" stroke-linecap="round"
+                stroke-dasharray="${circumference}" stroke-dashoffset="${circumference * (1 - report.score / 100)}"></circle>
+            </svg>
+            <span class="audit-ring-value" style="color:${scoreTone};">${report.score}</span>
+          </div>
           <div>
-            <div style="font-size:16px;font-weight:700;margin-bottom:4px;">${i18n.t.audit.scoreTitle}</div>
-            <div style="font-size:12px;color:var(--text-secondary);max-width:280px;line-height:1.4;">
-              ${i18n.getLocale() === 'fr' ? 'Mesure l&#x27;entropie, la non-réutilisation des mots de passe et l&#x27;activation du 2FA.' : 'Measures entropy, password reuse, and 2FA activation rate.'}
+            <div class="audit-hero-title">${scoreLabel}</div>
+            <div class="audit-hero-sub">${creds.length === 0
+              ? this.tr('Ajoutez des identifiants pour voir leur niveau de sécurité.', 'Add credentials to see how secure they are.')
+              : this.tr(`${creds.length} identifiant${creds.length > 1 ? 's' : ''} analysé${creds.length > 1 ? 's' : ''} dans ce coffre. Le score tient compte de la force, de la réutilisation et de la 2FA.`, `${creds.length} credential${creds.length > 1 ? 's' : ''} checked in this vault. The score reflects strength, reuse and 2FA.`)}</div>
+          </div>
+        </div>
+
+        <div class="audit-cards">
+          ${(Object.keys(groups) as GroupKey[]).map(key => `
+            <button type="button" class="audit-card" data-group="${key}" style="--tone:${groups[key].items.length ? groups[key].tone : 'var(--accent-green-bright)'};" ${groups[key].items.length ? '' : 'disabled'}>
+              <span class="audit-card-value">${groups[key].items.length}</span>
+              <span class="audit-card-label">${groups[key].label}</span>
+            </button>`).join('')}
+        </div>
+
+        <div class="audit-list" data-group-list hidden></div>
+
+        <div class="audit-breach">
+          <div class="audit-breach-head">
+            <div>
+              <div class="form-section-title">${this.tr('Fuites de données', 'Data breaches')}</div>
+              <div class="field-hint">${this.tr('Compare chaque mot de passe à la base Have I Been Pwned. Seuls 5 caractères de son empreinte sont envoyés.', 'Checks each password against Have I Been Pwned. Only 5 characters of its hash are sent.')}</div>
             </div>
+            <button class="btn-primary" type="button" id="btn-run-hibp" ${creds.some(c => c.password) ? '' : 'disabled'}>${this.tr('Vérifier', 'Check')}</button>
           </div>
-          <div class="audit-score-circle" style="border-color:${scoreColor};color:${scoreColor};">
-            ${report.score}<span>%</span>
-          </div>
+          <div class="audit-progress" hidden><span></span></div>
+          <div id="hibp-results"></div>
         </div>
-
-        <div class="audit-metric-grid">
-          <div class="audit-metric-box">
-            <div class="audit-metric-num" style="color:${report.weak > 0 ? 'var(--accent-red)' : 'var(--accent-green)'};">${report.weak}</div>
-            <div class="audit-metric-label">${i18n.t.audit.weakCount}</div>
-          </div>
-          <div class="audit-metric-box">
-            <div class="audit-metric-num" style="color:${report.reused > 0 ? 'var(--accent-orange)' : 'var(--accent-green)'};">${report.reused}</div>
-            <div class="audit-metric-label">${i18n.t.audit.reusedCount}</div>
-          </div>
-          <div class="audit-metric-box">
-            <div class="audit-metric-num" style="color:${report.missing2fa > 0 ? 'var(--accent-blue)' : 'var(--accent-green)'};">${report.missing2fa}</div>
-            <div class="audit-metric-label">${i18n.getLocale() === 'fr' ? 'Sans 2FA' : 'No 2FA'}</div>
-          </div>
-        </div>
-
-        <div style="margin-bottom:16px;">
-          <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;letter-spacing:0.5px;">
-            ${i18n.getLocale() === 'fr' ? 'Vérification de Fuites (Have I Been Pwned - k-anonymity)' : 'Breach Check (Have I Been Pwned - k-anonymity)'}
-          </div>
-          <div style="display:flex;gap:8px;">
-            <button class="btn-primary" id="btn-run-hibp" style="font-size:12px;padding:8px 16px;background-color:var(--bg-tertiary);border-color:var(--border-subtle);color:var(--text-primary);width:100%;">
-              ${i18n.t.audit.hibpScanButton} (${creds.length})
-            </button>
-          </div>
-          <div id="hibp-results" style="margin-top:10px;font-size:12px;line-height:1.5;"></div>
-        </div>
-
-        ${report.reusedMap.size > 0 ? `
-          <div>
-            <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;letter-spacing:0.5px;">
-              ${i18n.t.audit.reusedSectionTitle}
-            </div>
-            ${reusedDetailsHTML}
-          </div>
-        ` : ''}
       </div>
       <div class="modal-footer">
-        <button class="btn-primary" id="modal-close-audit">${i18n.t.common.close}</button>
+        <button class="btn-primary" data-close>${i18n.t.common.close}</button>
       </div>
     `);
 
-    box.querySelector('#modal-close-btn')?.addEventListener('click', () => this.closeModal());
-    box.querySelector('#modal-close-audit')?.addEventListener('click', () => this.closeModal());
+    const openCredential = (id: string) => {
+      this.closeModal();
+      this.activeView = 'all-credentials';
+      this.credentialFilters.clear();
+      this.selectedItemId = id;
+      this.renderList();
+      this.renderDetail(id);
+      document.getElementById('detail-container')?.classList.add('mobile-active');
+    };
+    box.addEventListener('click', e => {
+      const id = (e.target as HTMLElement).closest<HTMLElement>('[data-cred-id]')?.dataset.credId;
+      if (id) openCredential(id);
+    });
+
+    const listEl = box.querySelector('[data-group-list]') as HTMLElement;
+    box.querySelectorAll<HTMLButtonElement>('.audit-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const key = card.dataset.group as GroupKey;
+        const wasActive = card.classList.contains('active');
+        box.querySelectorAll('.audit-card').forEach(c => c.classList.remove('active'));
+        if (wasActive) {
+          listEl.hidden = true;
+          return;
+        }
+        card.classList.add('active');
+        listEl.hidden = false;
+        listEl.innerHTML = `
+          <div class="audit-list-title">${groups[key].label}</div>
+          ${groups[key].items.map(cred => itemRow(cred, describe(key, cred))).join('')}`;
+      });
+    });
 
     const btnHibp = box.querySelector('#btn-run-hibp') as HTMLButtonElement;
     const hibpResults = box.querySelector('#hibp-results') as HTMLElement;
+    const progress = box.querySelector('.audit-progress') as HTMLElement;
+    const progressBar = progress.querySelector('span') as HTMLElement;
 
-    btnHibp?.addEventListener('click', async () => {
+    btnHibp.addEventListener('click', async () => {
       btnHibp.disabled = true;
-      btnHibp.textContent = i18n.t.audit.scanningHibp;
-      hibpResults.innerHTML = `<span style="color:var(--text-muted);">${i18n.t.audit.scanningHibp}</span>`;
-
-      let compromisedCount = 0;
-      const compromisedList: string[] = [];
-      const breachesLabel = i18n.getLocale() === 'fr' ? 'fuites publiques connues' : 'known public breaches';
-
+      progress.hidden = false;
+      hibpResults.innerHTML = '';
       const toScan = creds.filter(c => c.password);
+      const compromised: Array<{ cred: CredentialItem; hits: number }> = [];
       let scanned = 0;
       let serviceError: string | null = null;
-      for (const c of toScan) {
+
+      for (const cred of toScan) {
         if (!btnHibp.isConnected) return; // Modale fermée pendant l'analyse
-        let pwnedHits: number;
         try {
-          pwnedHits = await checkPasswordPwnedHIBP(c.password);
+          const hits = await checkPasswordPwnedHIBP(cred.password);
+          if (hits > 0) compromised.push({ cred, hits });
         } catch (err) {
-          // Service injoignable : on s'arrête, les éléments restants ne sont PAS vérifiés
+          // Service injoignable : les éléments restants ne sont PAS vérifiés
           serviceError = err instanceof HibpUnavailableError ? err.message : String(err);
           break;
         }
         scanned++;
-        btnHibp.textContent = `${i18n.t.audit.scanningHibp} ${scanned}/${toScan.length}`;
-        if (pwnedHits > 0) {
-          compromisedCount++;
-          compromisedList.push(`<strong>${this.escapeHtml(c.title)}</strong> (${i18n.formatNumber(pwnedHits)} ${breachesLabel})`);
-        }
+        progressBar.style.width = `${Math.round((scanned / toScan.length) * 100)}%`;
+        btnHibp.textContent = `${scanned}/${toScan.length}`;
       }
 
       btnHibp.disabled = false;
-      btnHibp.textContent = this.tr('Relancer l’analyse', 'Run scan again');
+      btnHibp.textContent = this.tr('Vérifier à nouveau', 'Check again');
+      const compromisedList = compromised.map(({ cred, hits }) => itemRow(cred, this.tr(`Vu ${i18n.formatNumber(hits)} fois dans des fuites`, `Seen ${i18n.formatNumber(hits)} times in breaches`))).join('');
 
       if (serviceError !== null) {
-        const unchecked = toScan.length - scanned;
         hibpResults.innerHTML = `
-          <div style="padding:10px;background:rgba(210,153,34,0.1);border:1px solid rgba(210,153,34,0.35);border-radius:var(--radius-md);color:var(--accent-orange);">
-            <strong>${this.tr('Analyse incomplète — résultat inconnu', 'Scan incomplete — result unknown')}</strong>
-            <div style="margin-top:4px;">
-              ${this.escapeHtml(serviceError)}.
-              ${this.tr(
-                `${scanned} vérifié(s), ${unchecked} non vérifié(s). Vérifiez votre connexion puis relancez.`,
-                `${scanned} checked, ${unchecked} not checked. Check your connection and try again.`
-              )}
-            </div>
-            ${compromisedList.length ? `
-              <div style="margin-top:8px;color:var(--accent-red);">
-                <strong>${this.tr('Déjà détectés comme compromis :', 'Already found compromised:')}</strong>
-                <ul style="margin-top:4px;padding-left:18px;">${compromisedList.map(item => `<li>${item}</li>`).join('')}</ul>
-              </div>` : ''}
+          <div class="notice notice-warning">
+            <strong>${this.tr('Vérification interrompue', 'Check interrupted')}</strong><br>
+            ${this.escapeHtml(serviceError)}. ${this.tr(`${scanned} vérifié(s), ${toScan.length - scanned} restant(s).`, `${scanned} checked, ${toScan.length - scanned} left.`)}
           </div>
-        `;
-      } else if (compromisedCount > 0) {
-        const warnLabel = i18n.getLocale() === 'fr'
-          ? `${compromisedCount} identifiant(s) compromis détecté(s) dans des bases de fuites mondiales :`
-          : `${compromisedCount} credential(s) found in global data breaches:`;
+          ${compromisedList ? `<div class="audit-list" style="margin-top:8px;">${compromisedList}</div>` : ''}`;
+      } else if (compromised.length > 0) {
         hibpResults.innerHTML = `
-          <div style="padding:10px;background:rgba(218,54,51,0.1);border:1px solid rgba(218,54,51,0.3);border-radius:var(--radius-md);color:var(--accent-red);">
-            <strong>${warnLabel}</strong>
-            <ul style="margin-top:6px;padding-left:18px;">
-              ${compromisedList.map(item => `<li>${item}</li>`).join('')}
-            </ul>
-          </div>
-        `;
+          <div class="notice notice-danger"><strong>${this.tr(`${compromised.length} mot${compromised.length > 1 ? 's' : ''} de passe présent${compromised.length > 1 ? 's' : ''} dans des fuites`, `${compromised.length} password${compromised.length > 1 ? 's' : ''} found in breaches`)}</strong> · ${this.tr('changez-les dès que possible.', 'change them as soon as possible.')}</div>
+          <div class="audit-list" style="margin-top:8px;">${compromisedList}</div>`;
       } else {
-        const okLabel = i18n.getLocale() === 'fr'
-          ? 'Aucun mot de passe compromis trouvé dans les bases publiques de fuites de données.'
-          : 'No compromised passwords found in public breach databases.';
-        hibpResults.innerHTML = `
-          <div style="padding:10px;background:rgba(35,134,54,0.1);border:1px solid rgba(35,134,54,0.3);border-radius:var(--radius-md);color:var(--accent-green);">
-            ${okLabel}
-          </div>
-        `;
+        hibpResults.innerHTML = `<div class="notice notice-success">${this.tr('Aucun mot de passe trouvé dans les fuites connues.', 'No password found in known breaches.')}</div>`;
       }
+      window.setTimeout(() => { progress.hidden = true; }, 600);
     });
   }
 
@@ -2743,193 +3077,204 @@ class AppController {
     const data = vaultStore.getData();
     const creds = data.credentials.filter(c => c.vaultId === data.activeVaultId);
     const tasks = data.tasks.filter(t => t.vaultId === data.activeVaultId);
+    const limits = accountService.getLimits();
+    const tr = (fr: string, en: string) => this.tr(fr, en);
+    const activeVaultName = data.vaults.find(v => v.id === data.activeVaultId)?.name ?? 'BetterVault';
+
+    const brand = (slug: string, size = 22) => {
+      const row = BRAND_ICONS.find(([s]) => s === slug);
+      return row ? renderItemIcon({ set: 'simple', name: row[0], title: row[1], hex: row[2], body: `<path d="${row[3]}"/>` }, size) : GENERIC_FILE_ICON;
+    };
+    const bvLogo = `<img class="brand-logo brand-logo-dark" src="/brand/logo-on-dark.svg" width="22" height="22" alt="" style="width:22px;height:22px;"><img class="brand-logo brand-logo-light" src="/brand/logo-on-light.svg" width="22" height="22" alt="" style="width:22px;height:22px;">`;
+
+    type Source = { id: string; name: string; logo: string; formats: string; accept: string; steps: string[] };
+    const sources: Source[] = [
+      { id: 'bettervault', name: 'BetterVault', logo: bvLogo, formats: 'JSON', accept: '.json', steps: [tr('Dans BetterVault : Importer / exporter, onglet Exporter', 'In BetterVault: Import / export, Export tab'), tr('Export chiffré ou JSON', 'Encrypted export or JSON')] },
+      { id: 'bitwarden', name: 'Bitwarden', logo: brand('bitwarden'), formats: 'JSON · CSV', accept: '.json,.csv', steps: [tr('Coffre web : Outils, puis Exporter le coffre', 'Web vault: Tools, then Export vault'), tr('Format .json de préférence (garde les codes 2FA et les champs)', 'Prefer .json (keeps 2FA codes and fields)')] },
+      { id: '1password', name: '1Password', logo: brand('1password'), formats: '1PUX', accept: '.1pux', steps: [tr('Application de bureau : Fichier, puis Exporter', 'Desktop app: File, then Export'), tr('Choisissez le format 1PUX', 'Choose the 1PUX format')] },
+      { id: 'keepass', name: 'KeePass', logo: brand('keepassxc'), formats: 'KDBX · XML', accept: '.kdbx,.xml', steps: [tr('Choisissez directement votre base .kdbx', 'Pick your .kdbx database directly'), tr('Son mot de passe est demandé ensuite', 'Its password is asked next')] },
+      { id: 'proton', name: 'Proton Pass', logo: brand('protonpass'), formats: 'CSV · JSON', accept: '.csv,.json', steps: [tr('Paramètres, puis Exporter', 'Settings, then Export'), tr('Format CSV', 'CSV format')] },
+      { id: 'chrome', name: 'Chrome', logo: brand('googlechrome'), formats: 'CSV', accept: '.csv', steps: [tr('Ouvrez chrome://password-manager/settings', 'Open chrome://password-manager/settings'), tr('Exporter les mots de passe', 'Export passwords')] },
+      { id: 'firefox', name: 'Firefox', logo: brand('firefoxbrowser'), formats: 'CSV', accept: '.csv', steps: [tr('Ouvrez about:logins', 'Open about:logins'), tr('Menu ⋯, puis Exporter les identifiants', 'Menu ⋯, then Export logins')] },
+      { id: 'lastpass', name: 'LastPass', logo: brand('lastpass'), formats: 'CSV', accept: '.csv', steps: [tr('Options avancées, puis Exporter', 'Advanced options, then Export')] },
+      { id: 'dashlane', name: 'Dashlane', logo: brand('dashlane'), formats: 'CSV', accept: '.csv', steps: [tr('Paramètres, Exporter les données, format CSV', 'Settings, Export data, CSV format')] },
+      { id: 'apple', name: tr('Mots de passe Apple', 'Apple Passwords'), logo: brand('apple'), formats: 'CSV', accept: '.csv', steps: [tr('App Mots de passe : Fichier, puis Exporter', 'Passwords app: File, then Export')] },
+      { id: 'cxf', name: 'FIDO CXF', logo: brand('fidoalliance'), formats: 'JSON', accept: '.json', steps: [tr('Fichier Credential Exchange Format, passkeys comprises', 'Credential Exchange Format file, passkeys included')] },
+      { id: 'other', name: tr('Autre fichier', 'Other file'), logo: GENERIC_FILE_ICON, formats: 'KDBX · 1PUX · JSON · CSV · XML', accept: '.json,.csv,.xml,.kdbx,.1pux', steps: [tr('Le format est reconnu automatiquement', 'The format is detected automatically')] }
+    ];
+
+    const exportItem = (id: string, logo: string, title: string, sub: string, pill?: { label: string; safe: boolean }) => `
+      <button type="button" class="ie-export" data-export="${id}" aria-expanded="false">
+        <span class="ie-logo">${logo}</span>
+        <span class="ie-export-text">
+          <span class="ie-export-title">${title}${pill ? `<span class="ie-pill ${pill.safe ? 'ie-pill-safe' : 'ie-pill-plain'}">${pill.label}</span>` : ''}</span>
+          <span class="ie-export-sub">${sub}</span>
+        </span>
+      </button>`;
 
     const box = this.openModal(`
       <div class="modal-header">
         <div class="modal-title">${i18n.t.importExport.title}</div>
-        <button class="modal-close" id="modal-close-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
+        <button class="modal-close">${GEN_ICONS.close}</button>
       </div>
       <div class="modal-body">
-        <div class="import-export-tabs">
-          <button class="import-export-tab active" id="tab-btn-import">${i18n.t.importExport.importTab}</button>
-          <button class="import-export-tab" id="tab-btn-export">${i18n.t.importExport.exportTab} (${creds.length})</button>
+        <div class="tab-btn-group" role="tablist">
+          <button type="button" class="tab-btn active" role="tab" data-tab="import" aria-selected="true">${tr('Importer', 'Import')}</button>
+          <button type="button" class="tab-btn" role="tab" data-tab="export" aria-selected="false">${tr('Exporter', 'Export')}</button>
         </div>
 
-        <!-- Section Import -->
-        <div id="section-import">
-          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:14px;line-height:1.5;">
-            ${i18n.t.importExport.supportedFormats}
-          </p>
-          <div class="drop-zone" id="drop-zone" role="button" tabindex="0" aria-label="${this.tr('Choisir un fichier à importer', 'Choose a file to import')}">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5" style="margin:0 auto 10px;">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="17 8 12 3 7 8"></polyline>
-              <line x1="12" y1="3" x2="12" y2="15"></line>
-            </svg>
-            <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">${i18n.t.importExport.dragDropLabel}</div>
-            <div style="font-size:11px;color:var(--text-muted);">KDBX / 1PUX / CXF / JSON / CSV / XML</div>
+        <div data-panel="import">
+          <div data-step="sources">
+            <p class="modal-text" style="margin-bottom:10px;">${tr('D’où viennent vos identifiants ?', 'Where are your credentials coming from?')}</p>
+            <div class="ie-sources">
+              ${sources.map(source => `
+                <button type="button" class="ie-source" data-source="${source.id}">
+                  <span class="ie-logo">${source.logo}</span>
+                  <span>${this.escapeHtml(source.name)}</span>
+                  <span class="ie-source-format">${source.formats}</span>
+                </button>`).join('')}
+            </div>
           </div>
-          <input type="file" id="import-file-input" accept=".json,.csv,.xml,.kdbx,.1pux" hidden>
-          <div id="import-status" style="margin-top:10px;font-size:12px;color:var(--text-secondary);min-height:20px;"></div>
-          <div id="import-secret-panel" hidden>
-            <div style="margin-top:10px;padding:12px;border:1px solid var(--border-subtle);border-radius:var(--radius-md);background:var(--bg-secondary);">
-              <label class="form-label" id="import-secret-label">${this.tr('Mot de passe', 'Password')}</label>
-              <input class="form-input" id="import-secret-password" type="password" autocomplete="off">
-              <div id="import-keyfile-row" hidden>
-                <label class="form-label" style="margin-top:8px;">${this.tr('Fichier clé KeePass (optionnel)', 'KeePass key file (optional)')}</label>
+
+          <div data-step="file" hidden style="display:flex;flex-direction:column;gap:12px;">
+            <div class="ie-selected">
+              <span class="ie-logo" data-selected-logo></span>
+              <div class="ie-selected-text">
+                <div class="ie-selected-title" data-selected-name></div>
+                <div class="ie-selected-sub" data-selected-formats></div>
+              </div>
+              <button type="button" class="btn-primary btn-ghost" data-action="change-source">${tr('Changer', 'Change')}</button>
+            </div>
+            <ol class="ie-steps" data-selected-steps></ol>
+            <div class="drop-zone" id="drop-zone" role="button" tabindex="0" aria-label="${tr('Choisir un fichier à importer', 'Choose a file to import')}">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+              <div class="drop-zone-title">${tr('Déposez le fichier ici', 'Drop the file here')}</div>
+              <div class="drop-zone-sub">${tr('ou cliquez pour le choisir · rien n’est envoyé, tout est lu sur cet appareil', 'or click to choose it · nothing is uploaded, the file is read on this device')}</div>
+            </div>
+            <input type="file" id="import-file-input" hidden>
+            <div id="import-secret-panel" class="form-section" hidden>
+              <div class="form-field">
+                <label class="form-label" for="import-secret-password" id="import-secret-label">${tr('Mot de passe', 'Password')}</label>
+                <input class="form-input" id="import-secret-password" type="password" autocomplete="off">
+              </div>
+              <div class="form-field" id="import-keyfile-row" hidden>
+                <label class="form-label" for="import-keyfile">${tr('Fichier clé KeePass (facultatif)', 'KeePass key file (optional)')}</label>
                 <input class="form-input" id="import-keyfile" type="file">
               </div>
-              <div style="display:flex;justify-content:flex-end;margin-top:10px;">
-                <button class="btn-primary" id="btn-import-unlock" style="font-size:12px;">${this.tr('Déchiffrer', 'Decrypt')}</button>
+              <div class="account-actions account-actions-end">
+                <button type="button" class="btn-primary btn-accent" id="btn-import-unlock">${tr('Ouvrir le fichier', 'Open file')}</button>
               </div>
             </div>
+            <div id="import-status" aria-live="polite"></div>
           </div>
         </div>
 
-        <!-- Section Export -->
-        <div id="section-export" style="display:none;">
-          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:14px;line-height:1.5;">
-            Exportez les identifiants et tâches du coffre actif vers un fichier téléchargeable.
-          </p>
-          <div style="display:flex;flex-direction:column;gap:10px;">
-            <button class="btn-primary" id="btn-export-encrypted" style="justify-content:flex-start;padding:12px 16px;gap:12px;background-color:var(--bg-tertiary);border-color:var(--border-subtle);color:var(--text-primary);">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green)" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-              <div style="text-align:left;">
-                <div style="font-size:13px;font-weight:600;">${this.tr('Export chiffré (recommandé)', 'Encrypted export (recommended)')}</div>
-                <div style="font-size:11px;color:var(--text-muted);">${this.tr('Protégé par un mot de passe dédié (Argon2id + AES-256-GCM)', 'Protected by a dedicated password (Argon2id + AES-256-GCM)')}</div>
-              </div>
-            </button>
-            <button class="btn-primary" id="btn-export-kdbx" style="justify-content:flex-start;padding:12px 16px;gap:12px;background-color:var(--bg-tertiary);border-color:var(--border-subtle);color:var(--text-primary);">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green)" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
-              <div style="text-align:left;">
-                <div style="font-size:13px;font-weight:600;">${this.tr('Base KeePass (.kdbx 4)', 'KeePass database (.kdbx 4)')}</div>
-                <div style="font-size:11px;color:var(--text-muted);">${this.tr('Compatible KeePass, KeePassXC, Strongbox — chiffrée', 'Compatible with KeePass, KeePassXC, Strongbox — encrypted')}</div>
-              </div>
-            </button>
-            <div id="export-password-panel" hidden>
-              <div style="padding:12px;border:1px solid var(--border-subtle);border-radius:var(--radius-md);background:var(--bg-secondary);">
-                <div class="form-label" id="export-password-title"></div>
-                <input class="form-input" id="export-password" type="password" autocomplete="new-password" placeholder="${this.tr(`Mot de passe (${MIN_EXPORT_PASSWORD_LENGTH} caractères min.)`, `Password (min. ${MIN_EXPORT_PASSWORD_LENGTH} characters)`)}">
-                <input class="form-input" id="export-password-confirm" type="password" autocomplete="new-password" placeholder="${this.tr('Confirmer le mot de passe', 'Confirm password')}" style="margin-top:8px;">
-                <div id="export-password-status" style="font-size:11px;min-height:16px;margin-top:6px;color:var(--text-muted);"></div>
-                <div style="display:flex;justify-content:flex-end;margin-top:6px;">
-                  <button class="btn-primary" id="btn-export-password-confirm" style="font-size:12px;">${this.tr('Chiffrer et télécharger', 'Encrypt & download')}</button>
-                </div>
-              </div>
+        <div data-panel="export" hidden style="display:flex;flex-direction:column;gap:10px;">
+          <p class="modal-text">${tr(`Coffre « ${this.escapeHtml(activeVaultName)} » : ${creds.length} identifiant${creds.length > 1 ? 's' : ''} et ${tasks.length} tâche${tasks.length > 1 ? 's' : ''}.`, `Vault "${this.escapeHtml(activeVaultName)}": ${creds.length} credential${creds.length === 1 ? '' : 's'} and ${tasks.length} task${tasks.length === 1 ? '' : 's'}.`)}</p>
+          <div class="ie-group-title">${tr('Chiffré', 'Encrypted')}</div>
+          <div class="ie-export-list">
+            ${exportItem('encrypted', bvLogo, tr('BetterVault chiffré', 'Encrypted BetterVault'), tr('Protégé par un mot de passe dédié · Argon2id et AES-256-GCM', 'Protected by a dedicated password · Argon2id and AES-256-GCM'), { label: tr('Recommandé', 'Recommended'), safe: true })}
+            ${exportItem('kdbx', brand('keepassxc'), tr('Base KeePass (.kdbx)', 'KeePass database (.kdbx)'), 'KeePass, KeePassXC, Strongbox')}
+          </div>
+          <div id="export-password-panel" class="form-section" hidden>
+            <div class="form-section-title" id="export-password-title"></div>
+            <div class="form-row">
+              <input class="form-input" id="export-password" type="password" autocomplete="new-password" placeholder="${tr(`Mot de passe (${MIN_EXPORT_PASSWORD_LENGTH} caractères minimum)`, `Password (at least ${MIN_EXPORT_PASSWORD_LENGTH} characters)`)}">
+              <input class="form-input" id="export-password-confirm" type="password" autocomplete="new-password" placeholder="${tr('Confirmer', 'Confirm')}">
             </div>
-            <div style="padding:8px 12px;border:1px solid rgba(210,153,34,0.35);background:rgba(210,153,34,0.08);border-radius:var(--radius-md);font-size:11px;color:var(--accent-orange);line-height:1.5;">
-              ${this.tr('Les formats ci-dessous sont en clair : quiconque obtient le fichier lit tous vos secrets. Supprimez-le après usage.', 'The formats below are unencrypted: anyone who gets the file can read all your secrets. Delete it after use.')}
+            <div class="field-hint" id="export-password-status"></div>
+            <div class="account-actions account-actions-end">
+              <button type="button" class="btn-primary btn-accent" id="btn-export-password-confirm">${tr('Chiffrer et enregistrer', 'Encrypt and save')}</button>
             </div>
-            <button class="btn-primary" id="btn-export-cxf" style="justify-content:flex-start;padding:12px 16px;gap:12px;background-color:var(--bg-tertiary);border-color:var(--border-subtle);color:var(--text-primary);">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-purple)" stroke-width="2"><path d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5z"></path></svg>
-              <div style="text-align:left;">
-                <div style="font-size:13px;font-weight:600;">${this.tr('FIDO CXF — Passkeys & identifiants', 'FIDO CXF — Passkeys & credentials')}</div>
-                <div style="font-size:11px;color:var(--text-muted);">${this.tr('Credential Exchange Format de la FIDO Alliance (passkeys, TOTP, notes)', 'FIDO Alliance Credential Exchange Format (passkeys, TOTP, notes)')}</div>
-              </div>
-            </button>
-            <button class="btn-primary" id="btn-export-json" style="justify-content:flex-start;padding:12px 16px;gap:12px;background-color:var(--bg-tertiary);border-color:var(--border-subtle);color:var(--text-primary);">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-blue)" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-              <div style="text-align:left;">
-                <div style="font-size:13px;font-weight:600;">${this.tr('JSON BetterVault', 'BetterVault JSON')}</div>
-                <div style="font-size:11px;color:var(--text-muted);">Format complet préservant passkeys, 2FA, métadonnées et tâches</div>
-              </div>
-            </button>
-            <button class="btn-primary" id="btn-export-csv" style="justify-content:flex-start;padding:12px 16px;gap:12px;background-color:var(--bg-tertiary);border-color:var(--border-subtle);color:var(--text-primary);">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green)" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
-              <div style="text-align:left;">
-                <div style="font-size:13px;font-weight:600;">Exporter en CSV Universel</div>
-                <div style="font-size:11px;color:var(--text-muted);">Compatible avec Bitwarden, 1Password, Excel et navigateurs</div>
-              </div>
-            </button>
+          </div>
+
+          <div class="ie-group-title">${tr('Non chiffré', 'Not encrypted')}</div>
+          <div class="notice notice-warning">${tr('Ces fichiers contiennent vos mots de passe en clair. Supprimez-les dès qu’ils ne servent plus.', 'These files contain your passwords in plain text. Delete them once you no longer need them.')}</div>
+          <div class="ie-export-list">
+            ${exportItem('cxf', brand('fidoalliance'), 'FIDO CXF', tr('Format d’échange standard, passkeys comprises', 'Standard exchange format, passkeys included'))}
+            ${exportItem('json', bvLogo, 'JSON BetterVault', tr('Tout le contenu du coffre, tâches comprises', 'Everything in the vault, tasks included'))}
+            ${exportItem('csv', brand('bitwarden'), 'CSV', tr('Compatible Bitwarden, Chrome, Firefox et tableurs', 'Works with Bitwarden, Chrome, Firefox and spreadsheets'))}
           </div>
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn-primary" id="modal-cancel" style="color:var(--text-muted);">${i18n.t.common.close}</button>
-        <button class="btn-primary" id="modal-import-confirm" disabled>${i18n.t.importExport.importTab}</button>
+        <button class="btn-primary" data-close>${i18n.t.common.close}</button>
+        <button class="btn-primary" id="modal-import-confirm" disabled>${tr('Importer', 'Import')}</button>
       </div>
     `);
 
-    box.querySelector('#modal-close-btn')?.addEventListener('click', () => this.closeModal());
-    box.querySelector('#modal-cancel')?.addEventListener('click', () => this.closeModal());
+    const $ = <T extends HTMLElement>(selector: string) => box.querySelector(selector) as T;
+    const confirmBtn = $<HTMLButtonElement>('#modal-import-confirm');
 
-    // Navigation entre onglets
-    const tabImport = box.querySelector('#tab-btn-import') as HTMLButtonElement;
-    const tabExport = box.querySelector('#tab-btn-export') as HTMLButtonElement;
-    const secImport = box.querySelector('#section-import') as HTMLElement;
-    const secExport = box.querySelector('#section-export') as HTMLElement;
-    const confirmBtn = box.querySelector('#modal-import-confirm') as HTMLButtonElement;
-
-    tabImport?.addEventListener('click', () => {
-      tabImport.classList.add('active');
-      tabExport.classList.remove('active');
-      secImport.style.display = 'block';
-      secExport.style.display = 'none';
-      confirmBtn.style.display = 'inline-block';
+    // Onglets
+    box.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const name = tab.dataset.tab;
+        box.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(t => {
+          t.classList.toggle('active', t === tab);
+          t.setAttribute('aria-selected', String(t === tab));
+        });
+        box.querySelectorAll<HTMLElement>('[data-panel]').forEach(panel => { panel.hidden = panel.dataset.panel !== name; });
+        confirmBtn.hidden = name !== 'import';
+      });
     });
 
-    tabExport?.addEventListener('click', () => {
-      tabExport.classList.add('active');
-      tabImport.classList.remove('active');
-      secExport.style.display = 'block';
-      secImport.style.display = 'none';
-      confirmBtn.style.display = 'none';
-    });
-
-    // Actions Export
+    /* ── Export ── */
+    const exportDate = new Date().toISOString().slice(0, 10);
     const confirmPlaintextExport = () => this.confirmDialog({
-      title: this.tr('Export non chiffré', 'Unencrypted export'),
-      message: this.tr(
-        'Mots de passe, secrets 2FA et clés de passkeys seront lisibles par quiconque accède au fichier. Préférez l’export chiffré ou KeePass.',
-        'Passwords, 2FA secrets and passkey keys will be readable by anyone with the file. Prefer the encrypted or KeePass export.'
-      ),
-      confirmLabel: this.tr('Exporter en clair', 'Export anyway'),
+      title: tr('Exporter en clair ?', 'Export in plain text?'),
+      message: tr('Toute personne qui obtient ce fichier pourra lire vos mots de passe, codes 2FA et passkeys.', 'Anyone who gets this file can read your passwords, 2FA codes and passkeys.'),
+      confirmLabel: tr('Exporter', 'Export'),
       danger: true
     });
-    const exportDate = new Date().toISOString().slice(0, 10);
-    const activeVaultName = data.vaults.find(v => v.id === data.activeVaultId)?.name ?? 'BetterVault';
 
-    const exportPanel = box.querySelector('#export-password-panel') as HTMLElement;
-    const exportTitle = box.querySelector('#export-password-title') as HTMLElement;
-    const exportPwd = box.querySelector('#export-password') as HTMLInputElement;
-    const exportPwdConfirm = box.querySelector('#export-password-confirm') as HTMLInputElement;
-    const exportStatus = box.querySelector('#export-password-status') as HTMLElement;
-    const exportConfirmBtn = box.querySelector('#btn-export-password-confirm') as HTMLButtonElement;
+    const exportPanel = $<HTMLElement>('#export-password-panel');
+    const exportPwd = $<HTMLInputElement>('#export-password');
+    const exportPwdConfirm = $<HTMLInputElement>('#export-password-confirm');
+    const exportStatus = $<HTMLElement>('#export-password-status');
+    const exportConfirmBtn = $<HTMLButtonElement>('#btn-export-password-confirm');
     let protectedExportMode: 'encrypted' | 'kdbx' = 'encrypted';
 
-    const openExportPasswordPanel = (mode: 'encrypted' | 'kdbx') => {
-      protectedExportMode = mode;
-      exportTitle.textContent = mode === 'encrypted'
-        ? this.tr('Mot de passe dédié de l’export chiffré', 'Dedicated encrypted export password')
-        : this.tr('Mot de passe de la base KeePass', 'KeePass database password');
-      exportStatus.textContent = '';
-      exportPanel.hidden = false;
-      exportPwd.focus();
+    const setExportStatus = (text: string, error = false) => {
+      exportStatus.textContent = text;
+      exportStatus.classList.toggle('error', error);
     };
 
-    box.querySelector('#btn-export-encrypted')?.addEventListener('click', () => openExportPasswordPanel('encrypted'));
-    box.querySelector('#btn-export-kdbx')?.addEventListener('click', () => openExportPasswordPanel('kdbx'));
+    box.querySelectorAll<HTMLButtonElement>('[data-export]').forEach(button => {
+      button.addEventListener('click', async () => {
+        const kind = button.dataset.export;
+        if (kind === 'encrypted' || kind === 'kdbx') {
+          const reopen = exportPanel.hidden || protectedExportMode !== kind;
+          box.querySelectorAll('[data-export]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+          if (!reopen) {
+            exportPanel.hidden = true;
+            return;
+          }
+          protectedExportMode = kind;
+          button.setAttribute('aria-expanded', 'true');
+          $<HTMLElement>('#export-password-title').textContent = kind === 'encrypted'
+            ? tr('Mot de passe de l’export', 'Export password')
+            : tr('Mot de passe de la base KeePass', 'KeePass database password');
+          button.parentElement?.insertAdjacentElement('afterend', exportPanel);
+          setExportStatus('');
+          exportPanel.hidden = false;
+          exportPwd.focus();
+          return;
+        }
+        if (!(await confirmPlaintextExport())) return;
+        if (kind === 'cxf') downloadExportFile(exportCredentialsAsCxf(creds), `bettervault-${exportDate}.cxf.json`, 'application/json');
+        if (kind === 'json') downloadExportFile(exportVaultAsJson(creds, tasks), `bettervault-${exportDate}.json`, 'application/json');
+        if (kind === 'csv') downloadExportFile(exportVaultAsCsv(creds), `bettervault-${exportDate}.csv`, 'text/csv;charset=utf-8;');
+        if (!isTauri()) this.showToast(tr('Fichier enregistré dans vos téléchargements', 'File saved to your downloads'), 'success');
+      });
+    });
 
-    exportConfirmBtn?.addEventListener('click', async () => {
-      const setExportStatus = (text: string, color: string) => {
-        exportStatus.textContent = text;
-        exportStatus.style.color = color;
-      };
-      if (exportPwd.value !== exportPwdConfirm.value) {
-        setExportStatus(this.tr('Les mots de passe ne correspondent pas', 'Passwords do not match'), 'var(--accent-red)');
-        return;
-      }
-      if (exportPwd.value.length < MIN_EXPORT_PASSWORD_LENGTH) {
-        setExportStatus(this.tr(`${MIN_EXPORT_PASSWORD_LENGTH} caractères minimum`, `At least ${MIN_EXPORT_PASSWORD_LENGTH} characters`), 'var(--accent-red)');
-        return;
-      }
+    exportConfirmBtn.addEventListener('click', async () => {
+      if (exportPwd.value.length < MIN_EXPORT_PASSWORD_LENGTH) return setExportStatus(tr(`${MIN_EXPORT_PASSWORD_LENGTH} caractères minimum`, `At least ${MIN_EXPORT_PASSWORD_LENGTH} characters`), true);
+      if (exportPwd.value !== exportPwdConfirm.value) return setExportStatus(tr('Les deux mots de passe sont différents', 'The two passwords are different'), true);
 
       exportConfirmBtn.disabled = true;
-      setExportStatus(this.tr('Dérivation de la clé Argon2id en cours…', 'Deriving Argon2id key…'), 'var(--text-secondary)');
+      setExportStatus(tr('Chiffrement…', 'Encrypting…'));
       try {
         if (protectedExportMode === 'encrypted') {
           const file = await encryptExport(exportVaultAsJson(creds, tasks), exportPwd.value);
@@ -2941,78 +3286,104 @@ class AppController {
         exportPwd.value = '';
         exportPwdConfirm.value = '';
         exportPanel.hidden = true;
-        this.showToast(this.tr('Export chiffré téléchargé', 'Encrypted export downloaded'), 'success');
+        box.querySelectorAll('[data-export]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+        if (!isTauri()) this.showToast(tr('Export chiffré enregistré', 'Encrypted export saved'), 'success');
       } catch (err) {
-        setExportStatus(err instanceof Error ? err.message : String(err), 'var(--accent-red)');
+        setExportStatus(err instanceof Error ? err.message : String(err), true);
       } finally {
         exportConfirmBtn.disabled = false;
       }
     });
 
-    box.querySelector('#btn-export-cxf')?.addEventListener('click', async () => {
-      if (!(await confirmPlaintextExport())) return;
-      downloadExportFile(exportCredentialsAsCxf(creds), `bettervault-${exportDate}.cxf.json`, 'application/json');
-      this.showToast(this.tr('Export CXF téléchargé', 'CXF export downloaded'), 'success');
-    });
+    /* ── Import ── */
+    const sourcesStep = $<HTMLElement>('[data-step="sources"]');
+    const fileStep = $<HTMLElement>('[data-step="file"]');
+    const fileInput = $<HTMLInputElement>('#import-file-input');
+    const statusEl = $<HTMLElement>('#import-status');
+    const secretPanel = $<HTMLElement>('#import-secret-panel');
+    const secretLabel = $<HTMLElement>('#import-secret-label');
+    const secretPwd = $<HTMLInputElement>('#import-secret-password');
+    const keyFileRow = $<HTMLElement>('#import-keyfile-row');
+    const keyFileInput = $<HTMLInputElement>('#import-keyfile');
+    const unlockBtn = $<HTMLButtonElement>('#btn-import-unlock');
 
-    box.querySelector('#btn-export-json')?.addEventListener('click', async () => {
-      if (!(await confirmPlaintextExport())) return;
-      const jsonContent = exportVaultAsJson(creds, tasks);
-      const filename = `bettervault-${new Date().toISOString().slice(0, 10)}.json`;
-      downloadExportFile(jsonContent, filename, 'application/json');
-      this.showToast(i18n.getLocale() === 'fr' ? 'Export JSON téléchargé' : 'JSON export downloaded', 'success');
-    });
-
-    box.querySelector('#btn-export-csv')?.addEventListener('click', async () => {
-      if (!(await confirmPlaintextExport())) return;
-      const csvContent = exportVaultAsCsv(creds);
-      const filename = `bettervault-${new Date().toISOString().slice(0, 10)}.csv`;
-      downloadExportFile(csvContent, filename, 'text/csv;charset=utf-8;');
-      this.showToast(i18n.getLocale() === 'fr' ? 'Export CSV téléchargé' : 'CSV export downloaded', 'success');
-    });
-
-
-    // Actions Import
-    let parsedResult: { credentials: any[]; tasks: any[]; sourceFormat: string; count: number } = { credentials: [], tasks: [], sourceFormat: 'unknown', count: 0 };
-    const statusEl = box.querySelector('#import-status') as HTMLElement;
-
-    const secretPanel = box.querySelector('#import-secret-panel') as HTMLElement;
-    const secretLabel = box.querySelector('#import-secret-label') as HTMLElement;
-    const secretPwd = box.querySelector('#import-secret-password') as HTMLInputElement;
-    const keyFileRow = box.querySelector('#import-keyfile-row') as HTMLElement;
-    const keyFileInput = box.querySelector('#import-keyfile') as HTMLInputElement;
-    const unlockBtn = box.querySelector('#btn-import-unlock') as HTMLButtonElement;
     let pendingFile: { bytes: Uint8Array; name: string } | null = null;
+    let ready: { credentials: Partial<CredentialItem>[]; tasks: Partial<Task>[] } | null = null;
 
-    const setImportStatus = (text: string, color: string) => {
-      statusEl.textContent = text;
-      statusEl.style.color = color;
+    const setStatus = (html: string) => { statusEl.innerHTML = html; };
+
+    const showSources = () => {
+      sourcesStep.hidden = false;
+      fileStep.hidden = true;
+      pendingFile = null;
+      ready = null;
+      confirmBtn.disabled = true;
+      setStatus('');
     };
+
+    box.querySelectorAll<HTMLButtonElement>('[data-source]').forEach(button => {
+      button.addEventListener('click', () => {
+        const source = sources.find(s => s.id === button.dataset.source)!;
+        $<HTMLElement>('[data-selected-logo]').innerHTML = source.logo;
+        $<HTMLElement>('[data-selected-name]').textContent = source.name;
+        $<HTMLElement>('[data-selected-formats]').textContent = source.formats;
+        $<HTMLElement>('[data-selected-steps]').innerHTML = source.steps.map(step => `<li>${this.escapeHtml(step)}</li>`).join('');
+        fileInput.accept = source.accept;
+        sourcesStep.hidden = true;
+        fileStep.hidden = false;
+        secretPanel.hidden = true;
+        setStatus('');
+        $<HTMLElement>('#drop-zone').focus();
+      });
+    });
+    $<HTMLButtonElement>('[data-action="change-source"]').addEventListener('click', showSources);
 
     const tryParse = async (secrets?: ImportSecrets) => {
       if (!pendingFile) return;
       confirmBtn.disabled = true;
-      if (secrets) setImportStatus(this.tr('Déchiffrement en cours…', 'Decrypting…'), 'var(--text-secondary)');
+      ready = null;
+      if (secrets) setStatus(`<div class="field-hint">${tr('Déchiffrement…', 'Decrypting…')}</div>`);
       try {
-        parsedResult = await parseImportData(pendingFile.bytes, pendingFile.name, secrets);
+        const parsed = await parseImportData(pendingFile.bytes, pendingFile.name, secrets);
         secretPanel.hidden = true;
         secretPwd.value = '';
-        const foundLabel = this.tr('identifiant(s) trouvé(s)', 'item(s) found');
-        setImportStatus(`${parsedResult.count} ${foundLabel} — "${pendingFile.name}" [${parsedResult.sourceFormat}]`, 'var(--accent-green)');
-        confirmBtn.disabled = parsedResult.count === 0;
+
+        const valid = parsed.credentials.filter(c => !checkCredential(c, limits, tr));
+        const skipped = parsed.credentials.length - valid.length;
+        const capacity = remainingCapacity(vaultStore.getData(), vaultStore.getData().activeVaultId, limits);
+        const file = this.escapeHtml(pendingFile.name);
+
+        if (valid.length === 0 && parsed.tasks.length === 0) {
+          setStatus(`<div class="notice notice-warning">${tr(`Aucun identifiant trouvé dans ${file}.`, `No credentials found in ${file}.`)}</div>`);
+          return;
+        }
+        if (valid.length > capacity.credentials) {
+          setStatus(`<div class="notice notice-danger"><strong>${tr('Trop d’identifiants', 'Too many credentials')}</strong> · ${tr(`ce coffre peut encore en recevoir ${capacity.credentials}, le fichier en contient ${valid.length}.`, `this vault can take ${capacity.credentials} more, the file has ${valid.length}.`)}</div>`);
+          return;
+        }
+
+        ready = { credentials: valid, tasks: parsed.tasks };
+        const parts = [
+          tr(`${valid.length} identifiant${valid.length > 1 ? 's' : ''}`, `${valid.length} credential${valid.length === 1 ? '' : 's'}`),
+          ...(parsed.tasks.length ? [tr(`${parsed.tasks.length} tâche${parsed.tasks.length > 1 ? 's' : ''}`, `${parsed.tasks.length} task${parsed.tasks.length === 1 ? '' : 's'}`)] : [])
+        ];
+        setStatus(`
+          <div class="notice notice-success"><strong>${tr('Prêt à importer', 'Ready to import')}</strong> · ${parts.join(tr(' et ', ' and '))} (${file}, ${this.escapeHtml(parsed.sourceFormat)})</div>
+          ${skipped ? `<div class="notice notice-warning" style="margin-top:8px;">${tr(`${skipped} élément${skipped > 1 ? 's' : ''} dépasse${skipped > 1 ? 'nt' : ''} les limites du coffre et ne ser${skipped > 1 ? 'ont' : 'a'} pas importé${skipped > 1 ? 's' : ''}.`, `${skipped} item${skipped === 1 ? '' : 's'} exceed the vault limits and will be skipped.`)}</div>` : ''}`);
+        confirmBtn.disabled = false;
+        confirmBtn.focus();
       } catch (err) {
         if (err instanceof PasswordRequiredError) {
           secretPanel.hidden = false;
           keyFileRow.hidden = err.kind !== 'kdbx';
           secretLabel.textContent = err.kind === 'kdbx'
-            ? this.tr('Mot de passe de la base KeePass', 'KeePass database password')
-            : this.tr('Mot de passe de l’export chiffré', 'Encrypted export password');
-          setImportStatus(err.message, 'var(--accent-orange)');
+            ? tr('Mot de passe de la base KeePass', 'KeePass database password')
+            : tr('Mot de passe de l’export chiffré', 'Encrypted export password');
+          setStatus(secrets ? `<div class="notice notice-danger">${this.escapeHtml(err.message)}</div>` : '');
           secretPwd.focus();
           return;
         }
-        const errLabel = this.tr('Erreur de lecture', 'Read error');
-        setImportStatus(`${errLabel} : ${err instanceof Error ? err.message : String(err)}`, 'var(--accent-red)');
+        setStatus(`<div class="notice notice-danger"><strong>${tr('Fichier illisible', 'Unreadable file')}</strong> · ${this.escapeHtml(err instanceof Error ? err.message : String(err))}</div>`);
       }
     };
 
@@ -3024,7 +3395,7 @@ class AppController {
       await tryParse();
     };
 
-    unlockBtn?.addEventListener('click', async () => {
+    unlockBtn.addEventListener('click', async () => {
       const keyFile = keyFileInput.files?.[0];
       unlockBtn.disabled = true;
       try {
@@ -3036,44 +3407,46 @@ class AppController {
         unlockBtn.disabled = false;
       }
     });
-
-    secretPwd?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') unlockBtn.click();
+    secretPwd.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        unlockBtn.click();
+      }
     });
 
-    const fileInput = box.querySelector('#import-file-input') as HTMLInputElement;
     fileInput.addEventListener('change', () => {
       const file = fileInput.files?.[0];
-      // Vidé après lecture : choisir à nouveau le même fichier redéclenche l'import
+      // Vidé après lecture : choisir à nouveau le même fichier relance la lecture
       fileInput.value = '';
       if (file) void handleFile(file);
     });
 
     // Seule la zone de dépôt ouvre le sélecteur de fichier (clic ou clavier)
-    const dropZone = box.querySelector('#drop-zone') as HTMLElement;
+    const dropZone = $<HTMLElement>('#drop-zone');
     dropZone.addEventListener('click', () => fileInput.click());
-    dropZone.addEventListener('keydown', (e) => {
+    dropZone.addEventListener('keydown', e => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         fileInput.click();
       }
     });
-    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragging'); });
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragging'); });
     dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('dragging'); });
-    dropZone?.addEventListener('drop', (e) => {
+    dropZone.addEventListener('drop', e => {
       e.preventDefault();
       dropZone.classList.remove('dragging');
       const file = e.dataTransfer?.files[0];
-      if (file) handleFile(file);
+      if (file) void handleFile(file);
     });
 
-    confirmBtn?.addEventListener('click', () => {
-      vaultStore.importBulk(parsedResult.credentials, parsedResult.tasks);
+    confirmBtn.addEventListener('click', () => {
+      if (!ready) return;
+      const result = vaultStore.importBulk(ready.credentials, ready.tasks);
       pendingFile?.bytes.fill(0);
       pendingFile = null;
       this.closeModal();
-      const importedLabel = i18n.getLocale() === 'fr' ? `${parsedResult.count} identifiant(s) importé(s)` : `${parsedResult.count} item(s) imported`;
-      this.showToast(importedLabel, 'success');
+      this.showToast(tr(`${result.credentials} identifiant${result.credentials > 1 ? 's' : ''} importé${result.credentials > 1 ? 's' : ''}`, `${result.credentials} credential${result.credentials === 1 ? '' : 's'} imported`), 'success');
     });
   }
 
@@ -3196,11 +3569,23 @@ class AppController {
     const account = accountService.getAccount();
     if (!account) return;
     const isCloud = account.mode === 'cloud';
-    const locale = i18n.getLocale() === 'fr' ? 'fr-FR' : 'en-US';
+    const locale = this.dateLocale();
+    const limits = accountService.getLimits();
+    const tr = (fr: string, en: string) => this.tr(fr, en);
+    const hasRecovery = accountService.hasRecoveryKey();
+
+    const limitRows: Array<[string, string]> = [
+      [tr('Coffres', 'Vaults'), limits.maxVaults.toLocaleString(locale)],
+      [tr('Identifiants par coffre', 'Credentials per vault'), limits.maxCredentialsPerVault.toLocaleString(locale)],
+      [tr('Tâches par coffre', 'Tasks per vault'), limits.maxTasksPerVault.toLocaleString(locale)],
+      [tr('Longueur d’une note', 'Note length'), tr(`${limits.maxNoteLength.toLocaleString(locale)} caractères`, `${limits.maxNoteLength.toLocaleString(locale)} characters`)],
+      [tr('Longueur d’une URL', 'URL length'), tr(`${limits.maxUrlLength.toLocaleString(locale)} caractères`, `${limits.maxUrlLength.toLocaleString(locale)} characters`)],
+      [tr('Taille du coffre chiffré', 'Encrypted vault size'), `${Math.round(limits.maxVaultBytes / 1048576)} ${tr('Mo', 'MB')}`]
+    ];
 
     const box = this.openModal(`
       <div class="modal-header">
-        <div class="modal-title">${this.tr('Compte', 'Account')}</div>
+        <div class="modal-title">${tr('Compte', 'Account')}</div>
         <button class="modal-close">${GEN_ICONS.close}</button>
       </div>
       <div class="modal-body">
@@ -3209,91 +3594,136 @@ class AppController {
           <div class="account-summary-text">
             <div class="account-email">${this.escapeHtml(account.email)}</div>
             <div class="account-meta">${isCloud
-              ? `${this.tr('Synchronisé avec', 'Synced with')} ${this.escapeHtml(account.serverUrl ?? '')}`
-              : this.tr('Stocké uniquement sur cet appareil', 'Stored on this device only')}</div>
+              ? `${tr('Synchronisé avec', 'Synced with')} ${this.escapeHtml(account.serverUrl ?? '')}`
+              : tr('Stocké uniquement sur cet appareil', 'Stored on this device only')}</div>
           </div>
         </div>
 
         ${isCloud ? `
           <div class="account-sync-row">
             <div style="min-width:0;">
-              <div class="form-label">${this.tr('Synchronisation', 'Sync')}</div>
+              <div class="form-label">${tr('Synchronisation', 'Sync')}</div>
               <div class="account-sync-state" data-sync-state></div>
             </div>
-            <button class="btn-primary" data-action="sync">${GEN_ICONS.refresh}<span>${this.tr('Synchroniser', 'Sync now')}</span></button>
+            <button class="btn-primary" data-action="sync">${GEN_ICONS.refresh}<span>${tr('Synchroniser', 'Sync now')}</span></button>
+          </div>
+          <div class="form-section" data-reauth hidden>
+            <div class="form-section-title">${tr('Session expirée', 'Session expired')}</div>
+            <p class="modal-text">${tr('Saisissez un code de votre application d’authentification pour reprendre la synchronisation.', 'Enter a code from your authenticator app to resume syncing.')}</p>
+            <div class="form-row" style="grid-template-columns:minmax(0,1fr) auto;">
+              <input class="form-input otp-input" data-reauth-code inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000">
+              <button class="btn-primary btn-accent" data-action="reauth">${tr('Reprendre', 'Resume')}</button>
+            </div>
+            <div class="form-error" data-error="reauth" role="alert" hidden></div>
           </div>` : `
           <section class="account-section">
-            <h3 class="account-section-title">${this.tr('Activer la synchronisation', 'Enable sync')}</h3>
-            <p class="modal-text">${this.tr('Le coffre est envoyé chiffré. Le mot de passe principal et les données en clair ne quittent pas cet appareil.', 'The vault is uploaded encrypted. The master password and plaintext data never leave this device.')}</p>
+            <h3 class="account-section-title">${tr('Activer la synchronisation', 'Enable sync')}</h3>
+            <p class="modal-text">${tr('Le coffre est envoyé chiffré. Le mot de passe principal ne quitte jamais cet appareil.', 'The vault is uploaded encrypted. The master password never leaves this device.')}</p>
             <div class="form-field">
-              <label class="form-label" for="account-server">${this.tr('Adresse du serveur', 'Server address')}</label>
+              <label class="form-label" for="account-server">${tr('Adresse du serveur', 'Server address')}</label>
               <input class="form-input" id="account-server" type="url" value="${this.escapeHtml(DEFAULT_SERVER_URL)}" autocomplete="url" spellcheck="false">
             </div>
             <div class="form-field">
-              <label class="form-label" for="account-connect-password">${this.tr('Mot de passe principal', 'Master password')}</label>
+              <label class="form-label" for="account-connect-password">${tr('Mot de passe principal', 'Master password')}</label>
               <input class="form-input" id="account-connect-password" type="password" autocomplete="current-password">
             </div>
             <div class="form-error" data-error="connect" role="alert" hidden></div>
             <div class="account-actions account-actions-end">
-              <button class="btn-primary btn-accent" data-action="connect">${this.tr('Activer', 'Enable')}</button>
+              <button class="btn-primary btn-accent" data-action="connect">${tr('Activer', 'Enable')}</button>
             </div>
           </section>`}
 
         <section class="account-section">
-          <h3 class="account-section-title">${this.tr('Changer le mot de passe principal', 'Change master password')}</h3>
+          <h3 class="account-section-title">${tr('Sécurité du compte', 'Account security')}</h3>
+          ${isCloud ? `
+            <div class="switch-row" style="cursor:default;">
+              <span>${tr('Double authentification', 'Two-factor authentication')}<small>${tr('Un code de votre application (Aegis, Google Authenticator, 2FAS…) est demandé à chaque connexion', 'A code from your app (Aegis, Google Authenticator, 2FAS…) is required at every sign-in')}</small></span>
+              <span class="status-pill" data-totp-status>…</span>
+            </div>
+            <div class="account-actions account-actions-end"><button class="btn-primary" data-action="totp" disabled>${tr('Configurer', 'Set up')}</button></div>
+            <div class="form-section" data-totp-flow hidden></div>` : `
+            <p class="modal-text">${tr('La double authentification protège la connexion au serveur : activez d’abord la synchronisation.', 'Two-factor authentication protects the server sign-in: enable sync first.')}</p>`}
+          <div class="switch-row" style="cursor:default;">
+            <span>${tr('Clé de secours', 'Recovery key')}<small>${tr('Permet de choisir un nouveau mot de passe principal sans perdre le coffre', 'Lets you set a new master password without losing the vault')}</small></span>
+            <span class="status-pill ${hasRecovery ? 'on' : 'off'}">${hasRecovery ? tr('Créée', 'Created') : tr('Aucune', 'None')}</span>
+          </div>
+          <div class="account-actions account-actions-end"><button class="btn-primary" data-action="recovery">${hasRecovery ? tr('Créer une nouvelle clé', 'Create a new key') : tr('Créer une clé', 'Create a key')}</button></div>
+          <div class="form-section" data-recovery-flow hidden>
+            ${hasRecovery ? `<p class="modal-text">${tr('L’ancienne clé cessera de fonctionner.', 'The previous key will stop working.')}</p>` : ''}
+            <div class="form-row" style="grid-template-columns:minmax(0,1fr) auto;">
+              <input class="form-input" type="password" data-recovery-password autocomplete="current-password" placeholder="${tr('Mot de passe principal', 'Master password')}">
+              <button class="btn-primary btn-accent" data-action="recovery-create">${tr('Créer', 'Create')}</button>
+            </div>
+            <div class="form-error" data-error="recovery" role="alert" hidden></div>
+          </div>
+        </section>
+
+        <section class="account-section">
+          <h3 class="account-section-title">${tr('Changer le mot de passe principal', 'Change master password')}</h3>
           <div class="form-field">
-            <label class="form-label" for="account-current-password">${this.tr('Mot de passe actuel', 'Current password')}</label>
+            <label class="form-label" for="account-current-password">${tr('Mot de passe actuel', 'Current password')}</label>
             <input class="form-input" id="account-current-password" type="password" autocomplete="current-password">
           </div>
           <div class="form-row">
             <div class="form-field">
-              <label class="form-label" for="account-new-password">${this.tr('Nouveau mot de passe', 'New password')}</label>
+              <label class="form-label" for="account-new-password">${tr('Nouveau mot de passe', 'New password')}</label>
               <input class="form-input" id="account-new-password" type="password" autocomplete="new-password">
             </div>
             <div class="form-field">
-              <label class="form-label" for="account-new-password-confirm">${this.tr('Confirmer', 'Confirm')}</label>
+              <label class="form-label" for="account-new-password-confirm">${tr('Confirmer', 'Confirm')}</label>
               <input class="form-input" id="account-new-password-confirm" type="password" autocomplete="new-password">
             </div>
           </div>
           <div class="form-error" data-error="password" role="alert" hidden></div>
           <div class="account-actions account-actions-end">
-            <button class="btn-primary" data-action="change-password">${this.tr('Changer le mot de passe', 'Change password')}</button>
+            <button class="btn-primary" data-action="change-password">${tr('Changer le mot de passe', 'Change password')}</button>
           </div>
         </section>
 
+        <details class="account-section">
+          <summary class="account-section-title" style="cursor:pointer;">${isCloud ? tr('Limites du serveur', 'Server limits') : tr('Limites', 'Limits')}</summary>
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;margin-top:8px;font-size:12px;">
+            ${limitRows.map(([label, value]) => `<span style="color:var(--text-secondary);">${label}</span><span style="font-variant-numeric:tabular-nums;">${value}</span>`).join('')}
+          </div>
+        </details>
+
         <section class="account-section">
-          <h3 class="account-section-title">${this.tr('Cet appareil', 'This device')}</h3>
+          <h3 class="account-section-title">${tr('Cet appareil', 'This device')}</h3>
           <div class="account-actions">
-            <button class="btn-primary" data-action="lock">${this.tr('Verrouiller', 'Lock')}</button>
-            <button class="btn-primary btn-ghost" data-action="signout">${this.tr('Se déconnecter de cet appareil', 'Sign out of this device')}</button>
+            <button class="btn-primary" data-action="lock">${tr('Verrouiller', 'Lock')}</button>
+            <button class="btn-primary btn-ghost" data-action="signout">${tr('Se déconnecter de cet appareil', 'Sign out of this device')}</button>
           </div>
         </section>
 
         ${isCloud ? `
           <section class="account-section account-danger">
-            <h3 class="account-section-title">${this.tr('Supprimer le compte en ligne', 'Delete online account')}</h3>
-            <p class="modal-text">${this.tr('Supprime définitivement le coffre du serveur. Les données restent sur cet appareil.', 'Permanently deletes the vault from the server. Data stays on this device.')}</p>
+            <h3 class="account-section-title">${tr('Supprimer le compte en ligne', 'Delete online account')}</h3>
+            <p class="modal-text">${tr('Supprime le coffre du serveur. Les données restent sur cet appareil.', 'Deletes the vault from the server. Data stays on this device.')}</p>
             <div class="form-field">
-              <label class="form-label" for="account-delete-password">${this.tr('Mot de passe principal', 'Master password')}</label>
+              <label class="form-label" for="account-delete-password">${tr('Mot de passe principal', 'Master password')}</label>
               <input class="form-input" id="account-delete-password" type="password" autocomplete="current-password">
             </div>
             <div class="form-error" data-error="delete" role="alert" hidden></div>
             <div class="account-actions account-actions-end">
-              <button class="btn-primary btn-danger" data-action="delete">${this.tr('Supprimer le compte en ligne', 'Delete online account')}</button>
+              <button class="btn-primary btn-danger" data-action="delete">${tr('Supprimer le compte en ligne', 'Delete online account')}</button>
             </div>
           </section>` : ''}
       </div>
       <div class="modal-footer">
-        <button class="btn-primary" data-close>${this.tr('Fermer', 'Close')}</button>
+        <button class="btn-primary" data-close>${tr('Fermer', 'Close')}</button>
       </div>
     `);
 
+    const $ = <T extends HTMLElement>(selector: string) => box.querySelector(selector) as T | null;
+
     const renderState = () => {
-      const el = box.querySelector('[data-sync-state]');
+      const el = $('[data-sync-state]');
       if (!el) return;
       const state = accountService.getSyncState();
-      const when = state.lastSyncAt ? new Date(state.lastSyncAt).toLocaleString(locale) : this.tr('jamais', 'never');
-      el.textContent = `${this.syncStatusLabel(state.status)} · ${this.tr('dernière synchro', 'last sync')} ${when}${state.message ? ` — ${state.message}` : ''}`;
+      const when = state.lastSyncAt ? new Date(state.lastSyncAt).toLocaleString(locale) : tr('jamais', 'never');
+      el.textContent = `${this.syncStatusLabel(state.status)} · ${tr('dernière synchro', 'last sync')} ${when}${state.message ? ` · ${state.message}` : ''}`;
+      const reauth = $('[data-reauth]');
+      if (reauth) reauth.hidden = state.code !== 'totp_required';
     };
     renderState();
     const unsubscribe = accountService.onSyncStateChange(() => {
@@ -3302,10 +3732,14 @@ class AppController {
     });
 
     const showError = (key: string, err: unknown) => {
-      const el = box.querySelector<HTMLElement>(`[data-error="${key}"]`);
+      const el = $(`[data-error="${key}"]`);
       if (!el) return;
       el.textContent = accountErrorMessage(err);
       el.hidden = false;
+    };
+    const hideError = (key: string) => {
+      const el = $(`[data-error="${key}"]`);
+      if (el) el.hidden = true;
     };
     const runBusy = async (button: HTMLButtonElement, busyLabel: string, task: () => Promise<void>) => {
       const original = button.innerHTML;
@@ -3320,41 +3754,184 @@ class AppController {
         }
       }
     };
-    const action = (name: string) => box.querySelector<HTMLButtonElement>(`[data-action="${name}"]`);
+    const action = (name: string) => $<HTMLButtonElement>(`[data-action="${name}"]`);
 
     action('sync')?.addEventListener('click', event => {
-      void runBusy(event.currentTarget as HTMLButtonElement, this.tr('Synchronisation…', 'Syncing…'), () => accountService.syncNow());
+      void runBusy(event.currentTarget as HTMLButtonElement, tr('Synchronisation…', 'Syncing…'), () => accountService.syncNow());
+    });
+
+    action('reauth')?.addEventListener('click', event => {
+      const code = ($<HTMLInputElement>('[data-reauth-code]')?.value ?? '').trim();
+      hideError('reauth');
+      void runBusy(event.currentTarget as HTMLButtonElement, '…', async () => {
+        try {
+          await accountService.reauthenticate(code);
+        } catch (err) {
+          showError('reauth', err);
+        }
+      });
     });
 
     action('connect')?.addEventListener('click', event => {
-      const password = (box.querySelector('#account-connect-password') as HTMLInputElement).value;
-      const serverUrl = (box.querySelector('#account-server') as HTMLInputElement).value;
-      if (!password) return showError('connect', new Error(this.tr('Saisissez le mot de passe principal', 'Enter the master password')));
-      void runBusy(event.currentTarget as HTMLButtonElement, this.tr('Envoi du coffre chiffré…', 'Uploading encrypted vault…'), async () => {
+      const password = ($<HTMLInputElement>('#account-connect-password')?.value ?? '');
+      const serverUrl = ($<HTMLInputElement>('#account-server')?.value ?? '');
+      hideError('connect');
+      if (!password) return showError('connect', new Error(tr('Saisissez le mot de passe principal', 'Enter the master password')));
+      void runBusy(event.currentTarget as HTMLButtonElement, tr('Envoi du coffre chiffré…', 'Uploading encrypted vault…'), async () => {
         try {
-          await accountService.connectCloud(serverUrl, password);
-          this.closeModal();
+          const { recoveryKey } = await accountService.connectCloud(serverUrl, password);
           this.renderSyncStatus();
-          this.showToast(this.tr('Synchronisation activée', 'Sync enabled'), 'success');
+          this.showRecoveryKey(recoveryKey, tr('La synchronisation est active. Voici la clé de secours de ce compte : elle permet de retrouver l’accès si vous oubliez votre mot de passe principal.', 'Sync is on. Here is this account’s recovery key: it lets you get back in if you forget your master password.'));
         } catch (err) {
           showError('connect', err);
         }
       });
     });
 
-    action('change-password')?.addEventListener('click', event => {
-      const value = (id: string) => (box.querySelector(`#${id}`) as HTMLInputElement).value;
-      const errorEl = box.querySelector('[data-error="password"]') as HTMLElement;
-      errorEl.hidden = true;
-      if (!value('account-current-password')) return showError('password', new Error(this.tr('Saisissez le mot de passe actuel', 'Enter the current password')));
-      if (value('account-new-password') !== value('account-new-password-confirm')) {
-        return showError('password', new Error(this.tr('Les nouveaux mots de passe ne correspondent pas', 'New passwords do not match')));
+    // Double authentification du compte
+    const totpButton = action('totp');
+    const totpStatus = $('[data-totp-status]');
+    const totpFlow = $('[data-totp-flow]');
+    let totpEnabled = false;
+    const renderTotpStatus = () => {
+      if (!totpStatus || !totpButton) return;
+      totpStatus.className = `status-pill ${totpEnabled ? 'on' : 'off'}`;
+      totpStatus.textContent = totpEnabled ? tr('Activée', 'On') : tr('Désactivée', 'Off');
+      totpButton.textContent = totpEnabled ? tr('Désactiver', 'Turn off') : tr('Activer', 'Turn on');
+      totpButton.disabled = false;
+    };
+    if (isCloud && totpStatus) {
+      accountService.getCloudAccountInfo().then(info => {
+        if (!box.isConnected) return;
+        totpEnabled = info.totpEnabled;
+        renderTotpStatus();
+      }).catch(() => {
+        if (totpStatus.isConnected) totpStatus.textContent = tr('Serveur injoignable', 'Server unreachable');
+      });
+    }
+
+    totpButton?.addEventListener('click', () => {
+      if (!totpFlow) return;
+      if (!totpFlow.hidden) {
+        totpFlow.hidden = true;
+        return;
       }
-      void runBusy(event.currentTarget as HTMLButtonElement, this.tr('Changement en cours…', 'Changing…'), async () => {
+      totpFlow.hidden = false;
+      if (totpEnabled) {
+        totpFlow.innerHTML = `
+          <p class="modal-text">${tr('Confirmez avec votre mot de passe principal et un code de l’application.', 'Confirm with your master password and a code from the app.')}</p>
+          <div class="form-row">
+            <input class="form-input" type="password" data-totp-password autocomplete="current-password" placeholder="${tr('Mot de passe principal', 'Master password')}">
+            <input class="form-input otp-input" data-totp-code inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000">
+          </div>
+          <div class="form-error" data-error="totp" role="alert" hidden></div>
+          <div class="account-actions account-actions-end"><button class="btn-primary btn-danger" data-totp-disable>${tr('Désactiver', 'Turn off')}</button></div>`;
+        totpFlow.querySelector<HTMLButtonElement>('[data-totp-disable]')?.addEventListener('click', event => {
+          hideError('totp');
+          const password = totpFlow.querySelector<HTMLInputElement>('[data-totp-password]')!.value;
+          const code = totpFlow.querySelector<HTMLInputElement>('[data-totp-code]')!.value;
+          void runBusy(event.currentTarget as HTMLButtonElement, '…', async () => {
+            try {
+              await accountService.disableTotp(password, code);
+              totpEnabled = false;
+              totpFlow.hidden = true;
+              renderTotpStatus();
+              this.showToast(tr('Double authentification désactivée', 'Two-factor authentication turned off'), 'info');
+            } catch (err) {
+              showError('totp', err);
+            }
+          });
+        });
+        totpFlow.querySelector<HTMLInputElement>('[data-totp-password]')?.focus();
+        return;
+      }
+
+      totpFlow.innerHTML = `
+        <p class="modal-text">${tr('Confirmez avec votre mot de passe principal pour afficher le QR code.', 'Confirm with your master password to show the QR code.')}</p>
+        <div class="form-row" style="grid-template-columns:minmax(0,1fr) auto;">
+          <input class="form-input" type="password" data-totp-password autocomplete="current-password" placeholder="${tr('Mot de passe principal', 'Master password')}">
+          <button class="btn-primary btn-accent" data-totp-start>${tr('Continuer', 'Continue')}</button>
+        </div>
+        <div class="form-error" data-error="totp" role="alert" hidden></div>`;
+      const passwordInput = totpFlow.querySelector<HTMLInputElement>('[data-totp-password]')!;
+      passwordInput.focus();
+      totpFlow.querySelector<HTMLButtonElement>('[data-totp-start]')?.addEventListener('click', event => {
+        hideError('totp');
+        void runBusy(event.currentTarget as HTMLButtonElement, '…', async () => {
+          try {
+            const setup = await accountService.beginTotpSetup(passwordInput.value);
+            totpFlow.innerHTML = `
+              <div class="totp-setup">
+                <div class="qr-box" aria-label="QR code">${renderSVG(setup.uri, { border: 1 })}</div>
+                <div style="display:flex;flex-direction:column;gap:10px;min-width:0;">
+                  <ol class="ie-steps">
+                    <li>${tr('Scannez le QR code avec votre application d’authentification', 'Scan the QR code with your authenticator app')}</li>
+                    <li>${tr('Saisissez le code à 6 chiffres qu’elle affiche', 'Enter the 6-digit code it shows')}</li>
+                  </ol>
+                  <input class="form-input otp-input" data-totp-code inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000">
+                  <div class="form-error" data-error="totp" role="alert" hidden></div>
+                  <button class="btn-primary btn-accent" data-totp-enable style="justify-content:center;">${tr('Activer', 'Turn on')}</button>
+                  <details>
+                    <summary class="field-hint" style="cursor:pointer;">${tr('Saisir la clé à la main', 'Enter the key manually')}</summary>
+                    <code class="secret-text" style="margin-top:6px;">${setup.secret.match(/.{1,4}/g)!.join(' ')}</code>
+                  </details>
+                </div>
+              </div>`;
+            const codeInput = totpFlow.querySelector<HTMLInputElement>('[data-totp-code]')!;
+            codeInput.focus();
+            totpFlow.querySelector<HTMLButtonElement>('[data-totp-enable]')?.addEventListener('click', enableEvent => {
+              hideError('totp');
+              void runBusy(enableEvent.currentTarget as HTMLButtonElement, '…', async () => {
+                try {
+                  await accountService.enableTotp(codeInput.value);
+                  totpEnabled = true;
+                  totpFlow.hidden = true;
+                  renderTotpStatus();
+                  this.showToast(tr('Double authentification activée', 'Two-factor authentication turned on'), 'success');
+                } catch (err) {
+                  showError('totp', err);
+                }
+              });
+            });
+          } catch (err) {
+            showError('totp', err);
+          }
+        });
+      });
+    });
+
+    // Clé de secours
+    const recoveryFlow = $('[data-recovery-flow]');
+    action('recovery')?.addEventListener('click', () => {
+      if (!recoveryFlow) return;
+      recoveryFlow.hidden = !recoveryFlow.hidden;
+      if (!recoveryFlow.hidden) $<HTMLInputElement>('[data-recovery-password]')?.focus();
+    });
+    action('recovery-create')?.addEventListener('click', event => {
+      hideError('recovery');
+      const password = $<HTMLInputElement>('[data-recovery-password]')?.value ?? '';
+      void runBusy(event.currentTarget as HTMLButtonElement, '…', async () => {
+        try {
+          const key = await accountService.regenerateRecoveryKey(password);
+          this.showRecoveryKey(key, tr('Voici votre nouvelle clé de secours. L’ancienne ne fonctionne plus.', 'Here is your new recovery key. The previous one no longer works.'));
+        } catch (err) {
+          showError('recovery', err);
+        }
+      });
+    });
+
+    action('change-password')?.addEventListener('click', event => {
+      const value = (id: string) => ($<HTMLInputElement>(`#${id}`)?.value ?? '');
+      hideError('password');
+      if (!value('account-current-password')) return showError('password', new Error(tr('Saisissez le mot de passe actuel', 'Enter the current password')));
+      if (value('account-new-password') !== value('account-new-password-confirm')) {
+        return showError('password', new Error(tr('Les deux nouveaux mots de passe sont différents', 'The two new passwords are different')));
+      }
+      void runBusy(event.currentTarget as HTMLButtonElement, tr('Changement…', 'Changing…'), async () => {
         try {
           await accountService.changeMasterPassword(value('account-current-password'), value('account-new-password'));
           box.querySelectorAll<HTMLInputElement>('#account-current-password, #account-new-password, #account-new-password-confirm').forEach(input => { input.value = ''; });
-          this.showToast(this.tr('Mot de passe principal changé', 'Master password changed'), 'success', 4000);
+          this.showToast(tr('Mot de passe principal changé', 'Master password changed'), 'success', 4000);
         } catch (err) {
           showError('password', err);
         }
@@ -3366,26 +3943,61 @@ class AppController {
 
     action('delete')?.addEventListener('click', async event => {
       const button = event.currentTarget as HTMLButtonElement;
-      const password = (box.querySelector('#account-delete-password') as HTMLInputElement).value;
-      if (!password) return showError('delete', new Error(this.tr('Saisissez le mot de passe principal', 'Enter the master password')));
+      const password = $<HTMLInputElement>('#account-delete-password')?.value ?? '';
+      hideError('delete');
+      if (!password) return showError('delete', new Error(tr('Saisissez le mot de passe principal', 'Enter the master password')));
       const confirmed = await this.confirmDialog({
-        title: this.tr('Supprimer le compte en ligne ?', 'Delete online account?'),
-        message: this.tr('Le coffre sera supprimé du serveur et vos autres appareils ne pourront plus se synchroniser. Cette action est définitive.', 'The vault will be deleted from the server and your other devices will stop syncing. This cannot be undone.'),
-        confirmLabel: this.tr('Supprimer', 'Delete'),
+        title: tr('Supprimer le compte en ligne ?', 'Delete online account?'),
+        message: tr('Le coffre sera supprimé du serveur et vos autres appareils ne pourront plus se synchroniser. C’est définitif.', 'The vault will be deleted from the server and your other devices will stop syncing. This is permanent.'),
+        confirmLabel: tr('Supprimer', 'Delete'),
         danger: true
       });
       if (!confirmed) return;
-      void runBusy(button, this.tr('Suppression…', 'Deleting…'), async () => {
+      void runBusy(button, tr('Suppression…', 'Deleting…'), async () => {
         try {
           await accountService.deleteCloudAccount(password);
           this.closeModal();
           this.renderSyncStatus();
-          this.showToast(this.tr('Compte en ligne supprimé', 'Online account deleted'), 'success');
+          this.showToast(tr('Compte en ligne supprimé', 'Online account deleted'), 'success');
         } catch (err) {
           showError('delete', err);
         }
       });
     });
+  }
+
+  /** Affiche une clé de secours ; la fenêtre ne se ferme qu'après confirmation de l'enregistrement */
+  private showRecoveryKey(key: string, intro: string): void {
+    const tr = (fr: string, en: string) => this.tr(fr, en);
+    const email = accountService.getAccount()?.email ?? '';
+    const box = this.openModal(`
+      <div class="modal-header">
+        <div class="modal-title">${tr('Clé de secours', 'Recovery key')}</div>
+      </div>
+      <div class="modal-body">
+        <p class="modal-text">${intro}</p>
+        <div class="recovery-key">${formatRecoveryKey(key)}</div>
+        <div class="recovery-actions">
+          <button class="btn-primary" data-action="copy">${GEN_ICONS.copy}<span>${tr('Copier', 'Copy')}</span></button>
+          <button class="btn-primary" data-action="download">${tr('Enregistrer en .txt', 'Save as .txt')}</button>
+        </div>
+        <div class="notice notice-warning">${tr('Gardez-la en dehors de BetterVault : sur papier ou dans un endroit sûr. Elle ne sera plus affichée.', 'Keep it outside BetterVault: on paper or somewhere safe. It won’t be shown again.')}</div>
+        <label class="check-row"><input type="checkbox" data-confirm> ${tr('J’ai mis ma clé de secours en lieu sûr', 'I stored my recovery key somewhere safe')}</label>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-primary btn-accent" data-action="done" disabled>${tr('Terminé', 'Done')}</button>
+      </div>
+    `, { dismissible: false });
+
+    box.querySelector('[data-action="copy"]')?.addEventListener('click', () => void this.copyToClipboardWithAutoClear(key, tr('Clé copiée', 'Key copied'), true));
+    box.querySelector('[data-action="download"]')?.addEventListener('click', () => {
+      downloadExportFile(recoveryKeyFile(email, key, tr, this.dateLocale()), 'bettervault-cle-de-secours.txt', 'text/plain;charset=utf-8');
+    });
+    const done = box.querySelector('[data-action="done"]') as HTMLButtonElement;
+    box.querySelector<HTMLInputElement>('[data-confirm]')?.addEventListener('change', e => {
+      done.disabled = !(e.target as HTMLInputElement).checked;
+    });
+    done.addEventListener('click', () => this.closeModal());
   }
 
   /* ── Coffres ─────────────────────────────────────────────────────────── */
@@ -3394,19 +4006,34 @@ class AppController {
     const existing = vaultId ? data.vaults.find(v => v.id === vaultId) : undefined;
     const credentialCount = existing ? data.credentials.filter(c => c.vaultId === existing.id).length : 0;
     const taskCount = existing ? data.tasks.filter(t => t.vaultId === existing.id).length : 0;
+    const limits = accountService.getLimits();
+    const tr = (fr: string, en: string) => this.tr(fr, en);
     const typeOption = (type: 'personal' | 'work' | 'team', label: string) =>
       `<option value="${type}" ${existing?.type === type ? 'selected' : ''}>${label}</option>`;
 
+    if (!existing && remainingCapacity(data, data.activeVaultId, limits).vaults === 0) {
+      this.showToast(tr(`Limite de ${limits.maxVaults} coffres atteinte`, `Limit of ${limits.maxVaults} vaults reached`), 'error');
+      return;
+    }
+
+    let icon: ItemIcon | undefined = existing?.icon;
     const box = this.openModal(`
       <div class="modal-header">
-        <div class="modal-title">${existing ? this.tr('Modifier le coffre', 'Edit vault') : i18n.t.vault.newVaultModalTitle}</div>
+        <div class="modal-title">${existing ? tr('Modifier le coffre', 'Edit vault') : i18n.t.vault.newVaultModalTitle}</div>
         <button class="modal-close">${GEN_ICONS.close}</button>
       </div>
       <div class="modal-body">
-        <div class="form-field">
-          <label class="form-label" for="vault-name">${i18n.t.vault.vaultNameLabel}</label>
-          <input class="form-input" id="vault-name" type="text" maxlength="40" value="${this.escapeHtml(existing?.name ?? '')}" placeholder="${this.tr('Personnel, Travail, Famille…', 'Personal, Work, Family…')}" autocomplete="off">
+        <div class="cred-identity">
+          <button type="button" class="cred-icon-button" data-icon-button aria-expanded="false" title="${tr('Choisir une icône', 'Choose an icon')}" aria-label="${tr('Choisir une icône', 'Choose an icon')}">
+            <span data-icon-preview style="display:flex;"></span>
+            <span class="cred-icon-edit">${ACTION_ICONS.edit}</span>
+          </button>
+          <div class="form-field">
+            <label class="form-label" for="vault-name">${i18n.t.vault.vaultNameLabel}</label>
+            <input class="form-input cred-title-input" id="vault-name" type="text" maxlength="40" value="${this.escapeHtml(existing?.name ?? '')}" placeholder="${tr('Personnel, Travail, Famille…', 'Personal, Work, Family…')}" autocomplete="off" data-autofocus>
+          </div>
         </div>
+        <div data-icon-panel hidden></div>
         <div class="form-field">
           <label class="form-label" for="vault-type">${i18n.t.vault.vaultTypeLabel}</label>
           <select class="form-input" id="vault-type">
@@ -3417,34 +4044,62 @@ class AppController {
         </div>
         ${existing && data.vaults.length > 1 ? `
           <section class="account-section account-danger">
-            <h3 class="account-section-title">${this.tr('Supprimer ce coffre', 'Delete this vault')}</h3>
-            <p class="modal-text">${this.tr(`${credentialCount} identifiant(s) et ${taskCount} tâche(s) seront supprimés.`, `${credentialCount} credential(s) and ${taskCount} task(s) will be deleted.`)}</p>
+            <h3 class="account-section-title">${tr('Supprimer ce coffre', 'Delete this vault')}</h3>
+            <p class="modal-text">${tr(`${credentialCount} identifiant(s) et ${taskCount} tâche(s) seront supprimés.`, `${credentialCount} credential(s) and ${taskCount} task(s) will be deleted.`)}</p>
             <div class="account-actions account-actions-end">
-              <button class="btn-primary btn-danger" data-action="delete-vault">${this.tr('Supprimer le coffre', 'Delete vault')}</button>
+              <button class="btn-primary btn-danger" data-action="delete-vault">${tr('Supprimer le coffre', 'Delete vault')}</button>
             </div>
           </section>` : ''}
       </div>
       <div class="modal-footer">
         <button class="btn-primary" data-close>${i18n.t.common.cancel}</button>
-        <button class="btn-primary" id="modal-confirm">${existing ? this.tr('Enregistrer', 'Save') : i18n.t.vault.createVaultButton}</button>
+        <button class="btn-primary" id="modal-confirm">${existing ? tr('Enregistrer', 'Save') : i18n.t.vault.createVaultButton}</button>
       </div>
     `);
+
+    const preview = box.querySelector('[data-icon-preview]') as HTMLElement;
+    const panel = box.querySelector('[data-icon-panel]') as HTMLElement;
+    const iconButton = box.querySelector('[data-icon-button]') as HTMLButtonElement;
+    const renderPreview = () => { preview.innerHTML = icon ? renderItemIcon(icon, 28) : VAULT_ICON.replace(/width="15" height="15"/, 'width="28" height="28"'); };
+    const closePanel = () => {
+      panel.hidden = true;
+      panel.innerHTML = '';
+      panel.className = '';
+      iconButton.setAttribute('aria-expanded', 'false');
+    };
+    iconButton.addEventListener('click', () => {
+      if (!panel.hidden) return closePanel();
+      panel.hidden = false;
+      iconButton.setAttribute('aria-expanded', 'true');
+      mountIconPicker(panel, {
+        tr,
+        current: icon,
+        initialSet: 'lucide',
+        onPick: picked => {
+          icon = picked;
+          renderPreview();
+          closePanel();
+          iconButton.focus();
+        }
+      }).focus();
+    });
+    renderPreview();
 
     box.querySelector('#modal-confirm')?.addEventListener('click', () => {
       const name = (box.querySelector('#vault-name') as HTMLInputElement).value.trim();
       const type = (box.querySelector('#vault-type') as HTMLSelectElement).value as 'personal' | 'work' | 'team';
       if (!name) {
-        this.showToast(this.tr('Le nom du coffre est requis', 'Vault name is required'), 'error');
+        this.showToast(tr('Donnez un nom au coffre', 'Give the vault a name'), 'error');
         return;
       }
       if (existing) {
-        vaultStore.updateVault(existing.id, { name, type });
-        this.showToast(this.tr('Coffre enregistré', 'Vault saved'), 'success');
+        vaultStore.updateVault(existing.id, { name, type, icon });
+        this.showToast(tr('Coffre enregistré', 'Vault saved'), 'success');
       } else {
-        vaultStore.addVault(name, type);
+        vaultStore.addVault(name, type, icon);
         this.selectedItemId = null;
         this.renderDetail(null);
-        this.showToast(i18n.t.vault.vaultCreatedToast, 'success');
+        this.showToast(tr(`Coffre ${name} créé`, `Vault ${name} created`), 'success');
       }
       this.closeModal();
     });
@@ -3452,9 +4107,9 @@ class AppController {
     box.querySelector('[data-action="delete-vault"]')?.addEventListener('click', async () => {
       if (!existing) return;
       const confirmed = await this.confirmDialog({
-        title: this.tr('Supprimer le coffre ?', 'Delete vault?'),
-        message: this.tr(`« ${existing.name} », ses ${credentialCount} identifiant(s) et ses ${taskCount} tâche(s) seront définitivement supprimés.`, `"${existing.name}", its ${credentialCount} credential(s) and ${taskCount} task(s) will be permanently deleted.`),
-        confirmLabel: this.tr('Supprimer', 'Delete'),
+        title: tr('Supprimer le coffre ?', 'Delete vault?'),
+        message: tr(`« ${existing.name} », ses ${credentialCount} identifiant(s) et ses ${taskCount} tâche(s) seront définitivement supprimés.`, `"${existing.name}", its ${credentialCount} credential(s) and ${taskCount} task(s) will be permanently deleted.`),
+        confirmLabel: tr('Supprimer', 'Delete'),
         danger: true
       });
       if (!confirmed) return;
@@ -3462,7 +4117,7 @@ class AppController {
       this.selectedItemId = null;
       this.renderDetail(null);
       this.closeModal();
-      this.showToast(this.tr('Coffre supprimé', 'Vault deleted'), 'success');
+      this.showToast(tr('Coffre supprimé', 'Vault deleted'), 'success');
     });
   }
 
@@ -3519,44 +4174,84 @@ class AppController {
   }
 
   private openTagManagerModal(): void {
+    const tr = (fr: string, en: string) => this.tr(fr, en);
+    let newColor = TAG_COLORS[vaultStore.getTags().length % TAG_COLORS.length];
+
     const box = this.openModal(`
       <div class="modal-header">
         <div class="modal-title">Tags</div>
         <button class="modal-close">${GEN_ICONS.close}</button>
       </div>
       <div class="modal-body">
-        <form class="tag-create-row" data-tag-create>
-          <input class="form-input" id="tag-new-name" maxlength="32" placeholder="${this.tr('Nouveau tag', 'New tag')}" aria-label="${this.tr('Nouveau tag', 'New tag')}" autocomplete="off">
-          <button class="btn-primary btn-accent" type="submit">${this.tr('Ajouter', 'Add')}</button>
+        <form class="tag-create" data-tag-create>
+          <div class="form-row" style="grid-template-columns:minmax(0,1fr) auto;">
+            <input class="form-input" id="tag-new-name" maxlength="32" placeholder="${tr('Nom du nouveau tag', 'New tag name')}" aria-label="${tr('Nom du nouveau tag', 'New tag name')}" autocomplete="off" data-autofocus>
+            <button class="btn-primary btn-accent" type="submit">${tr('Ajouter', 'Add')}</button>
+          </div>
+          <div data-new-color></div>
+          <span class="tag-chip tag-create-preview" data-preview><span>${tr('Aperçu', 'Preview')}</span></span>
         </form>
         <div class="tag-manager-list" data-tag-list></div>
       </div>
       <div class="modal-footer">
-        <button class="btn-primary" data-close>${this.tr('Fermer', 'Close')}</button>
+        <button class="btn-primary" data-close>${tr('Fermer', 'Close')}</button>
       </div>
     `);
 
     const listEl = box.querySelector('[data-tag-list]') as HTMLElement;
+    const nameInput = box.querySelector('#tag-new-name') as HTMLInputElement;
+    const preview = box.querySelector('[data-preview]') as HTMLElement;
+
+    const updatePreview = () => {
+      preview.style.setProperty('--tag-color', newColor);
+      (preview.firstElementChild as HTMLElement).textContent = nameInput.value.trim() || tr('Aperçu', 'Preview');
+    };
+    const newColorPicker = mountColorPicker(box.querySelector('[data-new-color]') as HTMLElement, {
+      value: newColor,
+      presets: TAG_COLORS,
+      label: tr('Couleur', 'Color'),
+      customLabel: tr('Couleur personnalisée', 'Custom color'),
+      onChange: color => {
+        newColor = color;
+        updatePreview();
+      }
+    });
+    nameInput.addEventListener('input', updatePreview);
+    updatePreview();
 
     const render = () => {
       const tags = vaultStore.getTags();
       if (tags.length === 0) {
-        listEl.innerHTML = `<p class="modal-text">${this.tr('Aucun tag. Créez-en un ici ou depuis un identifiant ou une tâche.', 'No tags yet. Create one here or from a credential or task.')}</p>`;
+        listEl.innerHTML = `<p class="modal-text">${tr('Aucun tag pour l’instant. Vous pouvez aussi en créer depuis un identifiant ou une tâche.', 'No tags yet. You can also create them from a credential or a task.')}</p>`;
         return;
       }
       listEl.innerHTML = tags.map(tag => {
         const count = vaultStore.countTagUsage(tag.name);
         return `
           <div class="tag-manager-row" data-tag-id="${tag.id}">
-            <input class="form-input tag-rename" value="${this.escapeHtml(tag.name)}" maxlength="32" aria-label="${this.tr('Nom du tag', 'Tag name')}">
-            <span class="tag-usage">${this.tr(`${count} élément(s)`, `${count} item(s)`)}</span>
-            <button type="button" class="icon-btn tag-delete" title="${this.tr('Supprimer', 'Delete')}" aria-label="${this.tr('Supprimer', 'Delete')} ${this.escapeHtml(tag.name)}">${ACTION_ICONS.trash}</button>
-            <div class="tag-color-picker" role="radiogroup" aria-label="${this.tr('Couleur', 'Color')}">
-              ${TAG_COLORS.map(color => `
-                <button type="button" class="tag-swatch ${color === tag.color ? 'selected' : ''}" style="background-color:${color};" data-color="${color}" role="radio" aria-checked="${color === tag.color}" aria-label="${color}"></button>`).join('')}
-            </div>
+            <span class="tag-dot" style="background-color:${tagColor(tag.color)};"></span>
+            <input class="form-input tag-rename" value="${this.escapeHtml(tag.name)}" maxlength="32" aria-label="${tr('Nom du tag', 'Tag name')}">
+            <span class="tag-usage">${tr(`${count} élément${count > 1 ? 's' : ''}`, `${count} item${count === 1 ? '' : 's'}`)}</span>
+            <button type="button" class="icon-btn tag-delete" title="${tr('Supprimer', 'Delete')}" aria-label="${tr('Supprimer', 'Delete')} ${this.escapeHtml(tag.name)}">${ACTION_ICONS.trash}</button>
+            <div data-color-host></div>
           </div>`;
       }).join('');
+
+      listEl.querySelectorAll<HTMLElement>('[data-tag-id]').forEach(row => {
+        const tag = tags.find(t => t.id === row.dataset.tagId);
+        if (!tag) return;
+        const dot = row.querySelector('.tag-dot') as HTMLElement;
+        mountColorPicker(row.querySelector('[data-color-host]') as HTMLElement, {
+          value: tagColor(tag.color),
+          presets: TAG_COLORS,
+          label: tr(`Couleur de ${tag.name}`, `${tag.name} color`),
+          customLabel: tr('Couleur personnalisée', 'Custom color'),
+          onChange: color => {
+            vaultStore.updateTag(tag.id, { color });
+            dot.style.backgroundColor = color;
+          }
+        });
+      });
     };
 
     const rowTag = (el: HTMLElement) => {
@@ -3566,29 +4261,20 @@ class AppController {
 
     listEl.addEventListener('click', async e => {
       const target = e.target as HTMLElement;
+      if (!target.closest('.tag-delete')) return;
       const tag = rowTag(target);
       if (!tag) return;
-
-      const swatch = target.closest<HTMLElement>('.tag-swatch');
-      if (swatch?.dataset.color) {
-        vaultStore.updateTag(tag.id, { color: swatch.dataset.color });
-        render();
-        return;
-      }
-
-      if (target.closest('.tag-delete')) {
-        const count = vaultStore.countTagUsage(tag.name);
-        const confirmed = await this.confirmDialog({
-          title: this.tr('Supprimer le tag ?', 'Delete tag?'),
-          message: this.tr(`« ${tag.name} » sera retiré de ${count} élément(s). Les éléments eux-mêmes sont conservés.`, `"${tag.name}" will be removed from ${count} item(s). The items themselves are kept.`),
-          confirmLabel: this.tr('Supprimer', 'Delete'),
-          danger: true
-        });
-        if (!confirmed) return;
-        if (this.activeTag === tag.name) this.activeTag = null;
-        vaultStore.deleteTag(tag.id);
-        render();
-      }
+      const count = vaultStore.countTagUsage(tag.name);
+      const confirmed = await this.confirmDialog({
+        title: tr('Supprimer le tag ?', 'Delete tag?'),
+        message: tr(`« ${tag.name} » sera retiré de ${count} élément(s). Les éléments sont conservés.`, `"${tag.name}" will be removed from ${count} item(s). The items are kept.`),
+        confirmLabel: tr('Supprimer', 'Delete'),
+        danger: true
+      });
+      if (!confirmed) return;
+      if (this.activeTag === tag.name) this.activeTag = null;
+      vaultStore.deleteTag(tag.id);
+      render();
     });
 
     listEl.addEventListener('change', e => {
@@ -3615,15 +4301,19 @@ class AppController {
 
     box.querySelector('[data-tag-create]')?.addEventListener('submit', e => {
       e.preventDefault();
-      const input = box.querySelector('#tag-new-name') as HTMLInputElement;
       try {
-        vaultStore.createTag(input.value);
-        input.value = '';
+        const name = nameInput.value;
+        if (vaultStore.getTagByName(name)) throw new Error(tr('Ce tag existe déjà', 'This tag already exists'));
+        vaultStore.createTag(name, newColor);
+        nameInput.value = '';
+        newColor = TAG_COLORS[vaultStore.getTags().length % TAG_COLORS.length];
+        newColorPicker.setValue(newColor);
+        updatePreview();
         render();
       } catch (err) {
         this.showToast(err instanceof Error ? err.message : String(err), 'error');
       }
-      input.focus();
+      nameInput.focus();
     });
 
     render();
