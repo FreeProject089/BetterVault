@@ -798,7 +798,7 @@ class AppController {
         const isDone = task.status === 'completed';
         const isInProgress = task.status === 'in_progress';
         const dotColor = isDone ? 'var(--accent-green)' : isInProgress ? 'var(--accent-blue)' : 'var(--text-muted)';
-        const iconBg = isDone ? '35,134,54' : isInProgress ? '88,166,255' : '110,118,129';
+        const iconBg = isDone ? '35,134,54' : isInProgress ? 'var(--accent-rgb)' : '110,118,129';
 
         const statusSub = isInProgress ? i18n.t.tasks.statusInProgress : i18n.t.common.noDueDate;
         row.innerHTML = `
@@ -881,7 +881,7 @@ class AppController {
         <div class="record-badges">
           ${cred.expiresAt && cred.expiresAt < Date.now() ? '<span class="badge" style="color:var(--accent-red);border-color:rgba(218,54,51,0.4);">EXP</span>' : ''}
           ${cred.expiresAt && cred.expiresAt >= Date.now() && cred.expiresAt - Date.now() <= 14 * 86400000 ? '<span class="badge" style="color:var(--accent-orange);border-color:rgba(210,153,34,0.4);">EXP</span>' : ''}
-          ${cred.totpSecret ? '<span class="badge" style="color:var(--accent-blue);border-color:rgba(88,166,255,0.3);">2FA</span>' : ''}
+          ${cred.totpSecret ? '<span class="badge" style="color:var(--accent-blue);border-color:rgba(var(--accent-rgb),0.3);">2FA</span>' : ''}
           ${cred.passkeys && cred.passkeys.length > 0 ? '<span class="badge" style="color:var(--accent-purple);">PK</span>' : ''}
         </div>
       `;

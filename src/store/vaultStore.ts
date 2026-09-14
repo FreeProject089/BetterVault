@@ -2,7 +2,7 @@ import type { CredentialItem, Task, TagDef, UnlockedVaultData, VaultMetadata } f
 
 export const DEFAULT_VAULT_NAME = 'Personnel';
 export const MAX_TAG_LENGTH = 32;
-export const TAG_COLORS = ['#58a6ff', '#a371f7', '#2ea043', '#d29922', '#f85149', '#db61a2', '#39c5cf', '#8b949e'];
+export const TAG_COLORS = ['#7773e8', '#a371f7', '#2ea043', '#d29922', '#f85149', '#db61a2', '#39c5cf', '#8b949e'];
 
 type NewCredential = Omit<CredentialItem, 'id' | 'createdAt' | 'updatedAt'>;
 type NewTask = Omit<Task, 'id' | 'createdAt' | 'updatedAt'>;
