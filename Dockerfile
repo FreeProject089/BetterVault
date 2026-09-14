@@ -25,6 +25,7 @@ ENV NODE_ENV=production \
 COPY --from=build /app/dist ./dist
 COPY server/index.ts ./server/index.ts
 COPY server/src ./server/src
+COPY server/admin ./server/admin
 
 RUN mkdir -p /data && chown node:node /data
 USER node

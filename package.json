@@ -29,9 +29,11 @@
   "dependencies": {
     "@noble/ciphers": "^2.4.0",
     "@noble/hashes": "^2.4.0",
+    "@phosphor-icons/core": "^2.1.1",
     "fflate": "^0.8.3",
     "jsqr": "^1.4.0",
     "lucide": "^1.45.0",
-    "otpauth": "^9.5.2"
+    "otpauth": "^9.5.2",
+    "simple-icons": "^16.31.0"
   }
 }

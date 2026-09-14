@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>BetterVault · Administration</title>
+  <link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="top">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">BV</span>
+        <span>BetterVault</span>
+        <span class="brand-sub" data-i18n="admin">Administration</span>
+      </div>
+      <button class="btn ghost" id="logout" type="button" hidden data-i18n="logout">Se déconnecter</button>
+    </header>
+
+    <section class="card narrow" id="login-card">
+      <h1 data-i18n="loginTitle">Connexion administrateur</h1>
+      <p class="muted" data-i18n="loginHelp">Le jeton est affiché dans les journaux du serveur au premier démarrage, ou défini par ADMIN_TOKEN.</p>
+      <form id="login-form">
+        <label for="token" data-i18n="token">Jeton d’administration</label>
+        <input id="token" type="password" autocomplete="current-password" required>
+        <p class="error" id="login-error" role="alert" hidden></p>
+        <button class="btn primary" type="submit" data-i18n="signIn">Se connecter</button>
+      </form>
+    </section>
+
+    <div id="dashboard" hidden>
+      <section class="stats" id="stats"></section>
+
+      <form id="settings-form" class="grid">
+        <section class="card">
+          <h2 data-i18n="general">Général</h2>
+          <label for="publicUrl" data-i18n="publicUrl">Adresse publique</label>
+          <input id="publicUrl" type="url" placeholder="https://vault.exemple.fr">
+          <p class="hint" data-i18n="publicUrlHint">Affichée dans les emails envoyés aux utilisateurs.</p>
+          <label class="check"><input id="registrationOpen" type="checkbox"> <span data-i18n="registrationOpen">Inscriptions ouvertes</span></label>
+        </section>
+
+        <section class="card">
+          <h2 data-i18n="limits">Limites</h2>
+          <p class="hint" data-i18n="limitsHint">Les coffres sont chiffrés : les applications appliquent ces limites avant l’envoi, le serveur vérifie la taille.</p>
+          <div class="limits" id="limits"></div>
+        </section>
+
+        <section class="card wide">
+          <h2>SMTP</h2>
+          <p class="hint" data-i18n="smtpHint">Sert aux codes de réinitialisation et aux alertes de sécurité. Laissez l’hôte vide pour désactiver les emails.</p>
+          <div class="row">
+            <div><label for="smtpHost" data-i18n="host">Hôte</label><input id="smtpHost" placeholder="smtp.exemple.fr"></div>
+            <div class="small"><label for="smtpPort">Port</label><input id="smtpPort" type="number" min="1" max="65535"></div>
+            <div class="small">
+              <label for="smtpSecurity" data-i18n="security">Sécurité</label>
+              <select id="smtpSecurity">
+                <option value="starttls">STARTTLS</option>
+                <option value="tls">TLS</option>
+                <option value="none" data-i18n="none">Aucune</option>
+              </select>
+            </div>
+          </div>
+          <div class="row">
+            <div><label for="smtpUser" data-i18n="user">Utilisateur</label><input id="smtpUser" autocomplete="off"></div>
+            <div><label for="smtpPassword" data-i18n="password">Mot de passe</label><input id="smtpPassword" type="password" autocomplete="new-password"></div>
+          </div>
+          <label for="smtpFrom" data-i18n="from">Expéditeur</label>
+          <input id="smtpFrom" placeholder="BetterVault &lt;no-reply@exemple.fr&gt;">
+          <label class="check"><input id="smtpAllowInvalid" type="checkbox"> <span data-i18n="allowInvalid">Accepter un certificat non valide (serveur interne)</span></label>
+          <div class="row test">
+            <div><label for="testTo" data-i18n="testTo">Envoyer un email de test à</label><input id="testTo" type="email"></div>
+            <button class="btn" type="button" id="smtp-test" data-i18n="sendTest">Envoyer</button>
+          </div>
+          <p class="status" id="smtp-status" role="status"></p>
+        </section>
+
+        <div class="actions wide">
+          <p class="status" id="save-status" role="status"></p>
+          <button class="btn primary" type="submit" data-i18n="save">Enregistrer</button>
+        </div>
+      </form>
+    </div>
+  </main>
+  <script type="module" src="/admin/admin.js"></script>
+</body>
+</html>
