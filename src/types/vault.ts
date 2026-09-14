@@ -92,18 +92,6 @@ export interface TagDef {
   updatedAt: number;
 }
 
-export interface EncryptedVaultPayload {
-  version: number;
-  kdf: 'Argon2id' | 'PBKDF2-SHA256';
-  salt: string;        // Base64
-  iterations?: number;
-  memoryCost?: number;
-  cipher: 'AES-256-GCM';
-  iv: string;          // Base64
-  ciphertext: string;  // Base64
-  authTag: string;     // Base64 (si non concaténé)
-}
-
 export interface UnlockedVaultData {
   vaults: VaultMetadata[];
   activeVaultId: string;

@@ -1,22 +1,28 @@
 {
   "manifest_version": 3,
-  "name": "BUM — Zero-Knowledge Autofill & 2FA",
+  "name": "BetterVault",
   "version": "1.0.0",
-  "description": "Gestionnaire de mots de passe, coffre-fort E2EE, 2FA et tâches lié à BUM.",
-  "action": {
-    "default_popup": "popup.html",
-    "default_title": "BUM Vault"
+  "description": "Remplissage des identifiants et codes 2FA depuis votre coffre BetterVault chiffré.",
+  "icons": {
+    "32": "icons/32.png",
+    "128": "icons/128.png"
   },
-  "permissions": [
-    "activeTab",
-    "storage",
-    "clipboardWrite"
-  ],
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
-      "run_at": "document_idle"
+  "action": {
+    "default_popup": "extension/popup.html",
+    "default_title": "BetterVault",
+    "default_icon": {
+      "32": "icons/32.png",
+      "128": "icons/128.png"
     }
-  ]
+  },
+  "permissions": ["activeTab", "scripting", "clipboardWrite"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "extension@bettervault.app",
+      "strict_min_version": "121.0"
+    }
+  }
 }

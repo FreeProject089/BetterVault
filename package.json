@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:extension": "vite build --config vite.extension.config.ts",
     "preview": "vite preview",
     "server": "node --env-file-if-exists=server/.env server/index.ts",
     "typecheck": "tsc --noEmit -p . && tsc -p server",
@@ -17,6 +18,7 @@
   "license": "ISC",
   "type": "module",
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^26.5.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.0",

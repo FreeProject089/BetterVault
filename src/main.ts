@@ -443,6 +443,14 @@ class AppController {
       this.openTagManagerModal();
     });
 
+    // Exports enregistrés nativement par l'application de bureau
+    window.addEventListener('bettervault:file-saved', e => {
+      this.showToast(`${this.tr('Enregistré dans', 'Saved to')} ${(e as CustomEvent<string>).detail}`, 'success', 6000);
+    });
+    window.addEventListener('bettervault:file-save-error', e => {
+      this.showToast(`${this.tr('Enregistrement impossible', 'Could not save file')} : ${(e as CustomEvent<string>).detail}`, 'error', 6000);
+    });
+
     const viewButtons: Array<[string, TaskViewMode]> = [
       ['btn-view-list', 'list'],
       ['btn-view-kanban', 'kanban'],

@@ -1,4 +1,5 @@
 import { CredentialItem, Task } from '../types/vault';
+import { isTauri, saveFileNative } from '../platform/tauriBridge';
 
 export interface ImportResult {
   credentials: Partial<CredentialItem>[];
@@ -212,6 +213,14 @@ export function exportVaultAsCsv(credentials: CredentialItem[]): string {
  * Déclenche le téléchargement du fichier généré dans le navigateur
  */
 export function downloadExportFile(content: string | Uint8Array, filename: string, mimeType: string): void {
+  if (isTauri()) {
+    // La webview de bureau ignore les liens de téléchargement : écriture native dans Téléchargements
+    saveFileNative(filename, content)
+      .then(path => window.dispatchEvent(new CustomEvent('bettervault:file-saved', { detail: path })))
+      .catch(err => window.dispatchEvent(new CustomEvent('bettervault:file-save-error', { detail: String(err) })));
+    return;
+  }
+
   const part = typeof content === 'string' ? content : (content.slice().buffer as ArrayBuffer);
   const blob = new Blob([part], { type: mimeType });
   const url = URL.createObjectURL(blob);
@@ -221,6 +230,7 @@ export function downloadExportFile(content: string | Uint8Array, filename: strin
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  // Révocation différée : une révocation immédiate annule le téléchargement sur certains navigateurs
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 

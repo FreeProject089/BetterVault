@@ -6,9 +6,12 @@ import { i18n } from '../i18n';
 import { createEmptyVaultData } from '../store/vaultStore';
 import type { UnlockedVaultData } from '../types/vault';
 
-// Sur le web, l'API est servie à la même adresse que l'application (proxy Vite en dev, serveur BetterVault en prod)
+const isTauriRuntime = typeof (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined';
+
+// Sur le web, l'API est servie à la même adresse que l'application (proxy Vite en dev, serveur BetterVault en prod).
+// L'application de bureau et l'extension n'ont pas d'origine HTTP propre : serveur local par défaut.
 export const DEFAULT_SERVER_URL = import.meta.env.VITE_BETTERVAULT_SERVER
-  || (location.protocol === 'http:' || location.protocol === 'https:' ? location.origin : 'http://127.0.0.1:8787');
+  || (!isTauriRuntime && (location.protocol === 'http:' || location.protocol === 'https:') ? location.origin : 'http://127.0.0.1:8787');
 
 type Screen = 'unlock' | 'create' | 'signin' | 'confirm-signout';
 

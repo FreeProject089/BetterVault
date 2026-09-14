@@ -1,94 +1,151 @@
-# BUM — Zero-Knowledge Vault Manager (Passwords, 2FA & Tasks)
+# BetterVault
 
-> **Suite unifiée multi-plateforme E2EE** combinant gestionnaire d'identifiants, authentificateur 2FA, générateur diceware, audit de sécurité HIBP et gestionnaire de tâches GTD.
+Gestionnaire de mots de passe, de codes 2FA et de tâches, chiffré de bout en bout.
+Une seule interface pour le web, l'application de bureau, l'extension navigateur et le mobile.
 
----
+## Sécurité
 
-## 🔐 Fonctionnalités Clés
+- **Mot de passe maître** : dérivé avec Argon2id (64 Mio, 3 itérations), puis séparé par HKDF en une clé de chiffrement et une preuve d'authentification.
+- **Coffre** : chiffré en AES-256-GCM avec une clé aléatoire, elle-même chiffrée par la clé dérivée du mot de passe. Les données ne sont jamais écrites en clair sur l'appareil.
+- **Serveur** : ne reçoit que le coffre chiffré et la preuve d'authentification (protégée à nouveau par scrypt). Il ne voit ni le mot de passe maître, ni la clé du coffre, ni les données.
+- **Mot de passe oublié** : aucune récupération possible, par conception.
+- **Verrouillage** : manuel (`Ctrl+L`) ou après 5 minutes d'inactivité ; les clés sont effacées de la mémoire.
 
-### 1. Cryptographie & Sécurité Zero-Knowledge (E2EE)
-- **Dérivation de clé (KDF)** : PBKDF2-SHA256 (600 000 itérations, conforme OWASP) / Argon2id.
-- **Chiffrement fort** : AES-256-GCM avec vecteur d'initialisation (IV) aléatoire de 96 bits.
-- **Coffres-forts étanches** : Multi-comptes (`Personnel`, `Professionnel`, `Équipe`) avec protection par mot de passe dédié et verrouillage instantané.
-- **Audit de Sécurité & Fuites HIBP** :
-  - Calcul d'entropie mathématique en temps réel (bits & score).
-  - Détection automatique des mots de passe faibles et dupliqués.
-  - Vérification de compromission mondiale via l'API **Have I Been Pwned** en mode **k-Anonymity** (seuls 5 caractères hexadécimaux de SHA-1 sont transmis). Si le service est injoignable, l'audit l'indique comme « résultat inconnu » au lieu de conclure à l'absence de fuite.
-- **Phrases secrètes Diceware** : liste officielle EFF de 7 776 mots (≈ 12,9 bits par mot, ≈ 65 bits pour 5 mots), tirage cryptographique sans biais.
+## Fonctionnalités
 
-> Liste de mots : [EFF Large Wordlist for Passphrases](https://www.eff.org/deeplinks/2016/07/new-wordlists-random-passphrases) — Electronic Frontier Foundation, licence [CC BY 3.0 US](https://creativecommons.org/licenses/by/3.0/us/).
+- Identifiants avec historique des mots de passe, champs personnalisés, passkeys, date d'expiration
+- Codes 2FA (TOTP), import par QR code (caméra ou image)
+- Générateur de mots de passe et de phrases secrètes (liste EFF de 7 776 mots)
+- Audit : mots de passe faibles, réutilisés, sans 2FA, fuites Have I Been Pwned (k-anonymat)
+- Tâches : liste, Kanban, matrice d'Eisenhower, calendrier, sous-tâches, dépendances, récurrences, rappels
+- Tags colorés sur les identifiants et les tâches, filtre dans la barre latérale
+- Plusieurs coffres (personnel, travail, équipe)
+- Import : KeePass (`.kdbx`, `.xml`), 1Password (`.1pux`, CSV), Bitwarden (JSON, CSV), FIDO CXF, LastPass, Dashlane, Chrome, Firefox
+- Export : JSON chiffré, KeePass `.kdbx`, FIDO CXF, JSON, CSV
 
-### 2. Gestion des Identifiants & 2FA
-- **Champs complets** : Nom, URL de site, Identifiant/Email, Mot de passe avec historique des versions précédentes, Notes chiffrées, Passkeys (FIDO2 / WebAuthn).
-- **Champs personnalisés** : Support de champs dynamiques additionnels (Texte, Masqué/PIN, Question secrète) avec bouton révéler/copier.
-- **Authentificateur 2FA RFC 6238** : Génération de codes TOTP en temps réel avec compte à rebours circulaire SVG et copie en 1 clic.
-- **Scanner de QR code 2FA** : lecture `otpauth://` via la caméra ou une capture d'écran, décodage 100 % local (jsQR), pré-remplissage du service et de l'identifiant.
-- **Passkeys** : affichage de toutes les passkeys d'un identifiant, import/export avec clé privée (FIDO CXF, Bitwarden, KeePassXC).
-- **Iconographie intelligente** : Détection de domaine et affichage automatique du logo officiel via `SimpleIcons` vectoriel SVG ou fallback globe monochrome (0 emoji dans l'UI).
+## Comptes
 
-### 3. Gestionnaire de Tâches & Projets (GTD)
-- **Vues multiples** : Bascule instantanée entre **Vue Liste compacte** et **Vue Kanban** (4 colonnes de flux : À faire, En cours, Bloquée, Terminée).
-- **Sous-tâches interactives** : Checklist à cocher directement dans la vue détaillée avec suivi du ratio de complétion.
-- **Liaison bidirectionnelle** : Association d'une tâche à un identifiant pour un accès direct en 1 clic.
-- **Gestion complète** : Priorités (`Basse`, `Moyenne`, `Haute`, `Urgente`), dates d'échéances, statuts et édition.
-- **Matrice d'Eisenhower** : classement automatique Faire / Planifier / Déléguer / Plus tard (priorité + échéance à 2 jours).
-- **Récurrences avancées** : quotidienne, hebdomadaire, mensuelle, annuelle avec intervalle et date de fin ; la prochaine occurrence est créée à la complétion (fin de mois gérée).
-- **Dépendances** : une tâche ne peut être terminée tant que ses prérequis sont ouverts ; statut « Bloquée » automatique, déblocage des tâches suivantes et détection des cycles.
-- **Rappels** : notification système + toast à l'heure choisie, décalés avec la récurrence.
+À la création, deux modes :
 
-### 4. Interopérabilité & Backups
-- **Import universel** : Glisser-déposer de fichiers Bitwarden (JSON avec passkeys / CSV), 1Password (`.1pux`, CSV), KeePass (`.kdbx` 3.1 & 4.x — AES-KDF, Argon2d/id, AES-256, ChaCha20, fichier clé — et XML), FIDO CXF, LastPass, Dashlane, Passky, Chrome, Firefox et JSON brut.
-- **Export chiffré** : JSON BUM protégé par un mot de passe dédié (Argon2id + AES-256-GCM, paramètres authentifiés en AAD).
-- **Export KeePass** : base `.kdbx` 4 (Argon2id, AES-256) ouvrable dans KeePass / KeePassXC.
-- **Exports en clair** : JSON BUM, CSV universel et FIDO CXF, avec avertissement de sécurité avant téléchargement.
+- **Cet appareil** : le coffre chiffré reste dans le stockage local. La synchronisation peut être activée plus tard depuis *Compte & synchronisation*.
+- **Synchronisé** : le coffre chiffré est envoyé à un serveur BetterVault. Les autres appareils s'y connectent avec le même email et le même mot de passe maître. Les modifications faites en parallèle sont fusionnées élément par élément.
 
-### 5. Multi-Plateforme
-- **Web App / PWA** : Accessible directement dans le navigateur.
-- **Desktop Tauri v2 (`src-tauri/`)** : Application de bureau native Windows / macOS / Linux avec backend Rust : Argon2id natif, AES-256-GCM et trousseau du système (Windows Credential Manager, macOS Keychain, Secret Service) via `keyring` — utilisé pour mémoriser la clé de synchronisation.
-- **Extension Web Chromium / Firefox (`extension/`)** : Manifest V3 avec remplissage automatique des identifiants sur les pages web (Autofill).
-- **Mobile Android (`mobile-android/`)** : Application native Kotlin + Jetpack Compose avec chiffrement hardware Keystore (AES-256-GCM).
-- **Mobile iOS (`mobile-ios/`)** : Application native Swift + SwiftUI avec CryptoKit et Apple Keychain sécurisé.
+## Développement
 
----
-
-## 🛠️ Commandes Disponibles
+Prérequis : Node.js 24 ou plus récent.
 
 ```bash
-# Installer les dépendances
 npm install
+```
 
-# Démarrer le serveur de développement local
+Serveur de synchronisation (dans un terminal) :
+
+```bash
+cp server/.env.example server/.env
+```
+
+Renseigner `BETTERVAULT_SECRET` (32 caractères minimum) dans `server/.env`, puis :
+
+```bash
+npm run server
+```
+
+Application web sur http://localhost:3000 (l'API du serveur local est accessible via `/api`) :
+
+```bash
 npm run dev
+```
 
-# Compiler le bundle de production web
+Tests et vérification des types :
+
+```bash
+npm test
+```
+
+```bash
+npm run typecheck
+```
+
+## Déploiement du serveur
+
+```bash
 npm run build
+```
 
-# Lancer l'application de bureau native Tauri v2
+```bash
+BETTERVAULT_SECRET=... BETTERVAULT_STATIC=dist HOST=0.0.0.0 npm run server
+```
+
+| Variable | Rôle | Défaut |
+| --- | --- | --- |
+| `BETTERVAULT_SECRET` | Secret du serveur, 32 caractères minimum | requis |
+| `PORT` / `HOST` | Adresse d'écoute | `8787` / `127.0.0.1` |
+| `BETTERVAULT_DB` | Fichier SQLite | `server/data/bettervault.db` |
+| `BETTERVAULT_STATIC` | Dossier de l'application web à servir | aucun |
+| `CORS_ORIGINS` | Origines autorisées, séparées par des virgules | toutes |
+
+Placer le serveur derrière HTTPS : l'application refuse les serveurs en HTTP hors `localhost`.
+
+## Application de bureau (Windows, macOS, Linux)
+
+Prérequis : [Rust](https://rustup.rs) et les dépendances système de [Tauri](https://v2.tauri.app/start/prerequisites/).
+
+```bash
 npm run tauri dev
+```
 
-# Compiler l'installeur desktop de production (.msi / .exe)
+```bash
 npm run tauri build
 ```
 
----
+La version de bureau utilise Argon2id natif (Rust) et enregistre les exports dans le dossier Téléchargements.
 
-## 📁 Architecture du Projet
+## Mobile (Android, iOS)
+
+Même application via Tauri mobile. Prérequis : Android Studio (SDK + NDK) ou Xcode.
+
+```bash
+npm run tauri android init
+```
+
+```bash
+npm run tauri android dev
+```
+
+```bash
+npm run tauri ios init
+```
+
+Le trousseau du système n'est pas encore relié sur mobile.
+
+## Extension navigateur (Chrome, Edge, Firefox)
+
+```bash
+npm run build:extension
+```
+
+Charger le dossier `dist-extension` :
+
+- Chrome / Edge : `chrome://extensions`, activer le mode développeur, *Charger l'extension non empaquetée*
+- Firefox : `about:debugging`, *Charger un module complémentaire temporaire*, choisir `dist-extension/manifest.json`
+
+Le popup affiche les identifiants du site ouvert. Le remplissage n'est injecté qu'au clic et est refusé si le domaine de la page ne correspond pas à celui de l'identifiant. L'extension se connecte au même compte que l'application (mode synchronisé recommandé). Le coffre doit être déverrouillé à chaque ouverture du popup.
+
+## Structure
 
 ```
-├── src/
-│   ├── crypto/            # Moteurs WebCrypto (AES-GCM, KDF, HIBP, Diceware)
-│   ├── icons/             # Résolution vectorielle SimpleIcons + Fallback globe
-│   ├── import_export/     # Import/export : KeePass KDBX, 1PUX, CXF, export chiffré, JSON/CSV
-│   ├── platform/          # Pont Tauri (Argon2id natif, trousseau OS)
-│   ├── tasks/             # Moteur de tâches : Eisenhower, récurrences, dépendances, rappels
-│   ├── store/             # State manager réactif avec persistence chiffrée
-│   ├── styles/            # Design System Swiss Modernism & Addons
-│   ├── types/             # Schémas TypeScript stricts
-│   └── main.ts            # Contrôleur d'interface principal
-├── src-tauri/             # Backend Desktop natif Tauri v2 (Rust)
-├── extension/             # Extension Web Manifest V3 avec Autofill
-├── mobile-android/        # Application native Android (Kotlin, Jetpack Compose, Keystore)
-├── mobile-ios/            # Application native iOS (Swift, SwiftUI, CryptoKit, Keychain)
-├── Prompt/                # Cahier des charges & spécifications UI/UX
-└── index.html             # Point d'entrée de l'application
+src/
+  account/        compte, cryptographie du compte, client du serveur, fusion
+  crypto/         entropie, générateurs, TOTP, QR code, HIBP
+  extension/      popup et remplissage de l'extension
+  import_export/  KeePass, 1Password, CXF, exports chiffrés, JSON, CSV
+  store/          état du coffre déchiffré en mémoire
+  tasks/          moteur des tâches
+  ui/             écran de compte, saisie de tags
+server/           API de synchronisation (Node.js + SQLite)
+src-tauri/        application de bureau et mobile (Rust)
+extension/        manifeste et page du popup
+tests/            tests (Vitest)
 ```
+
+Liste de mots : [EFF Large Wordlist](https://www.eff.org/deeplinks/2016/07/new-wordlists-random-passphrases), Electronic Frontier Foundation, licence CC BY 3.0 US.

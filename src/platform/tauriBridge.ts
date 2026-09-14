@@ -42,6 +42,12 @@ export async function nativeArgon2id(
   }
 }
 
+/** Enregistre un fichier dans le dossier Téléchargements de l'appareil (application de bureau) */
+export async function saveFileNative(fileName: string, content: string | Uint8Array): Promise<string> {
+  const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : content;
+  return tauriInvoke<string>('save_export_file', { fileName, bytes: Array.from(bytes) });
+}
+
 /** Trousseau du système (Windows Credential Manager, macOS Keychain, Secret Service) */
 export const osKeychain = {
   async isAvailable(): Promise<boolean> {
