@@ -1,0 +1,16 @@
+node_modules
+dist
+dist-extension
+site
+.git
+.claude
+.vscode
+.idea
+src-tauri/target
+server/data
+server/.env
+.env
+*.log
+docs
+Assets
+Prompt

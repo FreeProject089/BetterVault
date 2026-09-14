@@ -1,0 +1,68 @@
+site_name: BetterVault
+site_description: Documentation de BetterVault — mots de passe, 2FA et tâches chiffrés de bout en bout
+docs_dir: docs
+site_dir: site
+strict: true
+
+theme:
+  name: material
+  language: fr
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/weather-sunny
+        name: Mode clair
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/weather-night
+        name: Mode sombre
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.keys
+
+nav:
+  - Accueil: index.md
+  - Guide:
+      - Premiers pas: guide/premiers-pas.md
+      - Identifiants et 2FA: guide/identifiants.md
+      - Tâches: guide/taches.md
+      - Coffres et tags: guide/coffres-tags.md
+      - Import et export: guide/import-export.md
+      - Compte et synchronisation: guide/synchronisation.md
+      - Extension navigateur: guide/extension.md
+      - Raccourcis clavier: guide/raccourcis.md
+  - Déploiement:
+      - Docker: deploiement/docker.md
+      - Sans Docker: deploiement/sans-docker.md
+      - Configuration et sauvegardes: deploiement/configuration.md
+  - Applications:
+      - Bureau et mobile: applications/bureau-mobile.md
+  - Sécurité: securite.md
+  - Développement:
+      - Architecture: developpement/architecture.md
+      - API du serveur: developpement/api.md
+      - Contribuer: developpement/contribuer.md

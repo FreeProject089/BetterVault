@@ -27,6 +27,10 @@ dist-extension
 # Serveur BetterVault : base de données et secrets locaux
 server/data
 server/.env
+.env
+
+# Documentation générée (mkdocs build)
+site
 
 # Tauri build artifacts
 src-tauri/target

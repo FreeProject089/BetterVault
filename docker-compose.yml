@@ -1,0 +1,41 @@
+name: bettervault
+
+services:
+  bettervault:
+    build: .
+    image: bettervault:latest
+    restart: unless-stopped
+    environment:
+      BETTERVAULT_SECRET: ${BETTERVAULT_SECRET:?Définir BETTERVAULT_SECRET dans le fichier .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+    volumes:
+      - bettervault-data:/data
+    ports:
+      # Accessible uniquement depuis la machine hôte ; utiliser le profil « https » pour l'exposer
+      - "127.0.0.1:${BETTERVAULT_PORT:-8787}:8787"
+
+  # HTTPS automatique (Let's Encrypt) : docker compose --profile https up -d
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on:
+      bettervault:
+        condition: service_healthy
+    environment:
+      # Requis uniquement avec le profil https (renseigner DOMAIN dans .env)
+      DOMAIN: ${DOMAIN:-}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  bettervault-data:
+  caddy-data:
+  caddy-config:

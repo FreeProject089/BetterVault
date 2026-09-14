@@ -66,7 +66,37 @@ npm test
 npm run typecheck
 ```
 
-## Déploiement du serveur
+## Documentation
+
+La documentation complète (guide, déploiement, sécurité, API) est dans `docs/` :
+
+```bash
+pip install -r docs/requirements.txt
+```
+
+```bash
+mkdocs serve
+```
+
+## Docker
+
+```bash
+cp .env.example .env
+```
+
+Renseigner `BETTERVAULT_SECRET` dans `.env`, puis :
+
+```bash
+docker compose up -d --build
+```
+
+BetterVault (application web et serveur de synchronisation) est disponible sur http://127.0.0.1:8787. Pour un accès public en HTTPS avec certificat automatique, renseigner `DOMAIN` et `TRUST_PROXY=true`, puis :
+
+```bash
+docker compose --profile https up -d --build
+```
+
+## Déploiement du serveur sans Docker
 
 ```bash
 npm run build

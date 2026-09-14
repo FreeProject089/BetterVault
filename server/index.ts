@@ -20,7 +20,12 @@ const corsOrigins = process.env.CORS_ORIGINS
 
 mkdirSync(dirname(dbPath), { recursive: true });
 
-const api = createApp({ db: openDatabase(dbPath), serverSecret: secret, corsOrigins });
+const api = createApp({
+  db: openDatabase(dbPath),
+  serverSecret: secret,
+  corsOrigins,
+  trustProxy: process.env.TRUST_PROXY === 'true'
+});
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',

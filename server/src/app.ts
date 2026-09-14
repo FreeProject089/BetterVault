@@ -28,6 +28,8 @@ export interface AppOptions {
   maxBodyBytes?: number;
   minKdfMemoryKib?: number;
   authRateLimit?: { windowMs: number; max: number };
+  /** Derrière un reverse proxy : utiliser X-Forwarded-For pour identifier le client */
+  trustProxy?: boolean;
   now?: () => number;
 }
 
@@ -155,8 +157,13 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
     deleteExpiredSessions: db.prepare('DELETE FROM sessions WHERE expires_at <= ?')
   };
 
+  const clientAddress = (req: IncomingMessage) => {
+    const forwarded = options.trustProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() : '';
+    return forwarded || req.socket.remoteAddress || 'unknown';
+  };
+
   const limit = (req: IncomingMessage, bucket: string) => {
-    const key = `${bucket}:${req.socket.remoteAddress ?? 'unknown'}`;
+    const key = `${bucket}:${clientAddress(req)}`;
     const current = now();
     const entry = attempts.get(key);
     if (!entry || entry.resetAt <= current) {

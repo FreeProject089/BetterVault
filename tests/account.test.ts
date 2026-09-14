@@ -337,6 +337,41 @@ describe('Serveur BetterVault + synchronisation multi-appareils', () => {
     expect(deviceB.service.getSyncState().message).toContain('modifié sur un autre appareil');
   });
 
+  it('limite les tentatives par client réel derrière un proxy, sans faire confiance à l’en-tête sinon', async () => {
+    const startLimitedServer = async (trustProxy: boolean) => {
+      const limited = createServer(createApp({
+        db: openDatabase(':memory:'),
+        serverSecret: 'secret-de-test-suffisamment-long-0123456789',
+        minKdfMemoryKib: 8,
+        authRateLimit: { windowMs: 60_000, max: 2 },
+        trustProxy
+      }));
+      await new Promise<void>(resolve => limited.listen(0, '127.0.0.1', resolve));
+      return { limited, url: `http://127.0.0.1:${(limited.address() as AddressInfo).port}` };
+    };
+    const prelogin = (url: string, forwardedFor: string) => fetch(`${url}/api/v1/sessions/prelogin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': forwardedFor },
+      body: JSON.stringify({ email: 'proxy@exemple.fr' })
+    }).then(r => r.status);
+
+    const behindProxy = await startLimitedServer(true);
+    try {
+      expect([await prelogin(behindProxy.url, '203.0.113.1'), await prelogin(behindProxy.url, '203.0.113.1'), await prelogin(behindProxy.url, '203.0.113.1')]).toEqual([200, 200, 429]);
+      expect(await prelogin(behindProxy.url, '203.0.113.2')).toBe(200);
+    } finally {
+      await new Promise<void>(resolve => behindProxy.limited.close(() => resolve()));
+    }
+
+    const direct = await startLimitedServer(false);
+    try {
+      // En-tête forgé ignoré : les trois requêtes viennent de la même connexion
+      expect([await prelogin(direct.url, '198.51.100.1'), await prelogin(direct.url, '198.51.100.2'), await prelogin(direct.url, '198.51.100.3')]).toEqual([200, 200, 429]);
+    } finally {
+      await new Promise<void>(resolve => direct.limited.close(() => resolve()));
+    }
+  });
+
   it('refuse une adresse qui ne répond pas comme un serveur BetterVault', async () => {
     const htmlServer = createServer((_req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/html' }).end('<!DOCTYPE html><html></html>');
