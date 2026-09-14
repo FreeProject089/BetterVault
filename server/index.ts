@@ -20,8 +20,9 @@ const corsOrigins = process.env.CORS_ORIGINS
 
 mkdirSync(dirname(dbPath), { recursive: true });
 
+const db = openDatabase(dbPath);
 const api = createApp({
-  db: openDatabase(dbPath),
+  db,
   serverSecret: secret,
   corsOrigins,
   trustProxy: process.env.TRUST_PROXY === 'true'
@@ -78,3 +79,15 @@ server.on('error', (err: NodeJS.ErrnoException) => {
 server.listen(port, host, () => {
   console.log(`BetterVault server: http://${host}:${port}${staticDir ? ` (application ${staticDir})` : ''} (base ${dbPath})`);
 });
+
+// Arrêt propre (docker stop, Ctrl+C) : fin des requêtes en cours puis fermeture de la base
+function shutdown(): void {
+  server.close(() => {
+    db.close();
+    process.exit(0);
+  });
+  server.closeIdleConnections();
+  setTimeout(() => process.exit(0), 5000).unref();
+}
+process.once('SIGTERM', shutdown);
+process.once('SIGINT', shutdown);
