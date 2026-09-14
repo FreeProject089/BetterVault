@@ -12,6 +12,7 @@ import { normalizeTotpInput, parseOtpAuthUri } from './crypto/otpauthUri';
 import { CameraQrScanner, decodeQrFromFile } from './crypto/qrScanner';
 import { AccountService, type SyncStatus } from './account/accountService';
 import { createDeviceStorage } from './platform/storage';
+import { isTauri } from './platform/tauriBridge';
 import type { UnlockedVaultData } from './types/vault';
 import {
   EisenhowerQuadrant,
@@ -3679,13 +3680,23 @@ class AppController {
    BOOTSTRAP
    ════════════════════════════════════════════════════════════════════════════ */
 // Le stockage de l'appareil est chargé avant l'interface : fichier natif sous Tauri, navigateur sinon
-void createDeviceStorage().then(storage => {
+createDeviceStorage().then(storage => {
   accountService = new AccountService({ storage });
   new AppController();
+}).catch(err => {
+  // Ne jamais démarrer sur un stockage vide : un nouveau compte écraserait le fichier existant
+  console.error(err);
+  const box = document.createElement('div');
+  box.setAttribute('role', 'alert');
+  box.style.cssText = 'position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:24px;background:#0b0f17;color:#e6e9ef;font:15px system-ui;text-align:center';
+  box.textContent = navigator.language.startsWith('fr')
+    ? `Impossible de lire les données de BetterVault sur cet appareil. Le fichier n'a pas été modifié. Détail : ${String(err)}`
+    : `BetterVault could not read its data on this device. The file was not modified. Details: ${String(err)}`;
+  document.body.append(box);
 });
 
-// Enregistrement PWA Service Worker
-if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+// Service worker (hors ligne) uniquement pour le site : l'app Tauri embarque déjà ses fichiers
+if ('serviceWorker' in navigator && window.location.protocol.startsWith('http') && !isTauri()) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {
       // Ignorer si non servi sous HTTP/HTTPS (ex: tauri:// ou file://)
