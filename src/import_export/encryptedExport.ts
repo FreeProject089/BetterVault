@@ -7,7 +7,7 @@ import { nativeArgon2id } from '../platform/tauriBridge';
  * pour empêcher toute altération silencieuse de l'en-tête.
  */
 
-export const ENCRYPTED_EXPORT_FORMAT = 'bum-encrypted-export';
+export const ENCRYPTED_EXPORT_FORMAT = 'bettervault-encrypted-export';
 export const MIN_EXPORT_PASSWORD_LENGTH = 10;
 
 export interface Argon2Params {

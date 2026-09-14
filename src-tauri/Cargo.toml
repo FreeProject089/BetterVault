@@ -1,8 +1,8 @@
 [package]
-name = "bum-desktop"
+name = "bettervault"
 version = "1.0.0"
-description = "BUM — Zero-Knowledge Passwords, 2FA & Tasks"
-authors = ["BUM Team"]
+description = "BetterVault"
+authors = ["BetterVault"]
 edition = "2021"
 
 [build-dependencies]

@@ -59,7 +59,7 @@ export function parseOtpAuthUri(input: string): OtpAuthInfo | null {
 }
 
 export function buildOtpAuthUri(info: Omit<OtpAuthInfo, 'type'>): string {
-  const label = info.issuer ? `${info.issuer}:${info.account ?? ''}` : (info.account || 'BUM');
+  const label = info.issuer ? `${info.issuer}:${info.account ?? ''}` : (info.account || 'BetterVault');
   const params = new URLSearchParams({
     secret: info.secret,
     algorithm: info.algorithm,

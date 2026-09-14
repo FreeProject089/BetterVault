@@ -23,6 +23,10 @@ dist-ssr
 *.sln
 *.sw?
 
+# Serveur BetterVault : base de données et secrets locaux
+server/data
+server/.env
+
 # Tauri build artifacts
 src-tauri/target
 

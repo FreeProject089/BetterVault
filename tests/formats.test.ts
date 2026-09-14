@@ -214,11 +214,11 @@ describe('Export chiffré Argon2id + AES-256-GCM', () => {
   });
 
   it('est reconnu et déchiffré par le routeur d’import', async () => {
-    const inner = JSON.stringify({ generator: 'BUM', credentials: [{ title: 'A', password: 'b' }], tasks: [] });
+    const inner = JSON.stringify({ generator: 'BetterVault', credentials: [{ title: 'A', password: 'b' }], tasks: [] });
     const bytes = new TextEncoder().encode(await encryptExport(inner, 'correct horse battery', params));
     await expect(parseImportData(bytes, 'backup.json')).rejects.toBeInstanceOf(PasswordRequiredError);
     const result = await parseImportData(bytes, 'backup.json', { password: 'correct horse battery' });
-    expect(result.sourceFormat).toBe('BUM Canonical Vault — chiffré Argon2id');
+    expect(result.sourceFormat).toBe('BetterVault JSON — chiffré Argon2id');
     expect(result.credentials[0].title).toBe('A');
   });
 });

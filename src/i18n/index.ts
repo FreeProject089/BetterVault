@@ -5,7 +5,7 @@ class I18nManager {
   private listeners: Array<() => void> = [];
 
   constructor() {
-    const saved = localStorage.getItem('bum_locale') as SupportedLocale | null;
+    const saved = localStorage.getItem('bettervault.locale') as SupportedLocale | null;
     if (saved === 'fr' || saved === 'en') {
       this.currentLocale = saved;
     } else {
@@ -21,7 +21,7 @@ class I18nManager {
   public setLocale(locale: SupportedLocale): void {
     if (this.currentLocale === locale) return;
     this.currentLocale = locale;
-    localStorage.setItem('bum_locale', locale);
+    localStorage.setItem('bettervault.locale', locale);
     document.documentElement.lang = locale;
     this.notify();
   }

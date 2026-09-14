@@ -53,7 +53,7 @@ describe('Import & Export Engine (Bitwarden, 1Password, CSV, JSON)', () => {
     expect(result.credentials[1].title).toBe('AWS Console');
   });
 
-  it('should accurately export and re-import BUM Standard JSON format', () => {
+  it('should accurately export and re-import BetterVault JSON format', () => {
     const now = Date.now();
     const mockCreds: CredentialItem[] = [
       {
@@ -85,9 +85,9 @@ describe('Import & Export Engine (Bitwarden, 1Password, CSV, JSON)', () => {
     ];
 
     const exportedJson = exportVaultAsJson(mockCreds, mockTasks);
-    const parsed = parseImportFile(exportedJson, 'bum-backup.json');
+    const parsed = parseImportFile(exportedJson, 'bettervault-backup.json');
 
-    expect(parsed.sourceFormat).toBe('BUM Canonical Vault');
+    expect(parsed.sourceFormat).toBe('BetterVault JSON');
     expect(parsed.count).toBe(2);
     expect(parsed.credentials[0].title).toBe('Server Root');
     expect(parsed.credentials[0].tags).toContain('prod');

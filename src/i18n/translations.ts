@@ -232,7 +232,7 @@ export const fr: Translations = {
     audit: 'Audit de Sécurité',
     importExport: 'Importer / Exporter',
     shortcuts: 'Raccourcis Clavier',
-    sync: 'Synchronisation Chiffrée',
+    sync: 'Compte & synchronisation',
     newVaultTitle: 'Nouveau coffre fort'
   },
   vault: {
@@ -345,15 +345,15 @@ export const fr: Translations = {
     importTab: 'Importer un fichier',
     exportTab: 'Exporter le coffre',
     dragDropLabel: 'Glissez-déposez un fichier de coffre-fort ici ou cliquez pour parcourir',
-    supportedFormats: 'Supporté : Bitwarden (JSON/CSV, passkeys), 1Password (.1pux, CSV), KeePass (.kdbx, .xml), FIDO CXF, LastPass, Dashlane, Passky, Chrome, Firefox, BUM JSON (clair ou chiffré).',
+    supportedFormats: 'Supporté : Bitwarden (JSON/CSV, passkeys), 1Password (.1pux, CSV), KeePass (.kdbx, .xml), FIDO CXF, LastPass, Dashlane, Passky, Chrome, Firefox, BetterVault JSON (clair ou chiffré).',
     importSuccessToast: 'Éléments importés avec succès',
-    exportJsonButton: 'Exporter en JSON BUM (Complet avec métadonnées)',
+    exportJsonButton: 'Exporter en JSON BetterVault',
     exportCsvButton: 'Exporter en CSV Universel',
     exportWarning: 'Attention : Les exports en clair ne sont pas chiffrés. Stockez-les dans un endroit sécurisé ou supprimez-les après usage.'
   },
   shortcutsModal: {
     title: 'Raccourcis Clavier Rapides',
-    description: 'Accélérez votre flux de travail et naviguez dans BUM sans toucher la souris.',
+    description: 'Raccourcis clavier disponibles.',
     search: 'Recherche globale',
     newItem: 'Nouvel identifiant ou tâche',
     lockVault: 'Verrouillage immédiat du coffre',
@@ -421,7 +421,7 @@ export const en: Translations = {
     audit: 'Security Audit',
     importExport: 'Import / Export',
     shortcuts: 'Keyboard Shortcuts',
-    sync: 'Encrypted Sync',
+    sync: 'Account & sync',
     newVaultTitle: 'New Vault'
   },
   vault: {
@@ -534,15 +534,15 @@ export const en: Translations = {
     importTab: 'Import File',
     exportTab: 'Export Vault',
     dragDropLabel: 'Drag and drop your vault file here or click to browse',
-    supportedFormats: 'Supported: Bitwarden (JSON/CSV, passkeys), 1Password (.1pux, CSV), KeePass (.kdbx, .xml), FIDO CXF, LastPass, Dashlane, Passky, Chrome, Firefox, BUM JSON (plain or encrypted).',
+    supportedFormats: 'Supported: Bitwarden (JSON/CSV, passkeys), 1Password (.1pux, CSV), KeePass (.kdbx, .xml), FIDO CXF, LastPass, Dashlane, Passky, Chrome, Firefox, BetterVault JSON (plain or encrypted).',
     importSuccessToast: 'Items imported successfully',
-    exportJsonButton: 'Export as BUM JSON (Full with metadata)',
+    exportJsonButton: 'Export as BetterVault JSON',
     exportCsvButton: 'Export as Universal CSV',
     exportWarning: 'Caution: Unencrypted exports are in plain text. Store securely or delete after use.'
   },
   shortcutsModal: {
     title: 'Keyboard Shortcuts',
-    description: 'Boost your productivity and navigate BUM swiftly without a mouse.',
+    description: 'Available keyboard shortcuts.',
     search: 'Global search',
     newItem: 'New credential or task',
     lockVault: 'Lock active vault instantly',

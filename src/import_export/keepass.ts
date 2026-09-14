@@ -644,7 +644,7 @@ function buildKeePassXml(credentials: CredentialItem[], innerKey: Uint8Array, da
   }).join('');
 
   return '<?xml version="1.0" encoding="utf-8" standalone="yes"?>'
-    + `<KeePassFile><Meta><Generator>BUM</Generator><DatabaseName>${encodeXmlText(databaseName)}</DatabaseName>`
+    + `<KeePassFile><Meta><Generator>BetterVault</Generator><DatabaseName>${encodeXmlText(databaseName)}</DatabaseName>`
     + `<DatabaseNameChanged>${now}</DatabaseNameChanged><RecycleBinEnabled>False</RecycleBinEnabled></Meta>`
     + `<Root><Group><UUID>${uuid()}</UUID><Name>${encodeXmlText(databaseName)}</Name><IsExpanded>True</IsExpanded>`
     + entriesXml
@@ -702,7 +702,7 @@ export async function buildKdbx4(credentials: CredentialItem[], password: string
     new Uint8Array([2]), u32le(innerKey.length), innerKey,
     new Uint8Array([0]), u32le(0)
   );
-  const xml = buildKeePassXml(credentials, innerKey, options.databaseName ?? 'BUM');
+  const xml = buildKeePassXml(credentials, innerKey, options.databaseName ?? 'BetterVault');
   const ciphertext = cbc(encryptionKey, iv).encrypt(gzipSync(concatBytes(innerHeader, utf8.encode(xml))));
 
   return concatBytes(

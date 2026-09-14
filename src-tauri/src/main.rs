@@ -10,12 +10,12 @@ use aes_gcm::{
 use rand::RngCore;
 
 /// Service sous lequel les secrets sont rangés dans le trousseau du système
-const KEYCHAIN_SERVICE: &str = "com.bum.vault";
-const KEYCHAIN_PROBE_ACCOUNT: &str = "__bum_keychain_probe__";
+const KEYCHAIN_SERVICE: &str = "app.bettervault";
+const KEYCHAIN_PROBE_ACCOUNT: &str = "__bettervault_keychain_probe__";
 
 #[command]
 fn get_system_status() -> String {
-    "BUM E2EE Rust Core Ready (Argon2id + AES-256-GCM + OS Keychain)".into()
+    "BetterVault core ready".into()
 }
 
 fn keychain_entry(account: &str) -> Result<keyring::Entry, String> {
@@ -141,5 +141,5 @@ fn main() {
             decrypt_data_aes_gcm
         ])
         .run(tauri::generate_context!())
-        .expect("error while running BUM tauri application");
+        .expect("error while running BetterVault");
 }

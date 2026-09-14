@@ -65,11 +65,11 @@ function totpCredential(cred: CredentialItem): Record<string, unknown> | null {
   return { type: 'totp', secret: cred.totpSecret, period: 30, digits: 6, algorithm: 'sha1', username: cred.username };
 }
 
-export function exportCredentialsAsCxf(credentials: CredentialItem[], exporterRpId = 'bum.local'): string {
+export function exportCredentialsAsCxf(credentials: CredentialItem[], exporterRpId = 'bettervault.app'): string {
   const document = {
     version: CXF_VERSION,
     exporterRpId,
-    exporterDisplayName: 'BUM',
+    exporterDisplayName: 'BetterVault',
     timestamp: toSeconds(Date.now()),
     accounts: [{
       id: randomId(),

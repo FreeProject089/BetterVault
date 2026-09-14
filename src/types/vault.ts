@@ -80,11 +80,16 @@ export interface VaultMetadata {
   id: string;
   name: string;
   type: 'personal' | 'work' | 'team';
-  icon?: string;
-  isLocked?: boolean;
-  passwordProtected?: boolean;
-  passwordHash?: string; // Hash Argon2 / PBKDF2 de vérification
-  salt?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TagDef {
+  id: string;
+  name: string;
+  color: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface EncryptedVaultPayload {
@@ -104,4 +109,7 @@ export interface UnlockedVaultData {
   activeVaultId: string;
   credentials: CredentialItem[];
   tasks: Task[];
+  tagDefs: TagDef[];
+  /** Suppressions synchronisables : id de l'élément → horodatage de suppression */
+  deleted: Record<string, number>;
 }

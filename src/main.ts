@@ -1,8 +1,8 @@
-import { vaultStore } from './store/vaultStore';
+import { TAG_COLORS, vaultStore } from './store/vaultStore';
 import { Task } from './types/vault';
 import { getServiceIconSvg } from './icons/serviceIcons';
 import { generateTOTP } from './crypto/totpEngine';
-import { calculatePasswordEntropy, generateStrongPassword, generatePassphrase, hashVaultPassword, auditVaultSecurity, checkPasswordPwnedHIBP, HibpUnavailableError, PASSPHRASE_WORDLIST } from './crypto/vaultCrypto';
+import { calculatePasswordEntropy, generateStrongPassword, generatePassphrase, auditVaultSecurity, checkPasswordPwnedHIBP, HibpUnavailableError, PASSPHRASE_WORDLIST } from './crypto/vaultCrypto';
 import { exportVaultAsJson, exportVaultAsCsv, downloadExportFile } from './import_export/importEngine';
 import { parseImportData, PasswordRequiredError, ImportSecrets } from './import_export/importRouter';
 import { encryptExport, MIN_EXPORT_PASSWORD_LENGTH } from './import_export/encryptedExport';
@@ -10,7 +10,8 @@ import { buildKdbx4 } from './import_export/keepass';
 import { exportCredentialsAsCxf } from './import_export/cxf';
 import { normalizeTotpInput, parseOtpAuthUri } from './crypto/otpauthUri';
 import { CameraQrScanner, decodeQrFromFile } from './crypto/qrScanner';
-import { osKeychain } from './platform/tauriBridge';
+import { AccountService, type SyncStatus } from './account/accountService';
+import type { UnlockedVaultData } from './types/vault';
 import {
   EisenhowerQuadrant,
   describeRecurrence,
@@ -22,8 +23,8 @@ import {
   wouldCreateDependencyCycle
 } from './tasks/taskEngine';
 import type { RecurrenceFrequency, TaskRecurrence } from './types/vault';
-import { isBiometricsAvailable, verifyBiometrics } from './crypto/webauthn';
-import { syncEngine } from './sync/syncEngine';
+import { accountErrorMessage, DEFAULT_SERVER_URL, mountAuthScreen } from './ui/authScreen';
+import { mountTagInput } from './ui/tagInput';
 import { i18n } from './i18n';
 
 type ActiveView = 'all-credentials' | '2fa-tokens' | 'tasks';
@@ -35,6 +36,10 @@ const ACTION_ICONS = {
   task: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>'
 };
 
+function tagColor(color?: string): string {
+  return color && /^#[0-9a-f]{6}$/i.test(color) ? color : '#8b949e';
+}
+
 const GEN_ICONS = {
   bolt: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>',
   close: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>',
@@ -44,9 +49,11 @@ const GEN_ICONS = {
   eyeOff: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>'
 };
 
-const GENERATOR_PREFS_KEY = 'bum-generator-prefs';
-const SYNC_KEYCHAIN_ACCOUNT = 'sync-passphrase';
+const GENERATOR_PREFS_KEY = 'bettervault.generator-prefs';
 const REMINDER_CHECK_INTERVAL_MS = 30_000;
+const SYNC_INTERVAL_MS = 60_000;
+
+const accountService = new AccountService();
 
 /* ════════════════════════════════════════════════════════════════════════════
    APP CONTROLLER — Zero-Knowledge Vault Manager
@@ -60,6 +67,8 @@ class AppController {
   private autoLockTimeout: number | null = null;
   private readonly AUTO_LOCK_DELAY_MS = 5 * 60 * 1000; // 5 minutes d'inactivité
   private clipboardClearTimer: number | null = null;
+  private activeTag: string | null = null;
+  private authScreen: { show(): void } | null = null;
 
   constructor() {
     this.initTheme();
@@ -84,6 +93,7 @@ class AppController {
       this.renderCounts();
       if (this.selectedItemId) this.renderDetail(this.selectedItemId);
     });
+    this.initAccount();
   }
 
   private tr(fr: string, en: string): string {
@@ -102,16 +112,15 @@ class AppController {
   /* ── Rappels de tâches (toast + notification système) ─────────────────── */
   private initReminders(): void {
     const check = () => {
-      const data = vaultStore.getData();
-      const lockedVaults = new Set(data.vaults.filter(v => v.isLocked).map(v => v.id));
-      const due = getDueReminders(data.tasks).filter(t => !lockedVaults.has(t.vaultId));
+      if (!vaultStore.isLoaded()) return;
+      const due = getDueReminders(vaultStore.getData().tasks);
       for (const task of due) {
         vaultStore.updateTask(task.id, { reminderSent: true });
         const label = this.tr('Rappel de tâche', 'Task reminder');
         this.showToast(`${label} : ${task.title}`, 'info', 6000);
         if ('Notification' in window && Notification.permission === 'granted') {
           try {
-            new Notification(`BUM — ${label}`, { body: task.title, tag: task.id });
+            new Notification(`BetterVault — ${label}`, { body: task.title, tag: task.id });
           } catch {
             // Notifications système indisponibles (contexte non sécurisé, webview restreinte)
           }
@@ -137,7 +146,7 @@ class AppController {
 
   /* ── Theme Toggle (Dark / Light) ──────────────────────────────────────── */
   private initTheme(): void {
-    const saved = localStorage.getItem('bum-theme');
+    const saved = localStorage.getItem('bettervault.theme');
     if (saved === 'light') {
       document.documentElement.setAttribute('data-theme', 'light');
     }
@@ -151,7 +160,7 @@ class AppController {
       } else {
         document.documentElement.removeAttribute('data-theme');
       }
-      localStorage.setItem('bum-theme', next);
+      localStorage.setItem('bettervault.theme', next);
       // Update meta theme-color
       const meta = document.querySelector('meta[name="theme-color"]');
       if (meta) meta.setAttribute('content', next === 'light' ? '#f6f8fa' : '#161b22');
@@ -305,12 +314,9 @@ class AppController {
         window.clearTimeout(this.autoLockTimeout);
       }
       this.autoLockTimeout = window.setTimeout(() => {
-        const data = vaultStore.getData();
-        const activeVault = data.vaults.find(v => v.id === data.activeVaultId);
-        if (activeVault && activeVault.passwordHash && !activeVault.isLocked) {
-          vaultStore.lockVault(activeVault.id);
-          this.showToast(i18n.getLocale() === 'fr' ? 'Coffre verrouillé pour inactivité' : 'Vault locked due to inactivity', 'info');
-        }
+        if (!accountService.isUnlocked()) return;
+        this.lockApp();
+        this.showToast(this.tr('Verrouillé après 5 minutes d’inactivité', 'Locked after 5 minutes of inactivity'), 'info', 4000);
       }, this.AUTO_LOCK_DELAY_MS);
     };
 
@@ -344,6 +350,7 @@ class AppController {
     }
 
     window.addEventListener('keydown', (e) => {
+      if (!accountService.isUnlocked()) return;
       const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName);
 
       // Cmd/Ctrl + K : Recherche globale
@@ -368,12 +375,7 @@ class AppController {
       // Cmd/Ctrl + L : Verrouiller le coffre actif immédiatement
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'l' && !isInput) {
         e.preventDefault();
-        const data = vaultStore.getData();
-        const activeVault = data.vaults.find(v => v.id === data.activeVaultId);
-        if (activeVault && activeVault.passwordHash && !activeVault.isLocked) {
-          vaultStore.lockVault(activeVault.id);
-          this.showToast(i18n.getLocale() === 'fr' ? 'Coffre verrouillé' : 'Vault locked', 'info');
-        }
+        this.lockApp();
         return;
       }
 
@@ -426,7 +428,7 @@ class AppController {
     });
 
     document.getElementById('btn-open-sync')?.addEventListener('click', () => {
-      this.openSyncModal();
+      this.openAccountModal();
     });
 
     document.getElementById('btn-open-shortcuts')?.addEventListener('click', () => {
@@ -434,7 +436,11 @@ class AppController {
     });
 
     document.getElementById('btn-add-vault')?.addEventListener('click', () => {
-      this.openCreateVaultModal();
+      this.openVaultModal();
+    });
+
+    document.getElementById('btn-manage-tags')?.addEventListener('click', () => {
+      this.openTagManagerModal();
     });
 
     const viewButtons: Array<[string, TaskViewMode]> = [
@@ -459,14 +465,6 @@ class AppController {
     const totpCountEl = document.getElementById('count-2fa');
     const taskCountEl = document.getElementById('count-tasks');
 
-    const activeVault = data.vaults.find(v => v.id === data.activeVaultId);
-    if (activeVault?.isLocked) {
-      if (credCountEl) credCountEl.textContent = '—';
-      if (totpCountEl) totpCountEl.textContent = '—';
-      if (taskCountEl) taskCountEl.textContent = '—';
-      return;
-    }
-
     const creds = data.credentials.filter(c => c.vaultId === data.activeVaultId);
     if (credCountEl) credCountEl.textContent = creds.length.toString();
     if (totpCountEl) totpCountEl.textContent = creds.filter(c => !!c.totpSecret).length.toString();
@@ -479,33 +477,17 @@ class AppController {
     const vaultListEl = document.getElementById('vault-list');
     if (!vaultListEl) return;
 
+    const typeLabels: Record<string, string> = {
+      personal: i18n.t.common.personal,
+      work: i18n.t.common.work,
+      team: i18n.t.common.team
+    };
+
     vaultListEl.innerHTML = '';
     data.vaults.forEach(vault => {
       const li = document.createElement('li');
       li.className = `nav-item ${vault.id === data.activeVaultId ? 'active' : ''}`;
-      li.style.justifyContent = 'space-between';
-
-      const typeLabels: Record<string, string> = {
-        personal: i18n.t.common.personal,
-        work: i18n.t.common.work,
-        team: i18n.t.common.team
-      };
-      let rightHTML = `<span class="vault-type-badge ${vault.type}">${typeLabels[vault.type] ?? vault.type}</span>`;
-
-      if (vault.passwordProtected) {
-        const isLocked = vault.isLocked;
-        const lockColor = isLocked ? 'var(--accent-red)' : 'var(--accent-green)';
-        const lockPath = isLocked
-          ? 'M7 11V7a5 5 0 0 1 10 0v4'
-          : 'M7 11V7a5 5 0 0 0 10 0v4';
-        rightHTML += ` <button class="icon-btn btn-vault-lock-action" data-vault-id="${vault.id}" data-locked="${isLocked}" style="color:${lockColor}; padding:2px;" title="${isLocked ? i18n.t.vault.unlockActionTitle : i18n.t.vault.lockActionTitle}">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-            <path d="${lockPath}"></path>
-          </svg>
-        </button>`;
-      }
-
+      li.tabIndex = 0;
       li.innerHTML = `
         <span class="nav-item-left">
           <span class="nav-item-icon">
@@ -513,33 +495,35 @@ class AppController {
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
             </svg>
           </span>
-          ${vault.name}
+          <span>${this.escapeHtml(vault.name)}</span>
         </span>
-        <span style="display:flex;align-items:center;gap:5px;">${rightHTML}</span>
+        <span class="nav-item-right">
+          <span class="vault-type-badge ${vault.type}">${typeLabels[vault.type] ?? vault.type}</span>
+          <button class="icon-btn nav-item-edit" type="button" title="${this.tr('Modifier le coffre', 'Edit vault')}" aria-label="${this.tr('Modifier le coffre', 'Edit vault')} ${this.escapeHtml(vault.name)}">${ACTION_ICONS.edit}</button>
+        </span>
       `;
 
-      li.querySelector('.btn-vault-lock-action')?.addEventListener('click', (e) => {
+      li.querySelector('.nav-item-edit')?.addEventListener('click', e => {
         e.stopPropagation();
-        if (vault.isLocked) {
-          this.openUnlockVaultModal(vault.id);
-        } else {
-          vaultStore.lockVault(vault.id);
-          this.showToast(`${i18n.t.vault.vaultLockedToast} ("${vault.name}")`, 'info');
-        }
+        this.openVaultModal(vault.id);
       });
-
-      li.addEventListener('click', () => {
-        if (vault.passwordProtected && vault.isLocked) {
-          this.openUnlockVaultModal(vault.id);
-        } else {
-          vaultStore.setActiveVault(vault.id);
-          this.selectedItemId = null;
-          this.renderList();
-          this.renderDetail(null);
+      const select = () => {
+        if (vault.id === vaultStore.getData().activeVaultId) return;
+        this.selectedItemId = null;
+        vaultStore.setActiveVault(vault.id);
+        this.renderDetail(null);
+      };
+      li.addEventListener('click', select);
+      li.addEventListener('keydown', e => {
+        if (e.target === li && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          select();
         }
       });
       vaultListEl.appendChild(li);
     });
+
+    this.renderTagSidebar();
   }
 
   /* ── List Panel ─────────────────────────────────────────────────────────── */
@@ -555,31 +539,9 @@ class AppController {
     document.getElementById('app')?.classList.toggle('tasks-board', this.activeView === 'tasks' && this.taskViewMode !== 'list');
     document.querySelectorAll<HTMLElement>('[data-view]').forEach(item => item.classList.toggle('active', item.dataset.view === this.activeView));
 
-    // Coffre verrouillé → bannière
-    const activeVault = data.vaults.find(v => v.id === data.activeVaultId);
-    if (activeVault?.isLocked) {
-      if (listTitle) listTitle.textContent = `${activeVault.name} — ${i18n.t.common.locked}`;
-      const banner = document.createElement('div');
-      banner.className = 'vault-locked-banner';
-      banner.innerHTML = `
-        <div class="vault-locked-icon">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-          </svg>
-        </div>
-        <div class="vault-locked-title">${i18n.t.vault.lockedBannerTitle}</div>
-        <div class="vault-locked-sub">${i18n.t.vault.lockedBannerSub}</div>
-        <button class="btn-primary" id="btn-quick-unlock" style="margin-top:8px;background-color:var(--accent-green);color:#fff;border-color:var(--accent-green);">
-          ${i18n.t.vault.unlockButton}
-        </button>
-      `;
-      container.appendChild(banner);
-      document.getElementById('btn-quick-unlock')?.addEventListener('click', () => {
-        this.openUnlockVaultModal(activeVault.id);
-      });
-      return;
-    }
+    const tagKey = this.activeTag?.toLowerCase();
+    const matchesTag = (item: { tags: string[] }) => !tagKey || item.tags.some(t => t.toLowerCase() === tagKey);
+    const withTag = (title: string) => (this.activeTag ? `${title} · ${this.activeTag}` : title);
 
     const taskToggle = document.getElementById('task-view-toggle');
     if (taskToggle) {
@@ -587,8 +549,8 @@ class AppController {
     }
 
     if (this.activeView === 'tasks') {
-      if (listTitle) listTitle.textContent = i18n.t.tasks.title;
-      let tasks = data.tasks.filter(t => t.vaultId === data.activeVaultId);
+      if (listTitle) listTitle.textContent = withTag(i18n.t.tasks.title);
+      let tasks = data.tasks.filter(t => t.vaultId === data.activeVaultId && matchesTag(t));
 
       if (this.searchQuery) {
         tasks = tasks.filter(t =>
@@ -859,9 +821,9 @@ class AppController {
     }
 
     // Vue Credentials ou 2FA
-    if (listTitle) listTitle.textContent = this.activeView === '2fa-tokens' ? i18n.t.nav.twoFactorTokens : i18n.t.credentials.title;
+    if (listTitle) listTitle.textContent = withTag(this.activeView === '2fa-tokens' ? i18n.t.nav.twoFactorTokens : i18n.t.credentials.title);
 
-    let creds = data.credentials.filter(c => c.vaultId === data.activeVaultId);
+    let creds = data.credentials.filter(c => c.vaultId === data.activeVaultId && matchesTag(c));
     if (this.activeView === '2fa-tokens') {
       creds = creds.filter(c => !!c.totpSecret);
     }
@@ -1024,8 +986,9 @@ class AppController {
               </svg>
             </div>
             <div>
-              <div class="detail-title">${task.title}</div>
-              <div class="detail-meta">Créée le ${new Date(task.createdAt).toLocaleDateString('fr-FR')}</div>
+              <div class="detail-title">${this.escapeHtml(task.title)}</div>
+              <div class="detail-meta">${this.tr('Créée le', 'Created')} ${new Date(task.createdAt).toLocaleDateString(i18n.getLocale() === 'fr' ? 'fr-FR' : 'en-US')}</div>
+              ${this.renderTagChips(task.tags)}
             </div>
           </div>
           <div class="detail-actions">
@@ -1358,11 +1321,7 @@ class AppController {
           <div>
             <div class="detail-title">${cred.title}</div>
             <div class="detail-meta">${cred.domain || cred.website || 'Pas de domaine'}</div>
-            ${cred.tags && cred.tags.length > 0 ? `
-              <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;">
-                ${cred.tags.map(t => `<span class="badge" style="font-size:10px;padding:2px 6px;">#${t}</span>`).join('')}
-              </div>
-            ` : ''}
+            ${this.renderTagChips(cred.tags)}
           </div>
         </div>
         <div class="detail-actions">
@@ -1983,6 +1942,10 @@ class AppController {
           <input class="form-input" id="field-expires-at" type="date" value="${existing?.expiresAt ? new Date(existing.expiresAt).toISOString().split('T')[0] : ''}">
         </div>
         <div class="form-field">
+          <label class="form-label">Tags</label>
+          <div id="field-tags"></div>
+        </div>
+        <div class="form-field">
           <label class="form-label">Notes</label>
           <textarea class="note-editor" id="field-notes" placeholder="Codes de récupération, informations supplémentaires...">${existing?.notes || ''}</textarea>
         </div>
@@ -1995,6 +1958,12 @@ class AppController {
 
     box.querySelector('#modal-close-btn')?.addEventListener('click', () => this.closeModal());
     box.querySelector('#modal-cancel')?.addEventListener('click', () => this.closeModal());
+
+    const tagInput = mountTagInput(box.querySelector('#field-tags') as HTMLElement, {
+      initial: existing?.tags ?? [],
+      suggestions: vaultStore.getTags(),
+      placeholder: this.tr('Ajouter un tag…', 'Add a tag…')
+    });
 
     // Mot de passe : visibilité, force en direct et générateur intégré
     const pwdField = box.querySelector('#field-password') as HTMLInputElement;
@@ -2133,6 +2102,7 @@ class AppController {
           domain: website ? (website.replace(/^https?:\/\//, '').split('/')[0]) : '',
           totpSecret: totpSecret || undefined,
           notes: notes || '',
+          tags: tagInput.getTags(),
           expiresAt
         });
         this.closeModal();
@@ -2148,7 +2118,7 @@ class AppController {
           domain: website ? (website.replace(/^https?:\/\//, '').split('/')[0]) : '',
           totpSecret: totpSecret || undefined,
           notes: notes || '',
-          tags: [],
+          tags: tagInput.getTags(),
           isFavorite: false,
           expiresAt
         });
@@ -2239,6 +2209,10 @@ class AppController {
             <input class="form-input" id="task-reminder" type="datetime-local" value="${this.toDateTimeInputValue(existing?.reminderAt)}">
           </div>
         </div>
+        <div class="form-field">
+          <label class="form-label">Tags</label>
+          <div id="task-tags"></div>
+        </div>
         ${dependencyOptions ? `
           <div class="form-field">
             <label class="form-label">${this.tr('Dépend de (à terminer avant)', 'Depends on (complete first)')}</label>
@@ -2263,6 +2237,12 @@ class AppController {
 
     box.querySelector('#modal-close-btn')?.addEventListener('click', () => this.closeModal());
     box.querySelector('#modal-cancel')?.addEventListener('click', () => this.closeModal());
+    const taskTagInput = mountTagInput(box.querySelector('#task-tags') as HTMLElement, {
+      initial: existing?.tags ?? [],
+      suggestions: vaultStore.getTags(),
+      placeholder: this.tr('Ajouter un tag…', 'Add a tag…')
+    });
+
     box.querySelector('#modal-confirm')?.addEventListener('click', () => {
       const title = (box.querySelector('#task-title') as HTMLInputElement)?.value.trim();
       if (!title) { this.showToast('Le titre est requis', 'error'); return; }
@@ -2308,7 +2288,8 @@ class AppController {
           recurrence,
           dependsOn: dependsOn.length ? dependsOn : undefined,
           reminderAt,
-          reminderSent
+          reminderSent,
+          tags: taskTagInput.getTags()
         });
         this.closeModal();
         this.showToast('Tâche mise à jour', 'success');
@@ -2322,7 +2303,7 @@ class AppController {
           priority,
           dueDate: dueDate || undefined,
           linkedCredentialId: linkedCred,
-          tags: [],
+          tags: taskTagInput.getTags(),
           recurrence,
           dependsOn: dependsOn.length ? dependsOn : undefined,
           reminderAt,
@@ -2808,7 +2789,7 @@ class AppController {
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green)" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
               <div style="text-align:left;">
                 <div style="font-size:13px;font-weight:600;">${this.tr('Export chiffré (recommandé)', 'Encrypted export (recommended)')}</div>
-                <div style="font-size:11px;color:var(--text-muted);">${this.tr('JSON BUM protégé par un mot de passe dédié — Argon2id + AES-256-GCM', 'BUM JSON protected by a dedicated password — Argon2id + AES-256-GCM')}</div>
+                <div style="font-size:11px;color:var(--text-muted);">${this.tr('Protégé par un mot de passe dédié (Argon2id + AES-256-GCM)', 'Protected by a dedicated password (Argon2id + AES-256-GCM)')}</div>
               </div>
             </button>
             <button class="btn-primary" id="btn-export-kdbx" style="justify-content:flex-start;padding:12px 16px;gap:12px;background-color:var(--bg-tertiary);border-color:var(--border-subtle);color:var(--text-primary);">
@@ -2842,7 +2823,7 @@ class AppController {
             <button class="btn-primary" id="btn-export-json" style="justify-content:flex-start;padding:12px 16px;gap:12px;background-color:var(--bg-tertiary);border-color:var(--border-subtle);color:var(--text-primary);">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-blue)" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
               <div style="text-align:left;">
-                <div style="font-size:13px;font-weight:600;">Exporter en JSON BUM Standard</div>
+                <div style="font-size:13px;font-weight:600;">${this.tr('JSON BetterVault', 'BetterVault JSON')}</div>
                 <div style="font-size:11px;color:var(--text-muted);">Format complet préservant passkeys, 2FA, métadonnées et tâches</div>
               </div>
             </button>
@@ -2851,13 +2832,6 @@ class AppController {
               <div style="text-align:left;">
                 <div style="font-size:13px;font-weight:600;">Exporter en CSV Universel</div>
                 <div style="font-size:11px;color:var(--text-muted);">Compatible avec Bitwarden, 1Password, Excel et navigateurs</div>
-              </div>
-            </button>
-            <button class="btn-primary" id="btn-export-extension" style="justify-content:flex-start;padding:12px 16px;gap:12px;background-color:var(--bg-tertiary);border-color:var(--border-subtle);color:var(--text-primary);">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-purple)" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
-              <div style="text-align:left;">
-                <div style="font-size:13px;font-weight:600;">Synchroniser avec l'Extension Navigateur</div>
-                <div style="font-size:11px;color:var(--text-muted);">Transférer les identifiants vers l'extension BUM locale pour remplissage auto</div>
               </div>
             </button>
           </div>
@@ -2906,7 +2880,7 @@ class AppController {
       danger: true
     });
     const exportDate = new Date().toISOString().slice(0, 10);
-    const activeVaultName = data.vaults.find(v => v.id === data.activeVaultId)?.name ?? 'BUM';
+    const activeVaultName = data.vaults.find(v => v.id === data.activeVaultId)?.name ?? 'BetterVault';
 
     const exportPanel = box.querySelector('#export-password-panel') as HTMLElement;
     const exportTitle = box.querySelector('#export-password-title') as HTMLElement;
@@ -2948,10 +2922,10 @@ class AppController {
       try {
         if (protectedExportMode === 'encrypted') {
           const file = await encryptExport(exportVaultAsJson(creds, tasks), exportPwd.value);
-          downloadExportFile(file, `bum-vault-encrypted-${exportDate}.json`, 'application/json');
+          downloadExportFile(file, `bettervault-${exportDate}.encrypted.json`, 'application/json');
         } else {
           const kdbx = await buildKdbx4(creds, exportPwd.value, { databaseName: activeVaultName });
-          downloadExportFile(kdbx, `bum-${exportDate}.kdbx`, 'application/octet-stream');
+          downloadExportFile(kdbx, `bettervault-${exportDate}.kdbx`, 'application/octet-stream');
         }
         exportPwd.value = '';
         exportPwdConfirm.value = '';
@@ -2966,14 +2940,14 @@ class AppController {
 
     box.querySelector('#btn-export-cxf')?.addEventListener('click', async () => {
       if (!(await confirmPlaintextExport())) return;
-      downloadExportFile(exportCredentialsAsCxf(creds), `bum-cxf-${exportDate}.json`, 'application/json');
+      downloadExportFile(exportCredentialsAsCxf(creds), `bettervault-${exportDate}.cxf.json`, 'application/json');
       this.showToast(this.tr('Export CXF téléchargé', 'CXF export downloaded'), 'success');
     });
 
     box.querySelector('#btn-export-json')?.addEventListener('click', async () => {
       if (!(await confirmPlaintextExport())) return;
       const jsonContent = exportVaultAsJson(creds, tasks);
-      const filename = `bum-vault-export-${new Date().toISOString().slice(0, 10)}.json`;
+      const filename = `bettervault-${new Date().toISOString().slice(0, 10)}.json`;
       downloadExportFile(jsonContent, filename, 'application/json');
       this.showToast(i18n.getLocale() === 'fr' ? 'Export JSON téléchargé' : 'JSON export downloaded', 'success');
     });
@@ -2981,34 +2955,11 @@ class AppController {
     box.querySelector('#btn-export-csv')?.addEventListener('click', async () => {
       if (!(await confirmPlaintextExport())) return;
       const csvContent = exportVaultAsCsv(creds);
-      const filename = `bum-credentials-${new Date().toISOString().slice(0, 10)}.csv`;
+      const filename = `bettervault-${new Date().toISOString().slice(0, 10)}.csv`;
       downloadExportFile(csvContent, filename, 'text/csv;charset=utf-8;');
       this.showToast(i18n.getLocale() === 'fr' ? 'Export CSV téléchargé' : 'CSV export downloaded', 'success');
     });
 
-    box.querySelector('#btn-export-extension')?.addEventListener('click', () => {
-      const extensionPayload = creds.map(c => ({
-        id: c.id,
-        title: c.title,
-        username: c.username,
-        password: c.password,
-        website: c.website
-      }));
-      try {
-        if (typeof (window as any).chrome !== 'undefined' && (window as any).chrome?.storage?.local) {
-          (window as any).chrome.storage.local.set({ bum_credentials: extensionPayload }, () => {
-            this.showToast(i18n.getLocale() === 'fr' ? 'Synchronisé avec l\'extension locale' : 'Synced with local extension', 'success');
-          });
-        } else {
-          // Si ouvert en dehors du contexte d'extension, téléchargement du manifest JSON pour l'extension
-          const jsonStr = JSON.stringify(extensionPayload, null, 2);
-          downloadExportFile(jsonStr, 'bum-extension-credentials.json', 'application/json');
-          this.showToast(i18n.getLocale() === 'fr' ? 'Fichier pour extension téléchargé' : 'Extension file downloaded', 'success');
-        }
-      } catch {
-        this.showToast('Erreur lors de la synchronisation extension', 'error');
-      }
-    });
 
     // Actions Import
     let parsedResult: { credentials: any[]; tasks: any[]; sourceFormat: string; count: number } = { credentials: [], tasks: [], sourceFormat: 'unknown', count: 0 };
@@ -3104,328 +3055,515 @@ class AppController {
     });
   }
 
-  /* ── Synchronisation Chiffrée E2EE ─────────────────────────────────────── */
-  private openSyncModal(): void {
-    const config = syncEngine.getConfig();
-    const lastSyncFormatted = config.lastSyncTimestamp
-      ? new Date(config.lastSyncTimestamp).toLocaleString(i18n.getLocale() === 'fr' ? 'fr-FR' : 'en-US')
-      : i18n.t.syncModal.neverSynced;
+  /* ── Compte : déverrouillage, verrouillage, synchronisation ─────────── */
+  private initAccount(): void {
+    this.authScreen = mountAuthScreen(document.getElementById('auth-screen') as HTMLElement, accountService, data => this.showApp(data));
 
-    const statusBadge = config.status === 'success'
-      ? `<span class="badge" style="color:var(--accent-green);border-color:rgba(35,134,54,0.4);">${i18n.t.syncModal.statusSuccess}</span>`
-      : config.status === 'syncing'
-      ? `<span class="badge" style="color:var(--accent-blue);border-color:rgba(88,166,255,0.4);">${i18n.t.syncModal.statusSyncing}</span>`
-      : config.status === 'error'
-      ? `<span class="badge" style="color:var(--accent-red);border-color:rgba(218,54,51,0.4);">${i18n.t.syncModal.statusError}</span>`
-      : `<span class="badge" style="color:var(--text-muted);border-color:var(--border-subtle);">${i18n.t.syncModal.statusIdle}</span>`;
+    accountService.onRemoteData(data => {
+      vaultStore.load(data);
+      const exists = data.credentials.some(c => c.id === this.selectedItemId) || data.tasks.some(t => t.id === this.selectedItemId);
+      if (this.selectedItemId && !exists) {
+        this.selectedItemId = null;
+        this.renderDetail(null);
+      }
+    });
+    accountService.onSyncStateChange(() => this.renderSyncStatus());
+
+    document.getElementById('btn-lock-app')?.addEventListener('click', () => this.lockApp());
+    document.getElementById('btn-sync-status')?.addEventListener('click', () => this.openAccountModal());
+    window.addEventListener('online', () => {
+      if (accountService.isUnlocked()) void accountService.syncNow();
+    });
+    window.setInterval(() => {
+      if (accountService.isUnlocked()) void accountService.syncNow();
+    }, SYNC_INTERVAL_MS);
+
+    this.renderSyncStatus();
+    this.authScreen.show();
+  }
+
+  private showApp(data: UnlockedVaultData): void {
+    vaultStore.load(data);
+    vaultStore.setPersistence(snapshot => void accountService.save(snapshot));
+    this.selectedItemId = null;
+    this.activeTag = null;
+    (document.getElementById('app') as HTMLElement).hidden = false;
+    this.renderDetail(null);
+    this.renderSyncStatus();
+    void accountService.syncNow();
+  }
+
+  private lockApp(): void {
+    if (!accountService.isUnlocked()) return;
+    accountService.lock();
+    vaultStore.setPersistence(null);
+    vaultStore.unload();
+    this.closeModal();
+    this.selectedItemId = null;
+    this.renderDetail(null);
+    (document.getElementById('app') as HTMLElement).hidden = true;
+    this.authScreen?.show();
+  }
+
+  private async signOutDevice(): Promise<void> {
+    const account = accountService.getAccount();
+    if (!account) return;
+
+    let unsyncedWarning = '';
+    if (account.mode === 'cloud') {
+      await accountService.flush();
+      await accountService.syncNow();
+      if (accountService.getSyncState().status !== 'synced') {
+        unsyncedWarning = this.tr(' Des modifications n’ont pas pu être synchronisées et seront perdues.', ' Some changes could not be synced and will be lost.');
+      }
+    }
+
+    const confirmed = await this.confirmDialog({
+      title: this.tr('Se déconnecter de cet appareil ?', 'Sign out of this device?'),
+      message: account.mode === 'cloud'
+        ? this.tr('Le coffre reste disponible sur le serveur et sur vos autres appareils.', 'The vault stays available on the server and your other devices.') + unsyncedWarning
+        : this.tr('Ce coffre n’est pas synchronisé : toutes ses données seront définitivement supprimées. Exportez-les avant si nécessaire.', 'This vault is not synced: all of its data will be permanently deleted. Export it first if needed.'),
+      confirmLabel: this.tr('Se déconnecter', 'Sign out'),
+      danger: true
+    });
+    if (!confirmed) return;
+
+    await accountService.signOut();
+    vaultStore.setPersistence(null);
+    vaultStore.unload();
+    this.closeModal();
+    this.selectedItemId = null;
+    this.activeTag = null;
+    this.renderDetail(null);
+    (document.getElementById('app') as HTMLElement).hidden = true;
+    this.authScreen?.show();
+  }
+
+  private syncStatusLabel(status: SyncStatus): string {
+    const labels: Record<SyncStatus, string> = {
+      local: this.tr('Sur cet appareil', 'On this device'),
+      synced: this.tr('Synchronisé', 'Synced'),
+      pending: this.tr('Modifications en attente', 'Changes pending'),
+      syncing: this.tr('Synchronisation…', 'Syncing…'),
+      offline: this.tr('Hors ligne', 'Offline'),
+      error: this.tr('Erreur de synchronisation', 'Sync error')
+    };
+    return labels[status];
+  }
+
+  private renderSyncStatus(): void {
+    const el = document.getElementById('sync-status');
+    if (!el) return;
+    const account = accountService.getAccount();
+    const state = accountService.getSyncState();
+    const status: SyncStatus = account?.mode === 'cloud' ? state.status : 'local';
+    const colors: Record<SyncStatus, string> = {
+      local: 'var(--text-muted)',
+      synced: 'var(--accent-green-bright)',
+      pending: 'var(--accent-orange)',
+      syncing: 'var(--accent-blue)',
+      offline: 'var(--accent-orange)',
+      error: 'var(--accent-red)'
+    };
+    el.innerHTML = `<span class="sync-dot" style="background-color:${colors[status]};"></span><span class="sync-label">${this.syncStatusLabel(status)}</span>`;
+    const button = document.getElementById('btn-sync-status');
+    if (button) button.title = [account?.email, state.message].filter(Boolean).join(' — ');
+  }
+
+  private openAccountModal(): void {
+    const account = accountService.getAccount();
+    if (!account) return;
+    const isCloud = account.mode === 'cloud';
+    const locale = i18n.getLocale() === 'fr' ? 'fr-FR' : 'en-US';
 
     const box = this.openModal(`
       <div class="modal-header">
-        <div class="modal-title" style="display:flex;align-items:center;gap:8px;">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
-          </svg>
-          ${i18n.t.syncModal.title}
-        </div>
-        <button class="modal-close" id="modal-close-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
+        <div class="modal-title">${this.tr('Compte', 'Account')}</div>
+        <button class="modal-close">${GEN_ICONS.close}</button>
       </div>
       <div class="modal-body">
-        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;line-height:1.5;">${i18n.t.syncModal.description}</p>
-        
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:var(--radius-md);margin-bottom:16px;">
-          <div>
-            <div style="font-size:13px;font-weight:600;color:var(--text-primary);">${i18n.t.syncModal.enableSync}</div>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${i18n.t.syncModal.lastSynced} ${lastSyncFormatted}</div>
-          </div>
-          <div style="display:flex;align-items:center;gap:10px;">
-            ${statusBadge}
-            <input type="checkbox" id="sync-enabled" ${config.enabled ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--accent-blue);cursor:pointer;">
+        <div class="account-summary">
+          <div class="account-avatar">${this.escapeHtml(account.email.charAt(0).toUpperCase())}</div>
+          <div class="account-summary-text">
+            <div class="account-email">${this.escapeHtml(account.email)}</div>
+            <div class="account-meta">${isCloud
+              ? `${this.tr('Synchronisé avec', 'Synced with')} ${this.escapeHtml(account.serverUrl ?? '')}`
+              : this.tr('Stocké uniquement sur cet appareil', 'Stored on this device only')}</div>
           </div>
         </div>
 
-        <div class="form-field">
-          <label class="form-label">${i18n.t.syncModal.serverUrlLabel}</label>
-          <input class="form-input" id="sync-url" type="url" placeholder="https://sync.votre-serveur.com/api/v1/relay" value="${config.endpointUrl || ''}" autocomplete="off">
-        </div>
+        ${isCloud ? `
+          <div class="account-sync-row">
+            <div style="min-width:0;">
+              <div class="form-label">${this.tr('Synchronisation', 'Sync')}</div>
+              <div class="account-sync-state" data-sync-state></div>
+            </div>
+            <button class="btn-primary" data-action="sync">${GEN_ICONS.refresh}<span>${this.tr('Synchroniser', 'Sync now')}</span></button>
+          </div>` : `
+          <section class="account-section">
+            <h3 class="account-section-title">${this.tr('Activer la synchronisation', 'Enable sync')}</h3>
+            <p class="modal-text">${this.tr('Le coffre est envoyé chiffré. Le mot de passe maître et les données en clair ne quittent pas cet appareil.', 'The vault is uploaded encrypted. The master password and plaintext data never leave this device.')}</p>
+            <div class="form-field">
+              <label class="form-label" for="account-server">${this.tr('Adresse du serveur', 'Server address')}</label>
+              <input class="form-input" id="account-server" type="url" value="${this.escapeHtml(DEFAULT_SERVER_URL)}" autocomplete="url" spellcheck="false">
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="account-connect-password">${this.tr('Mot de passe maître', 'Master password')}</label>
+              <input class="form-input" id="account-connect-password" type="password" autocomplete="current-password">
+            </div>
+            <div class="form-error" data-error="connect" role="alert" hidden></div>
+            <div class="account-actions account-actions-end">
+              <button class="btn-primary btn-accent" data-action="connect">${this.tr('Activer', 'Enable')}</button>
+            </div>
+          </section>`}
 
-        <div class="form-field">
-          <label class="form-label">${i18n.t.syncModal.passphraseLabel}</label>
-          <input class="form-input" id="sync-passphrase" type="password" placeholder="${i18n.t.syncModal.passphrasePlaceholder}" autocomplete="off">
-          <div id="sync-keychain-row" hidden>
-            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-secondary);margin-top:8px;cursor:pointer;">
-              <input type="checkbox" id="sync-remember-keychain">
-              ${this.tr('Mémoriser la clé dans le trousseau du système (Windows / macOS / Linux)', 'Remember passphrase in the OS keychain (Windows / macOS / Linux)')}
-            </label>
+        <section class="account-section">
+          <h3 class="account-section-title">${this.tr('Cet appareil', 'This device')}</h3>
+          <div class="account-actions">
+            <button class="btn-primary" data-action="lock">${this.tr('Verrouiller', 'Lock')}</button>
+            <button class="btn-primary btn-ghost" data-action="signout">${this.tr('Se déconnecter de cet appareil', 'Sign out of this device')}</button>
           </div>
-        </div>
+        </section>
 
-        <div id="sync-message-box" style="display:none;margin-top:12px;padding:10px 12px;border-radius:var(--radius-md);font-size:12px;"></div>
+        ${isCloud ? `
+          <section class="account-section account-danger">
+            <h3 class="account-section-title">${this.tr('Supprimer le compte en ligne', 'Delete online account')}</h3>
+            <p class="modal-text">${this.tr('Supprime définitivement le coffre du serveur. Les données restent sur cet appareil.', 'Permanently deletes the vault from the server. Data stays on this device.')}</p>
+            <div class="form-field">
+              <label class="form-label" for="account-delete-password">${this.tr('Mot de passe maître', 'Master password')}</label>
+              <input class="form-input" id="account-delete-password" type="password" autocomplete="current-password">
+            </div>
+            <div class="form-error" data-error="delete" role="alert" hidden></div>
+            <div class="account-actions account-actions-end">
+              <button class="btn-primary btn-danger" data-action="delete">${this.tr('Supprimer le compte en ligne', 'Delete online account')}</button>
+            </div>
+          </section>` : ''}
       </div>
       <div class="modal-footer">
-        <button class="btn-primary" id="modal-close-sync" style="color:var(--text-muted);">${i18n.t.common.close}</button>
-        <button class="btn-primary" id="btn-trigger-sync" data-primary style="background-color:var(--accent-blue);color:#fff;">${i18n.t.syncModal.syncNowButton}</button>
+        <button class="btn-primary" data-close>${this.tr('Fermer', 'Close')}</button>
       </div>
     `);
 
-    box.querySelector('#modal-close-btn')?.addEventListener('click', () => this.closeModal());
-    box.querySelector('#modal-close-sync')?.addEventListener('click', () => this.closeModal());
-
-    const enabledCheck = box.querySelector('#sync-enabled') as HTMLInputElement;
-    const urlInput = box.querySelector('#sync-url') as HTMLInputElement;
-    const pwdInput = box.querySelector('#sync-passphrase') as HTMLInputElement;
-    const msgBox = box.querySelector('#sync-message-box') as HTMLElement;
-    const btnSync = box.querySelector('#btn-trigger-sync') as HTMLButtonElement;
-    const keychainRow = box.querySelector('#sync-keychain-row') as HTMLElement;
-    const rememberCheck = box.querySelector('#sync-remember-keychain') as HTMLInputElement;
-
-    void osKeychain.isAvailable().then(async available => {
-      if (!available || !keychainRow.isConnected) return;
-      keychainRow.hidden = false;
-      const stored = await osKeychain.get(SYNC_KEYCHAIN_ACCOUNT).catch(() => null);
-      if (stored && !pwdInput.value) {
-        pwdInput.value = stored;
-        rememberCheck.checked = true;
-      }
+    const renderState = () => {
+      const el = box.querySelector('[data-sync-state]');
+      if (!el) return;
+      const state = accountService.getSyncState();
+      const when = state.lastSyncAt ? new Date(state.lastSyncAt).toLocaleString(locale) : this.tr('jamais', 'never');
+      el.textContent = `${this.syncStatusLabel(state.status)} · ${this.tr('dernière synchro', 'last sync')} ${when}${state.message ? ` — ${state.message}` : ''}`;
+    };
+    renderState();
+    const unsubscribe = accountService.onSyncStateChange(() => {
+      if (!box.isConnected) return unsubscribe();
+      renderState();
     });
 
-    enabledCheck?.addEventListener('change', () => {
-      syncEngine.updateConfig({ enabled: enabledCheck.checked });
-    });
-
-    urlInput?.addEventListener('change', () => {
-      syncEngine.updateConfig({ endpointUrl: urlInput.value.trim() });
-    });
-
-    btnSync?.addEventListener('click', async () => {
-      const endpoint = urlInput.value.trim();
-      const pass = pwdInput.value;
-      if (!endpoint) {
-        msgBox.style.display = 'block';
-        msgBox.style.background = 'rgba(218,54,51,0.1)';
-        msgBox.style.color = 'var(--accent-red)';
-        msgBox.textContent = i18n.getLocale() === 'fr' ? 'Veuillez saisir l’URL du relais distant' : 'Please provide the remote relay URL';
-        return;
-      }
-      if (!pass) {
-        msgBox.style.display = 'block';
-        msgBox.style.background = 'rgba(218,54,51,0.1)';
-        msgBox.style.color = 'var(--accent-red)';
-        msgBox.textContent = i18n.getLocale() === 'fr' ? 'Clé secrète E2EE requise' : 'E2EE secret passphrase required';
-        return;
-      }
-
-      if (!keychainRow.hidden) {
-        try {
-          if (rememberCheck.checked) {
-            await osKeychain.set(SYNC_KEYCHAIN_ACCOUNT, pass);
-          } else {
-            await osKeychain.remove(SYNC_KEYCHAIN_ACCOUNT);
-          }
-        } catch (err) {
-          this.showToast(`${this.tr('Trousseau système', 'OS keychain')} : ${err instanceof Error ? err.message : String(err)}`, 'error');
+    const showError = (key: string, err: unknown) => {
+      const el = box.querySelector<HTMLElement>(`[data-error="${key}"]`);
+      if (!el) return;
+      el.textContent = accountErrorMessage(err);
+      el.hidden = false;
+    };
+    const runBusy = async (button: HTMLButtonElement, busyLabel: string, task: () => Promise<void>) => {
+      const original = button.innerHTML;
+      button.disabled = true;
+      button.textContent = busyLabel;
+      try {
+        await task();
+      } finally {
+        if (button.isConnected) {
+          button.disabled = false;
+          button.innerHTML = original;
         }
       }
+    };
+    const action = (name: string) => box.querySelector<HTMLButtonElement>(`[data-action="${name}"]`);
 
-      syncEngine.updateConfig({ enabled: true, endpointUrl: endpoint });
-      btnSync.disabled = true;
-      btnSync.textContent = i18n.t.syncModal.statusSyncing;
+    action('sync')?.addEventListener('click', event => {
+      void runBusy(event.currentTarget as HTMLButtonElement, this.tr('Synchronisation…', 'Syncing…'), () => accountService.syncNow());
+    });
 
-      const data = vaultStore.getData();
-      const res = await syncEngine.syncWithRemote(data, pass);
+    action('connect')?.addEventListener('click', event => {
+      const password = (box.querySelector('#account-connect-password') as HTMLInputElement).value;
+      const serverUrl = (box.querySelector('#account-server') as HTMLInputElement).value;
+      if (!password) return showError('connect', new Error(this.tr('Saisissez le mot de passe maître', 'Enter the master password')));
+      void runBusy(event.currentTarget as HTMLButtonElement, this.tr('Envoi du coffre chiffré…', 'Uploading encrypted vault…'), async () => {
+        try {
+          await accountService.connectCloud(serverUrl, password);
+          this.closeModal();
+          this.renderSyncStatus();
+          this.showToast(this.tr('Synchronisation activée', 'Sync enabled'), 'success');
+        } catch (err) {
+          showError('connect', err);
+        }
+      });
+    });
 
-      btnSync.disabled = false;
-      btnSync.textContent = i18n.t.syncModal.syncNowButton;
+    action('lock')?.addEventListener('click', () => this.lockApp());
+    action('signout')?.addEventListener('click', () => void this.signOutDevice());
 
-      msgBox.style.display = 'block';
-      if (res.success) {
-        msgBox.style.background = 'rgba(35,134,54,0.1)';
-        msgBox.style.color = 'var(--accent-green)';
-        msgBox.textContent = res.message;
-        this.showToast(res.message, 'success');
-      } else {
-        msgBox.style.background = 'rgba(218,54,51,0.1)';
-        msgBox.style.color = 'var(--accent-red)';
-        msgBox.textContent = res.message;
-        this.showToast(res.message, 'error');
-      }
+    action('delete')?.addEventListener('click', async event => {
+      const button = event.currentTarget as HTMLButtonElement;
+      const password = (box.querySelector('#account-delete-password') as HTMLInputElement).value;
+      if (!password) return showError('delete', new Error(this.tr('Saisissez le mot de passe maître', 'Enter the master password')));
+      const confirmed = await this.confirmDialog({
+        title: this.tr('Supprimer le compte en ligne ?', 'Delete online account?'),
+        message: this.tr('Le coffre sera supprimé du serveur et vos autres appareils ne pourront plus se synchroniser. Cette action est définitive.', 'The vault will be deleted from the server and your other devices will stop syncing. This cannot be undone.'),
+        confirmLabel: this.tr('Supprimer', 'Delete'),
+        danger: true
+      });
+      if (!confirmed) return;
+      void runBusy(button, this.tr('Suppression…', 'Deleting…'), async () => {
+        try {
+          await accountService.deleteCloudAccount(password);
+          this.closeModal();
+          this.renderSyncStatus();
+          this.showToast(this.tr('Compte en ligne supprimé', 'Online account deleted'), 'success');
+        } catch (err) {
+          showError('delete', err);
+        }
+      });
     });
   }
 
-  /* ── Créer Coffre ─────────────────────────────────────────────────────── */
-  private openCreateVaultModal(): void {
+  /* ── Coffres ─────────────────────────────────────────────────────────── */
+  private openVaultModal(vaultId?: string): void {
+    const data = vaultStore.getData();
+    const existing = vaultId ? data.vaults.find(v => v.id === vaultId) : undefined;
+    const credentialCount = existing ? data.credentials.filter(c => c.vaultId === existing.id).length : 0;
+    const taskCount = existing ? data.tasks.filter(t => t.vaultId === existing.id).length : 0;
+    const typeOption = (type: 'personal' | 'work' | 'team', label: string) =>
+      `<option value="${type}" ${existing?.type === type ? 'selected' : ''}>${label}</option>`;
+
     const box = this.openModal(`
       <div class="modal-header">
-        <div class="modal-title">${i18n.t.vault.newVaultModalTitle}</div>
-        <button class="modal-close" id="modal-close-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
+        <div class="modal-title">${existing ? this.tr('Modifier le coffre', 'Edit vault') : i18n.t.vault.newVaultModalTitle}</div>
+        <button class="modal-close">${GEN_ICONS.close}</button>
       </div>
       <div class="modal-body">
         <div class="form-field">
-          <label class="form-label">${i18n.t.vault.vaultNameLabel} *</label>
-          <input class="form-input" id="vault-name" type="text" placeholder="Personnel, Travail, Famille..." autocomplete="off">
+          <label class="form-label" for="vault-name">${i18n.t.vault.vaultNameLabel}</label>
+          <input class="form-input" id="vault-name" type="text" maxlength="40" value="${this.escapeHtml(existing?.name ?? '')}" placeholder="${this.tr('Personnel, Travail, Famille…', 'Personal, Work, Family…')}" autocomplete="off">
         </div>
         <div class="form-field">
-          <label class="form-label">${i18n.t.vault.vaultTypeLabel}</label>
+          <label class="form-label" for="vault-type">${i18n.t.vault.vaultTypeLabel}</label>
           <select class="form-input" id="vault-type">
-            <option value="personal">${i18n.t.common.personal}</option>
-            <option value="work">${i18n.t.common.work}</option>
-            <option value="team">${i18n.t.common.team}</option>
+            ${typeOption('personal', i18n.t.common.personal)}
+            ${typeOption('work', i18n.t.common.work)}
+            ${typeOption('team', i18n.t.common.team)}
           </select>
         </div>
-        <div class="form-field">
-          <label class="form-label" style="display:flex;align-items:center;gap:8px;">
-            <input type="checkbox" id="vault-protected">
-            ${i18n.t.vault.passwordProtectLabel}
-          </label>
-        </div>
-        <div id="vault-pwd-section" style="display:none;">
-          <div class="form-field">
-            <label class="form-label">${i18n.t.vault.passwordOptionalLabel}</label>
-            <input class="form-input" id="vault-pwd" type="password" placeholder="Mot de passe fort..." autocomplete="new-password">
-          </div>
-          <div class="form-field">
-            <label class="form-label">Confirmer</label>
-            <input class="form-input" id="vault-pwd-confirm" type="password" placeholder="Confirmer..." autocomplete="new-password">
-          </div>
-        </div>
+        ${existing && data.vaults.length > 1 ? `
+          <section class="account-section account-danger">
+            <h3 class="account-section-title">${this.tr('Supprimer ce coffre', 'Delete this vault')}</h3>
+            <p class="modal-text">${this.tr(`${credentialCount} identifiant(s) et ${taskCount} tâche(s) seront supprimés.`, `${credentialCount} credential(s) and ${taskCount} task(s) will be deleted.`)}</p>
+            <div class="account-actions account-actions-end">
+              <button class="btn-primary btn-danger" data-action="delete-vault">${this.tr('Supprimer le coffre', 'Delete vault')}</button>
+            </div>
+          </section>` : ''}
       </div>
       <div class="modal-footer">
-        <button class="btn-primary" id="modal-cancel" style="color:var(--text-muted);">${i18n.t.common.cancel}</button>
-        <button class="btn-primary" id="modal-confirm">${i18n.t.vault.createVaultButton}</button>
+        <button class="btn-primary" data-close>${i18n.t.common.cancel}</button>
+        <button class="btn-primary" id="modal-confirm">${existing ? this.tr('Enregistrer', 'Save') : i18n.t.vault.createVaultButton}</button>
       </div>
     `);
 
-    box.querySelector('#modal-close-btn')?.addEventListener('click', () => this.closeModal());
-    box.querySelector('#modal-cancel')?.addEventListener('click', () => this.closeModal());
-
-    const protectedCheck = box.querySelector('#vault-protected') as HTMLInputElement;
-    const pwdSection = box.querySelector('#vault-pwd-section') as HTMLElement;
-    protectedCheck?.addEventListener('change', () => {
-      pwdSection.style.display = protectedCheck.checked ? 'block' : 'none';
+    box.querySelector('#modal-confirm')?.addEventListener('click', () => {
+      const name = (box.querySelector('#vault-name') as HTMLInputElement).value.trim();
+      const type = (box.querySelector('#vault-type') as HTMLSelectElement).value as 'personal' | 'work' | 'team';
+      if (!name) {
+        this.showToast(this.tr('Le nom du coffre est requis', 'Vault name is required'), 'error');
+        return;
+      }
+      if (existing) {
+        vaultStore.updateVault(existing.id, { name, type });
+        this.showToast(this.tr('Coffre enregistré', 'Vault saved'), 'success');
+      } else {
+        vaultStore.addVault(name, type);
+        this.selectedItemId = null;
+        this.renderDetail(null);
+        this.showToast(i18n.t.vault.vaultCreatedToast, 'success');
+      }
+      this.closeModal();
     });
 
-    box.querySelector('#modal-confirm')?.addEventListener('click', async () => {
-      const name = (box.querySelector('#vault-name') as HTMLInputElement)?.value.trim();
-      const type = (box.querySelector('#vault-type') as HTMLSelectElement)?.value;
-      if (!name) { this.showToast(i18n.getLocale() === 'fr' ? 'Le nom du coffre est requis' : 'Vault name is required', 'error'); return; }
-
-      let passwordHash: string | undefined;
-      if (protectedCheck?.checked) {
-        const pwd = (box.querySelector('#vault-pwd') as HTMLInputElement)?.value;
-        const confirm = (box.querySelector('#vault-pwd-confirm') as HTMLInputElement)?.value;
-        if (!pwd || pwd !== confirm) { this.showToast(i18n.getLocale() === 'fr' ? 'Les mots de passe ne correspondent pas' : 'Passwords do not match', 'error'); return; }
-        passwordHash = await hashVaultPassword(pwd);
-      }
-
-      vaultStore.addVault(name, type as 'personal' | 'work' | 'team', passwordHash);
+    box.querySelector('[data-action="delete-vault"]')?.addEventListener('click', async () => {
+      if (!existing) return;
+      const confirmed = await this.confirmDialog({
+        title: this.tr('Supprimer le coffre ?', 'Delete vault?'),
+        message: this.tr(`« ${existing.name} », ses ${credentialCount} identifiant(s) et ses ${taskCount} tâche(s) seront définitivement supprimés.`, `"${existing.name}", its ${credentialCount} credential(s) and ${taskCount} task(s) will be permanently deleted.`),
+        confirmLabel: this.tr('Supprimer', 'Delete'),
+        danger: true
+      });
+      if (!confirmed) return;
+      vaultStore.deleteVault(existing.id);
+      this.selectedItemId = null;
+      this.renderDetail(null);
       this.closeModal();
-      this.showToast(i18n.t.vault.vaultCreatedToast, 'success');
+      this.showToast(this.tr('Coffre supprimé', 'Vault deleted'), 'success');
     });
   }
 
-  /* ── Déverrouiller Coffre ─────────────────────────────────────────────── */
-  private openUnlockVaultModal(vaultId: string): void {
+  /* ── Tags ────────────────────────────────────────────────────────────── */
+  private renderTagSidebar(): void {
+    const list = document.getElementById('tag-list');
+    if (!list) return;
     const data = vaultStore.getData();
-    const vault = data.vaults.find(v => v.id === vaultId);
-    if (!vault) return;
+    const tags = vaultStore.getTags();
+    if (this.activeTag && !tags.some(t => t.name === this.activeTag)) this.activeTag = null;
 
+    if (tags.length === 0) {
+      list.innerHTML = `<li class="nav-empty">${this.tr('Aucun tag', 'No tags')}</li>`;
+      return;
+    }
+
+    const itemsInVault = [...data.credentials, ...data.tasks].filter(item => item.vaultId === data.activeVaultId);
+    list.innerHTML = '';
+    tags.forEach(tag => {
+      const key = tag.name.toLowerCase();
+      const count = itemsInVault.filter(item => item.tags.some(t => t.toLowerCase() === key)).length;
+      const li = document.createElement('li');
+      li.className = `nav-item ${this.activeTag === tag.name ? 'active' : ''}`;
+      li.tabIndex = 0;
+      li.setAttribute('aria-pressed', String(this.activeTag === tag.name));
+      li.innerHTML = `
+        <span class="nav-item-left">
+          <span class="tag-dot" style="background-color:${tagColor(tag.color)};"></span>
+          <span>${this.escapeHtml(tag.name)}</span>
+        </span>
+        <span class="nav-count">${count}</span>`;
+      const toggle = () => {
+        this.activeTag = this.activeTag === tag.name ? null : tag.name;
+        this.selectedItemId = null;
+        this.renderSidebar();
+        this.renderList();
+        this.renderDetail(null);
+      };
+      li.addEventListener('click', toggle);
+      li.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggle();
+        }
+      });
+      list.appendChild(li);
+    });
+  }
+
+  private renderTagChips(tags: string[]): string {
+    if (!tags.length) return '';
+    return `<div class="tag-chip-row">${tags.map(name => `
+      <span class="tag-chip" style="--tag-color:${tagColor(vaultStore.getTagByName(name)?.color)}"><span>${this.escapeHtml(name)}</span></span>`).join('')}</div>`;
+  }
+
+  private openTagManagerModal(): void {
     const box = this.openModal(`
       <div class="modal-header">
-        <div class="modal-title">${i18n.t.vault.unlockModalTitle} "${vault.name}"</div>
-        <button class="modal-close" id="modal-close-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
+        <div class="modal-title">Tags</div>
+        <button class="modal-close">${GEN_ICONS.close}</button>
       </div>
       <div class="modal-body">
-        <div style="text-align:center;padding:16px 0;">
-          <div style="width:52px;height:52px;border-radius:var(--radius-xl);background-color:rgba(88,166,255,0.1);border:1px solid rgba(88,166,255,0.2);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--accent-blue)" stroke-width="2">
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-            </svg>
-          </div>
-          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;">${i18n.t.vault.unlockModalSub}</p>
-        </div>
-        <div class="form-field">
-          <label class="form-label">${i18n.t.vault.masterPasswordPlaceholder}</label>
-          <input class="form-input" id="unlock-pwd" type="password" placeholder="${i18n.t.vault.masterPasswordPlaceholder}" autocomplete="current-password">
-        </div>
-        <div id="unlock-error" style="font-size:12px;color:var(--accent-red);margin-top:8px;display:none;">${i18n.t.vault.invalidPasswordToast}</div>
-        <div id="bio-unlock-container" style="margin-top:14px;display:none;">
-          <button class="btn-primary" id="btn-bio-unlock" style="width:100%;gap:8px;background:rgba(88,166,255,0.08);border-color:rgba(88,166,255,0.25);color:var(--accent-blue);padding:10px;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 004 11m0 0a8.003 8.003 0 0115.357-2m1.51 15c-.056-.4-.117-.8-.184-1.196"></path>
-            </svg>
-            ${i18n.getLocale() === 'fr' ? 'Déverrouiller avec Biométrie (TouchID / Hello)' : 'Unlock with Biometrics (TouchID / Hello)'}
-          </button>
-        </div>
+        <form class="tag-create-row" data-tag-create>
+          <input class="form-input" id="tag-new-name" maxlength="32" placeholder="${this.tr('Nouveau tag', 'New tag')}" aria-label="${this.tr('Nouveau tag', 'New tag')}" autocomplete="off">
+          <button class="btn-primary btn-accent" type="submit">${this.tr('Ajouter', 'Add')}</button>
+        </form>
+        <div class="tag-manager-list" data-tag-list></div>
       </div>
       <div class="modal-footer">
-        <button class="btn-primary" id="modal-cancel" style="color:var(--text-muted);">${i18n.t.common.cancel}</button>
-        <button class="btn-primary" id="modal-confirm" style="background-color:var(--accent-blue);color:#fff;border-color:var(--accent-blue);">${i18n.t.vault.unlockAction}</button>
+        <button class="btn-primary" data-close>${this.tr('Fermer', 'Close')}</button>
       </div>
     `);
 
-    const pwdInput = box.querySelector('#unlock-pwd') as HTMLInputElement;
-    const errorEl = box.querySelector('#unlock-error') as HTMLElement;
-    const bioContainer = box.querySelector('#bio-unlock-container') as HTMLElement;
-    const btnBioUnlock = box.querySelector('#btn-bio-unlock') as HTMLButtonElement;
+    const listEl = box.querySelector('[data-tag-list]') as HTMLElement;
 
-    // Détection disponibilité WebAuthn Biométrie
-    isBiometricsAvailable().then((available) => {
-      if (available && bioContainer) {
-        bioContainer.style.display = 'block';
-      }
-    });
-
-    btnBioUnlock?.addEventListener('click', async () => {
-      btnBioUnlock.disabled = true;
-      const verified = await verifyBiometrics().catch(() => false);
-      btnBioUnlock.disabled = false;
-      if (verified) {
-        // Passe par le store : sauvegarde + rafraîchissement de l'interface
-        vaultStore.unlockVaultWithBiometrics(vaultId);
-        this.closeModal();
-        this.showToast(`${i18n.t.vault.vaultUnlockedToast} ("${vault.name}")`, 'success');
-      } else {
-        errorEl.textContent = i18n.getLocale() === 'fr' ? 'Échec d&#x27;authentification biométrique.' : 'Biometric authentication failed.';
-        errorEl.style.display = 'block';
-      }
-    });
-
-    box.querySelector('#modal-close-btn')?.addEventListener('click', () => this.closeModal());
-    box.querySelector('#modal-cancel')?.addEventListener('click', () => this.closeModal());
-
-    box.querySelector('#modal-confirm')?.addEventListener('click', async () => {
-      const pwd = pwdInput?.value;
-      if (!pwd) {
-        errorEl.textContent = this.tr('Entrez le mot de passe du coffre', 'Enter the vault password');
-        errorEl.style.display = 'block';
-        pwdInput.focus();
+    const render = () => {
+      const tags = vaultStore.getTags();
+      if (tags.length === 0) {
+        listEl.innerHTML = `<p class="modal-text">${this.tr('Aucun tag. Créez-en un ici ou depuis un identifiant ou une tâche.', 'No tags yet. Create one here or from a credential or task.')}</p>`;
         return;
       }
-      const success = await vaultStore.unlockVault(vaultId, await hashVaultPassword(pwd));
-      errorEl.textContent = i18n.t.vault.invalidPasswordToast;
-      if (success) {
-        this.closeModal();
-        this.showToast(`${i18n.t.vault.vaultUnlockedToast} ("${vault.name}")`, 'success');
-      } else {
-        errorEl.style.display = 'block';
-        pwdInput.value = '';
-        pwdInput.focus();
+      listEl.innerHTML = tags.map(tag => {
+        const count = vaultStore.countTagUsage(tag.name);
+        return `
+          <div class="tag-manager-row" data-tag-id="${tag.id}">
+            <input class="form-input tag-rename" value="${this.escapeHtml(tag.name)}" maxlength="32" aria-label="${this.tr('Nom du tag', 'Tag name')}">
+            <span class="tag-usage">${this.tr(`${count} élément(s)`, `${count} item(s)`)}</span>
+            <button type="button" class="icon-btn tag-delete" title="${this.tr('Supprimer', 'Delete')}" aria-label="${this.tr('Supprimer', 'Delete')} ${this.escapeHtml(tag.name)}">${ACTION_ICONS.trash}</button>
+            <div class="tag-color-picker" role="radiogroup" aria-label="${this.tr('Couleur', 'Color')}">
+              ${TAG_COLORS.map(color => `
+                <button type="button" class="tag-swatch ${color === tag.color ? 'selected' : ''}" style="background-color:${color};" data-color="${color}" role="radio" aria-checked="${color === tag.color}" aria-label="${color}"></button>`).join('')}
+            </div>
+          </div>`;
+      }).join('');
+    };
+
+    const rowTag = (el: HTMLElement) => {
+      const id = el.closest<HTMLElement>('[data-tag-id]')?.dataset.tagId;
+      return vaultStore.getTags().find(t => t.id === id);
+    };
+
+    listEl.addEventListener('click', async e => {
+      const target = e.target as HTMLElement;
+      const tag = rowTag(target);
+      if (!tag) return;
+
+      const swatch = target.closest<HTMLElement>('.tag-swatch');
+      if (swatch?.dataset.color) {
+        vaultStore.updateTag(tag.id, { color: swatch.dataset.color });
+        render();
+        return;
+      }
+
+      if (target.closest('.tag-delete')) {
+        const count = vaultStore.countTagUsage(tag.name);
+        const confirmed = await this.confirmDialog({
+          title: this.tr('Supprimer le tag ?', 'Delete tag?'),
+          message: this.tr(`« ${tag.name} » sera retiré de ${count} élément(s). Les éléments eux-mêmes sont conservés.`, `"${tag.name}" will be removed from ${count} item(s). The items themselves are kept.`),
+          confirmLabel: this.tr('Supprimer', 'Delete'),
+          danger: true
+        });
+        if (!confirmed) return;
+        if (this.activeTag === tag.name) this.activeTag = null;
+        vaultStore.deleteTag(tag.id);
+        render();
       }
     });
 
-    setTimeout(() => pwdInput?.focus(), 100);
+    listEl.addEventListener('change', e => {
+      const input = e.target as HTMLInputElement;
+      if (!input.classList.contains('tag-rename')) return;
+      const tag = rowTag(input);
+      if (!tag) return;
+      try {
+        const wasActive = this.activeTag === tag.name;
+        vaultStore.updateTag(tag.id, { name: input.value });
+        if (wasActive) this.activeTag = vaultStore.getTags().find(t => t.id === tag.id)?.name ?? null;
+      } catch (err) {
+        this.showToast(err instanceof Error ? err.message : String(err), 'error');
+      }
+      render();
+    });
+
+    listEl.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && (e.target as HTMLElement).classList.contains('tag-rename')) {
+        e.preventDefault();
+        (e.target as HTMLInputElement).blur();
+      }
+    });
+
+    box.querySelector('[data-tag-create]')?.addEventListener('submit', e => {
+      e.preventDefault();
+      const input = box.querySelector('#tag-new-name') as HTMLInputElement;
+      try {
+        vaultStore.createTag(input.value);
+        input.value = '';
+        render();
+      } catch (err) {
+        this.showToast(err instanceof Error ? err.message : String(err), 'error');
+      }
+      input.focus();
+    });
+
+    render();
   }
 
   /* ── Raccourcis Clavier (Palette Cheat Sheet) ─────────────────────────── */

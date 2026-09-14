@@ -68,12 +68,12 @@ export function parseImportFile(fileContent: string, fileName = ''): ImportResul
         };
       }
 
-      // B. Format standard BUM / Canonique
+      // B. Format BetterVault
       if (parsed.credentials && Array.isArray(parsed.credentials)) {
         return {
           credentials: parsed.credentials,
           tasks: parsed.tasks || [],
-          sourceFormat: 'BUM Canonical Vault',
+          sourceFormat: 'BetterVault JSON',
           count: parsed.credentials.length + (parsed.tasks ? parsed.tasks.length : 0)
         };
       }
@@ -146,7 +146,7 @@ export function parseImportFile(fileContent: string, fileName = ''): ImportResul
     }
   }
 
-  throw new Error('Format de fichier non reconnu. Prise en charge : JSON (Bitwarden, 1Password, BUM), CSV.');
+  throw new Error('Format de fichier non reconnu. Formats pris en charge : KeePass, 1Password, Bitwarden, FIDO CXF, BetterVault, CSV.');
 }
 
 function parseCsvLine(text: string, delimiter: string): string[] {
@@ -170,11 +170,11 @@ function parseCsvLine(text: string, delimiter: string): string[] {
 }
 
 /**
- * Exporte les données du coffre au format JSON standard BUM
+ * Exporte les données du coffre au format JSON BetterVault
  */
 export function exportVaultAsJson(credentials: CredentialItem[], tasks: Task[]): string {
   const exportPayload = {
-    generator: 'BUM Zero-Knowledge Vault Manager',
+    generator: 'BetterVault',
     exportedAt: new Date().toISOString(),
     version: 1,
     credentials,
@@ -191,7 +191,7 @@ export function exportVaultAsCsv(credentials: CredentialItem[]): string {
   const rows = credentials.map(c => {
     const sanitize = (val?: string) => `"${(val || '').replace(/"/g, '""')}"`;
     return [
-      sanitize('BUM Vault'),
+      sanitize('BetterVault'),
       sanitize(c.isFavorite ? '1' : '0'),
       sanitize('login'),
       sanitize(c.title),
