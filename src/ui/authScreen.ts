@@ -8,6 +8,7 @@ import { createEmptyVaultData } from '../store/vaultStore';
 import type { UnlockedVaultData } from '../types/vault';
 import { formatRecoveryKey, recoveryKeyFile } from './recoveryKey';
 import { BiometricCancelledError, type DeviceSecretStore } from '../platform/biometric';
+import { renderSVG } from 'uqr';
 
 const isTauriRuntime = typeof (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined';
 
@@ -16,7 +17,7 @@ const isTauriRuntime = typeof (globalThis as { __TAURI_INTERNALS__?: unknown }).
 export const DEFAULT_SERVER_URL = import.meta.env.VITE_BETTERVAULT_SERVER
   || (!isTauriRuntime && (location.protocol === 'http:' || location.protocol === 'https:') ? location.origin : 'http://127.0.0.1:8787');
 
-type Screen = 'unlock' | 'create' | 'signin' | 'confirm-signout' | 'recover' | 'recovery-key';
+type Screen = 'unlock' | 'create' | 'signin' | 'confirm-signout' | 'recover' | 'recovery-key' | 'totp-offer';
 
 const tr = (fr: string, en: string) => (i18n.getLocale() === 'fr' ? fr : en);
 
@@ -41,7 +42,9 @@ export function mountAuthScreen(
   options: { deviceStore?: DeviceSecretStore | null } = {}
 ): { show(): void } {
   // Données à ouvrir une fois la clé de secours confirmée
-  let pending: { data: UnlockedVaultData; key: string; intro: string } | null = null;
+  let pending: { data: UnlockedVaultData; key: string; intro: string; offerTotp?: boolean } | null = null;
+  // Mot de passe gardé en mémoire le temps de proposer la double authentification après la création
+  let newAccountPassword: string | null = null;
   // L'invite biométrique s'ouvre d'elle-même une seule fois par affichage de l'écran
   let autoPrompted = false;
 
@@ -156,6 +159,10 @@ export function mountAuthScreen(
           </label>
         </fieldset>
         ${serverField(true)}
+        <label class="check-row" data-terms hidden>
+          <input type="checkbox" data-accept-terms>
+          <span>${tr('J’accepte les', 'I accept the')} <a data-legal="terms" target="_blank" rel="noopener">${tr('conditions d’utilisation', 'terms of use')}</a> ${tr('et la', 'and the')} <a data-legal="privacy" target="_blank" rel="noopener">${tr('politique de confidentialité', 'privacy policy')}</a> ${tr('de ce serveur', 'of this server')}</span>
+        </label>
         <p class="auth-warning">${tr('Ce mot de passe chiffre le coffre et n’est jamais envoyé. Une clé de secours vous sera donnée pour pouvoir le changer si vous l’oubliez.', 'This password encrypts the vault and is never sent. You will get a recovery key to reset it if you forget it.')}</p>
         <div class="auth-error" role="alert" hidden></div>
         <button type="submit" class="btn-primary btn-accent auth-submit">${tr('Créer le coffre', 'Create vault')}</button>
@@ -244,7 +251,34 @@ export function mountAuthScreen(
       </div>
       <p class="auth-warning">${tr('Gardez-la hors de BetterVault (papier, clé USB…). Elle ne sera plus affichée.', 'Keep it outside BetterVault (paper, USB drive…). It won’t be shown again.')}</p>
       <label class="check-row"><input type="checkbox" data-confirm-key> ${tr('J’ai mis ma clé de secours en lieu sûr', 'I stored my recovery key somewhere safe')}</label>
-      <button type="button" class="btn-primary btn-accent auth-submit" data-action="continue" disabled>${tr('Continuer', 'Continue')}</button>`
+      <button type="button" class="btn-primary btn-accent auth-submit" data-action="continue" disabled>${tr('Continuer', 'Continue')}</button>`,
+
+    'totp-offer': () => `
+      ${brand()}
+      <div>
+        <h1 class="auth-title">${tr('Double authentification', 'Two-factor authentication')}</h1>
+        <p class="auth-sub">${tr('Recommandé : même avec votre mot de passe, personne ne pourra se connecter au serveur sans le code de votre téléphone.', 'Recommended: even with your password, nobody can sign in to the server without the code from your phone.')}</p>
+      </div>
+      <div class="auth-form" data-totp-step>
+        <div class="totp-setup totp-setup-auth">
+          <div class="qr-box" data-totp-qr aria-label="QR code"><span class="skeleton skeleton-block"></span></div>
+          <div style="display:flex;flex-direction:column;gap:10px;min-width:0;">
+            <ol class="ie-steps">
+              <li>${tr('Scannez le QR code avec Aegis, 2FAS, Google Authenticator…', 'Scan the QR code with Aegis, 2FAS, Google Authenticator…')}</li>
+              <li>${tr('Saisissez le code à 6 chiffres affiché', 'Enter the 6-digit code shown')}</li>
+            </ol>
+            <details>
+              <summary class="field-hint" style="cursor:pointer;">${tr('Saisir la clé à la main', 'Enter the key manually')}</summary>
+              <code class="secret-text" data-totp-secret style="margin-top:6px;"></code>
+            </details>
+          </div>
+        </div>
+        ${otpField('auth-totp-new', tr('Code de l’application', 'App code'), '')}
+        <div class="auth-error" role="alert" hidden></div>
+        <button type="button" class="btn-primary btn-accent auth-submit" data-action="totp-enable">${tr('Activer', 'Turn on')}</button>
+        <button type="button" class="btn-primary btn-ghost auth-submit" data-action="totp-skip">${tr('Plus tard', 'Later')}</button>
+      </div>
+      <p class="field-hint" style="text-align:center;">${tr('Modifiable à tout moment dans Compte › Sécurité.', 'You can change this anytime in Account › Security.')}</p>`
   };
 
   const finish = (data: UnlockedVaultData) => {
@@ -279,9 +313,13 @@ export function mountAuthScreen(
       const mode = form.querySelector<HTMLInputElement>('input[name="auth-mode"]:checked')?.value === 'cloud' ? 'cloud' : 'local';
       const initial = createEmptyVaultData();
       initial.vaults[0].name = tr('Personnel', 'Personal');
+      if (mode === 'cloud' && !form.querySelector<HTMLInputElement>('[data-accept-terms]')?.checked) {
+        return fail(tr('Acceptez les conditions d’utilisation du serveur pour créer un compte synchronisé', 'Accept the server’s terms of use to create a synced account'));
+      }
       task = async () => {
         const { recoveryKey } = await service.createAccount({ email: value('auth-email'), password, mode, serverUrl: mode === 'cloud' ? value('auth-server') : undefined }, initial);
-        pending = { data: initial, key: recoveryKey, intro: tr('Si vous oubliez votre mot de passe principal, cette clé permet d’en choisir un nouveau sans perdre vos données.', 'If you forget your master password, this key lets you choose a new one without losing your data.') };
+        if (mode === 'cloud') newAccountPassword = password;
+        pending = { data: initial, key: recoveryKey, offerTotp: mode === 'cloud', intro: tr('Si vous oubliez votre mot de passe principal, cette clé permet d’en choisir un nouveau sans perdre vos données.', 'If you forget your master password, this key lets you choose a new one without losing your data.') };
         render('recovery-key');
       };
     } else if (kind === 'signin') {
@@ -440,10 +478,74 @@ export function mountAuthScreen(
     });
     continueButton?.addEventListener('click', () => {
       if (!pending) return;
+      if (pending.offerTotp && newAccountPassword) {
+        render('totp-offer');
+        return;
+      }
       const data = pending.data;
       pending = null;
       finish(data);
     });
+
+    // Création d'un compte synchronisé : liens vers les documents du serveur choisi
+    const termsRow = card.querySelector<HTMLElement>('[data-terms]');
+    if (termsRow) {
+      const serverInput = card.querySelector<HTMLInputElement>('#auth-server');
+      const updateTerms = () => {
+        const cloud = card.querySelector<HTMLInputElement>('input[name="auth-mode"]:checked')?.value === 'cloud';
+        termsRow.hidden = !cloud;
+        const base = (serverInput?.value ?? '').trim().replace(/\/+$/, '');
+        termsRow.querySelectorAll<HTMLAnchorElement>('[data-legal]').forEach(link => {
+          if (/^https?:\/\//.test(base)) link.href = `${base}/legal/${link.dataset.legal}`;
+          else link.removeAttribute('href');
+        });
+      };
+      serverInput?.addEventListener('input', updateTerms);
+      card.querySelectorAll<HTMLInputElement>('input[name="auth-mode"]').forEach(radio => radio.addEventListener('change', updateTerms));
+      updateTerms();
+    }
+
+    // Proposition de double authentification juste après la création du compte
+    const totpStep = card.querySelector<HTMLElement>('[data-totp-step]');
+    if (totpStep && pending) {
+      const done = () => {
+        newAccountPassword = null;
+        const data = pending!.data;
+        pending = null;
+        finish(data);
+      };
+      const errorEl = totpStep.querySelector<HTMLElement>('.auth-error')!;
+      const enableButton = totpStep.querySelector<HTMLButtonElement>('[data-action="totp-enable"]')!;
+      const codeInput = totpStep.querySelector<HTMLInputElement>('#auth-totp-new')!;
+      enableButton.disabled = true;
+      totpStep.querySelector('[data-action="totp-skip"]')?.addEventListener('click', done);
+      service.beginTotpSetup(newAccountPassword ?? '').then(setup => {
+        if (!totpStep.isConnected) return;
+        totpStep.querySelector('[data-totp-qr]')!.innerHTML = renderSVG(setup.uri, { border: 1 });
+        totpStep.querySelector('[data-totp-secret]')!.textContent = setup.secret.match(/.{1,4}/g)!.join(' ');
+        enableButton.disabled = false;
+        codeInput.focus();
+      }).catch(err => {
+        errorEl.textContent = accountErrorMessage(err);
+        errorEl.hidden = false;
+      });
+      const enable = async () => {
+        errorEl.hidden = true;
+        enableButton.disabled = true;
+        try {
+          await service.enableTotp(codeInput.value);
+          done();
+        } catch (err) {
+          errorEl.textContent = accountErrorMessage(err);
+          errorEl.hidden = false;
+          codeInput.select();
+          enableButton.disabled = false;
+        }
+      };
+      enableButton.addEventListener('click', () => void enable());
+      codeInput.addEventListener('keydown', e => { if (e.key === 'Enter') void enable(); });
+      codeInput.addEventListener('input', () => { if (/^\d{6}$/.test(codeInput.value.trim())) void enable(); });
+    }
 
     const deviceButton = card.querySelector<HTMLButtonElement>('[data-action="device-unlock"]');
     if (deviceButton && options.deviceStore) {

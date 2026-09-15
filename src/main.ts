@@ -25,7 +25,7 @@ import { normalizeTotpInput, parseOtpAuthUri } from './crypto/otpauthUri';
 import { CameraQrScanner, decodeQrFromFile } from './crypto/qrScanner';
 import { AccountService, type SyncStatus } from './account/accountService';
 import { SharedReadOnlyError, SharedVaultManager } from './account/sharedVaults';
-import type { SharedMember, SharedPermission, SharedRole } from './account/cloudClient';
+import type { AccountSession, SharedMember, SharedPermission, SharedRole } from './account/cloudClient';
 import { decryptFile, encryptFile, type AttachmentMeta } from './account/attachmentCrypto';
 import { createDeviceStorage } from './platform/storage';
 import { isTauri } from './platform/tauriBridge';
@@ -2466,7 +2466,7 @@ class AppController {
           </div>
           <div class="form-field">
             <label class="form-label">${this.tr('Échéance', 'Due date')}</label>
-            <input class="form-input" id="task-due" type="date" value="${existing?.dueDate || ''}">
+            <div id="task-due"></div>
           </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
@@ -2488,11 +2488,11 @@ class AppController {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
           <div class="form-field">
             <label class="form-label">${this.tr('Fin de récurrence', 'Recurrence end')}</label>
-            <input class="form-input" id="task-recur-until" type="date" value="${existing?.recurrence?.until || ''}">
+            <div id="task-recur-until"></div>
           </div>
           <div class="form-field">
             <label class="form-label">${this.tr('Rappel', 'Reminder')}</label>
-            <input class="form-input" id="task-reminder" type="datetime-local" value="${this.toDateTimeInputValue(existing?.reminderAt)}">
+            <div id="task-reminder"></div>
           </div>
         </div>
         <div class="form-field">
@@ -2528,26 +2528,38 @@ class AppController {
       suggestions: vaultStore.getTags(),
       placeholder: this.tr('Ajouter un tag…', 'Add a tag…')
     });
+    const trTask = (fr: string, en: string) => this.tr(fr, en);
+    const dueField = mountDateField(box.querySelector('#task-due') as HTMLElement, {
+      value: existing?.dueDate || '', label: trTask('Échéance', 'Due date'), tr: trTask, locale: this.dateLocale()
+    });
+    const untilField = mountDateField(box.querySelector('#task-recur-until') as HTMLElement, {
+      value: existing?.recurrence?.until || '', label: trTask('Fin de récurrence', 'Recurrence end'), tr: trTask, locale: this.dateLocale(),
+      placeholder: trTask('Jamais', 'Never'), describe: () => ''
+    });
+    const reminderField = mountDateField(box.querySelector('#task-reminder') as HTMLElement, {
+      value: this.toDateTimeInputValue(existing?.reminderAt), label: trTask('Rappel', 'Reminder'), tr: trTask, locale: this.dateLocale(),
+      withTime: true, placeholder: trTask('Aucun rappel', 'No reminder'), describe: () => ''
+    });
 
     box.querySelector('#modal-confirm')?.addEventListener('click', () => {
       const title = (box.querySelector('#task-title') as HTMLInputElement)?.value.trim();
       if (!title) { this.showToast(this.tr('Le titre est obligatoire', 'Title is required'), 'error'); return; }
       const description = (box.querySelector('#task-desc') as HTMLTextAreaElement)?.value;
       const priority = (box.querySelector('#task-priority') as HTMLSelectElement)?.value as Task['priority'];
-      const dueDate = (box.querySelector('#task-due') as HTMLInputElement)?.value;
+      const dueDate = dueField.getValue();
       const linkedCredSel = box.querySelector('#task-cred') as HTMLSelectElement;
       const linkedCred = linkedCredSel?.value || undefined;
 
       const freq = (box.querySelector('#task-recur-freq') as HTMLSelectElement).value as RecurrenceFrequency | '';
       const interval = Math.min(365, Math.max(1, parseInt((box.querySelector('#task-recur-interval') as HTMLInputElement).value, 10) || 1));
-      const until = (box.querySelector('#task-recur-until') as HTMLInputElement).value || undefined;
+      const until = untilField.getValue() || undefined;
       const recurrence: TaskRecurrence | undefined = freq ? { freq, interval, until } : undefined;
       if (recurrence && until && dueDate && until < dueDate) {
         this.showToast(this.tr('La fin de récurrence précède l’échéance', 'Recurrence end is before the due date'), 'error');
         return;
       }
 
-      const reminderValue = (box.querySelector('#task-reminder') as HTMLInputElement).value;
+      const reminderValue = reminderField.getValue();
       const reminderAt = reminderValue ? new Date(reminderValue).getTime() : undefined;
       const reminderSent = reminderAt !== undefined && existing?.reminderAt === reminderAt ? existing.reminderSent : false;
       if (reminderAt && reminderAt > Date.now()) this.requestNotificationPermission();
@@ -3900,6 +3912,15 @@ class AppController {
           </div>
         </div>
 
+        <div class="tab-btn-group account-tabs" role="tablist">
+          <button type="button" class="tab-btn active" role="tab" aria-selected="true" data-account-tab="general">${tr('Général', 'General')}</button>
+          <button type="button" class="tab-btn" role="tab" aria-selected="false" data-account-tab="security">${tr('Sécurité', 'Security')}</button>
+          ${isCloud ? `<button type="button" class="tab-btn" role="tab" aria-selected="false" data-account-tab="sessions">${tr('Sessions', 'Sessions')}</button>` : ''}
+          <button type="button" class="tab-btn" role="tab" aria-selected="false" data-account-tab="plan">${isCloud ? tr('Espace', 'Storage') : tr('Limites', 'Limits')}</button>
+          <button type="button" class="tab-btn" role="tab" aria-selected="false" data-account-tab="data">${tr('Données', 'Data')}</button>
+        </div>
+
+        <div data-tab-panel="general">
         ${isCloud ? `
           <div class="account-sync-row">
             <div style="min-width:0;">
@@ -3934,6 +3955,18 @@ class AppController {
             </div>
           </section>`}
 
+        <section class="account-section" data-device-section hidden></section>
+
+        <section class="account-section">
+          <h3 class="account-section-title">${tr('Session sur cet appareil', 'Session on this device')}</h3>
+          <div class="account-actions">
+            <button class="btn-primary" data-action="lock">${tr('Verrouiller', 'Lock')}</button>
+            <button class="btn-primary btn-ghost" data-action="signout">${tr('Se déconnecter de cet appareil', 'Sign out of this device')}</button>
+          </div>
+        </section>
+        </div>
+
+        <div data-tab-panel="security" hidden>
         <section class="account-section">
           <h3 class="account-section-title">${tr('Sécurité du compte', 'Account security')}</h3>
           ${isCloud ? `
@@ -3959,8 +3992,6 @@ class AppController {
           </div>
         </section>
 
-        <section class="account-section" data-device-section hidden></section>
-
         <section class="account-section">
           <h3 class="account-section-title">${tr('Changer le mot de passe principal', 'Change master password')}</h3>
           <div class="form-field">
@@ -3982,19 +4013,44 @@ class AppController {
             <button class="btn-primary" data-action="change-password">${tr('Changer le mot de passe', 'Change password')}</button>
           </div>
         </section>
+        </div>
 
-        <details class="account-section">
-          <summary class="account-section-title" style="cursor:pointer;">${isCloud ? tr('Limites du serveur', 'Server limits') : tr('Limites', 'Limits')}</summary>
-          <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;margin-top:8px;font-size:12px;">
-            ${limitRows.map(([label, value]) => `<span style="color:var(--text-secondary);">${label}</span><span style="font-variant-numeric:tabular-nums;">${value}</span>`).join('')}
-          </div>
-        </details>
+        ${isCloud ? `
+        <div data-tab-panel="sessions" hidden>
+          <section class="account-section">
+            <div class="account-section-head">
+              <h3 class="account-section-title">${tr('Appareils connectés', 'Signed-in devices')}</h3>
+              <button class="btn-primary btn-ghost btn-sm" data-action="sessions-refresh">${GEN_ICONS.refresh}<span>${tr('Actualiser', 'Refresh')}</span></button>
+            </div>
+            <p class="modal-text">${tr('Adresse IP tronquée et lieu approximatif, calculés par votre serveur. Fermer une session déconnecte l’appareil au prochain échange avec le serveur.', 'Truncated IP address and approximate place, computed by your server. Closing a session signs the device out the next time it talks to the server.')}</p>
+            <div class="session-list" data-session-list></div>
+            <div class="form-section session-confirm" data-session-confirm hidden></div>
+          </section>
+        </div>` : ''}
 
+        <div data-tab-panel="plan" hidden>
+          ${isCloud ? `<section class="account-section" data-billing-section>
+            <h3 class="account-section-title">${tr('Espace de stockage', 'Storage')}</h3>
+            <div data-usage></div>
+            <div data-plans></div>
+          </section>` : ''}
+          <section class="account-section">
+            <h3 class="account-section-title">${isCloud ? tr('Limites du compte', 'Account limits') : tr('Limites', 'Limits')}</h3>
+            <div class="limit-grid" data-limit-grid>
+              ${limitRows.map(([label, value]) => `<span>${label}</span><span>${value}</span>`).join('')}
+            </div>
+          </section>
+        </div>
+
+        <div data-tab-panel="data" hidden>
         <section class="account-section">
-          <h3 class="account-section-title">${tr('Cet appareil', 'This device')}</h3>
+          <h3 class="account-section-title">${tr('Confidentialité', 'Privacy')}</h3>
+          <p class="modal-text">${isCloud
+            ? tr('Le serveur ne reçoit que des données chiffrées sur cet appareil : il ne peut lire ni vos identifiants, ni vos notes, ni vos fichiers.', 'The server only receives data encrypted on this device: it cannot read your credentials, notes or files.')
+            : tr('Rien ne quitte cet appareil.', 'Nothing leaves this device.')}</p>
+          <div class="legal-links" data-legal-links></div>
           <div class="account-actions">
-            <button class="btn-primary" data-action="lock">${tr('Verrouiller', 'Lock')}</button>
-            <button class="btn-primary btn-ghost" data-action="signout">${tr('Se déconnecter de cet appareil', 'Sign out of this device')}</button>
+            <button class="btn-primary" data-action="export">${tr('Exporter mes données', 'Export my data')}</button>
           </div>
         </section>
 
@@ -4011,6 +4067,7 @@ class AppController {
               <button class="btn-primary btn-danger" data-action="delete">${tr('Supprimer le compte en ligne', 'Delete online account')}</button>
             </div>
           </section>` : ''}
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn-primary" data-close>${tr('Fermer', 'Close')}</button>
@@ -4018,6 +4075,23 @@ class AppController {
     `);
 
     const $ = <T extends HTMLElement>(selector: string) => box.querySelector(selector) as T | null;
+    box.classList.add('account-modal');
+
+    const loaded = new Set<string>();
+    const selectTab = (name: string) => {
+      box.querySelectorAll<HTMLElement>('[data-account-tab]').forEach(tab => {
+        const active = tab.dataset.accountTab === name;
+        tab.classList.toggle('active', active);
+        tab.setAttribute('aria-selected', String(active));
+      });
+      box.querySelectorAll<HTMLElement>('[data-tab-panel]').forEach(panel => { panel.hidden = panel.dataset.tabPanel !== name; });
+      if (loaded.has(name)) return;
+      loaded.add(name);
+      if (name === 'sessions') void loadSessions();
+      if (name === 'plan' && isCloud) void loadBilling();
+      if (name === 'data') void loadLegal();
+    };
+    box.querySelectorAll<HTMLElement>('[data-account-tab]').forEach(tab => tab.addEventListener('click', () => selectTab(tab.dataset.accountTab!)));
 
     const renderState = () => {
       const el = $('[data-sync-state]');
@@ -4245,6 +4319,207 @@ class AppController {
 
     action('lock')?.addEventListener('click', () => this.lockApp());
     action('signout')?.addEventListener('click', () => void this.signOutDevice());
+    action('export')?.addEventListener('click', () => {
+      this.closeModal();
+      document.getElementById('btn-open-import')?.click();
+    });
+
+    // Sessions : liste, fermeture avec mot de passe (et code 2FA si activée)
+    const sessionList = $('[data-session-list]');
+    const sessionConfirm = $('[data-session-confirm]');
+    const skeletonRows = (count: number) => Array.from({ length: count }, () => `
+      <div class="session-row"><span class="skeleton skeleton-circle"></span><div class="session-main"><span class="skeleton skeleton-line" style="width:55%"></span><span class="skeleton skeleton-line" style="width:80%"></span></div></div>`).join('');
+    const flag = (country: string | null) => country && /^[A-Z]{2}$/.test(country)
+      ? String.fromCodePoint(...[...country].map(c => 0x1f1a5 + c.charCodeAt(0)))
+      : '';
+    const regionName = (country: string | null) => {
+      if (!country) return '';
+      try {
+        return new Intl.DisplayNames([locale], { type: 'region' }).of(country) ?? country;
+      } catch {
+        return country;
+      }
+    };
+    const relative = (at: number) => {
+      const diff = Date.now() - at;
+      const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+      if (diff < 60_000) return tr('à l’instant', 'just now');
+      if (diff < 3_600_000) return rtf.format(-Math.round(diff / 60_000), 'minute');
+      if (diff < 86_400_000) return rtf.format(-Math.round(diff / 3_600_000), 'hour');
+      return rtf.format(-Math.round(diff / 86_400_000), 'day');
+    };
+    const deviceIcon = (device: string | null) => /Android|iOS/.test(device ?? '')
+      ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></svg>'
+      : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>';
+
+    let sessions: AccountSession[] = [];
+    const renderSessions = () => {
+      if (!sessionList) return;
+      const others = sessions.filter(s => !s.current).length;
+      sessionList.innerHTML = sessions.map(s => {
+        const place = [s.city, regionName(s.country)].filter(Boolean).join(', ');
+        return `
+          <div class="session-row ${s.current ? 'current' : ''}">
+            <span class="session-icon">${deviceIcon(s.device)}</span>
+            <div class="session-main">
+              <div class="session-title">${this.escapeHtml(s.device ?? tr('Appareil inconnu', 'Unknown device'))}${s.current ? `<span class="status-pill on">${tr('Cet appareil', 'This device')}</span>` : ''}</div>
+              <div class="session-meta">
+                ${place ? `<span>${flag(s.country)} ${this.escapeHtml(place)}</span>` : `<span>${tr('Lieu inconnu', 'Unknown place')}</span>`}
+                ${s.ipPrefix ? `<span class="mono">${this.escapeHtml(s.ipPrefix)}</span>` : ''}
+                <span title="${new Date(s.lastSeenAt).toLocaleString(locale)}">${tr('Actif', 'Active')} ${relative(s.lastSeenAt)}</span>
+                <span>${tr('Connecté le', 'Signed in')} ${new Date(s.createdAt).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+              </div>
+            </div>
+            ${s.current ? '' : `<button class="btn-primary btn-ghost btn-sm" data-revoke="${s.id}">${tr('Fermer', 'Close')}</button>`}
+          </div>`;
+      }).join('') + (others > 1 ? `
+        <div class="account-actions account-actions-end"><button class="btn-primary btn-danger btn-sm" data-revoke="all">${tr(`Fermer les ${others} autres sessions`, `Close the ${others} other sessions`)}</button></div>` : '');
+    };
+    const loadSessions = async () => {
+      if (!sessionList) return;
+      sessionList.innerHTML = skeletonRows(2);
+      try {
+        sessions = await accountService.listSessions();
+        if (box.isConnected) renderSessions();
+      } catch (err) {
+        sessionList.innerHTML = `<div class="form-error">${this.escapeHtml(accountErrorMessage(err))}</div>`;
+      }
+    };
+    action('sessions-refresh')?.addEventListener('click', () => void loadSessions());
+
+    sessionList?.addEventListener('click', e => {
+      const target = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-revoke]')?.dataset.revoke;
+      if (!target || !sessionConfirm) return;
+      const session = sessions.find(s => s.id === target);
+      sessionConfirm.hidden = false;
+      sessionConfirm.innerHTML = `
+        <p class="modal-text"><strong>${target === 'all'
+          ? tr('Fermer toutes les autres sessions', 'Close all other sessions')
+          : `${tr('Fermer la session', 'Close session')} « ${this.escapeHtml(session?.device ?? '')} »`}</strong><br>${tr('Confirmez avec votre mot de passe principal', 'Confirm with your master password')}${totpEnabled ? tr(' et un code de l’application d’authentification.', ' and a code from your authenticator app.') : '.'}</p>
+        <div class="form-row" style="grid-template-columns:${totpEnabled ? 'minmax(0,1fr) 120px' : 'minmax(0,1fr)'};">
+          <input class="form-input" type="password" data-revoke-password autocomplete="current-password" placeholder="${tr('Mot de passe principal', 'Master password')}">
+          ${totpEnabled ? '<input class="form-input otp-input" data-revoke-code inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000">' : ''}
+        </div>
+        <div class="form-error" data-error="revoke" role="alert" hidden></div>
+        <div class="account-actions account-actions-end">
+          <button class="btn-primary btn-ghost" data-revoke-cancel>${tr('Annuler', 'Cancel')}</button>
+          <button class="btn-primary btn-danger" data-revoke-confirm>${tr('Fermer', 'Close')}</button>
+        </div>`;
+      const passwordInput = sessionConfirm.querySelector<HTMLInputElement>('[data-revoke-password]')!;
+      passwordInput.focus();
+      sessionConfirm.querySelector('[data-revoke-cancel]')?.addEventListener('click', () => { sessionConfirm.hidden = true; });
+      const submit = (button: HTMLButtonElement) => {
+        hideError('revoke');
+        const code = sessionConfirm.querySelector<HTMLInputElement>('[data-revoke-code]')?.value;
+        void runBusy(button, '…', async () => {
+          try {
+            const count = await accountService.revokeSessions(passwordInput.value, target === 'all' ? { all: true } : { sessionId: target }, code);
+            sessionConfirm.hidden = true;
+            this.showToast(count > 1 ? tr(`${count} sessions fermées`, `${count} sessions closed`) : tr('Session fermée', 'Session closed'), 'success');
+            await loadSessions();
+          } catch (err) {
+            showError('revoke', err);
+          }
+        });
+      };
+      const confirmButton = sessionConfirm.querySelector<HTMLButtonElement>('[data-revoke-confirm]')!;
+      confirmButton.addEventListener('click', () => submit(confirmButton));
+      sessionConfirm.addEventListener('keydown', ev => { if ((ev as KeyboardEvent).key === 'Enter') submit(confirmButton); });
+    });
+
+    // Espace de stockage et offres du serveur
+    const loadBilling = async () => {
+      const usageEl = $('[data-usage]');
+      const plansEl = $('[data-plans]');
+      if (!usageEl || !plansEl) return;
+      usageEl.innerHTML = '<span class="skeleton skeleton-line" style="width:60%"></span><span class="skeleton skeleton-bar"></span>';
+      try {
+        const [billing, usage] = await Promise.all([accountService.getBilling(), accountService.getAttachmentUsage().catch(() => null)]);
+        if (!box.isConnected) return;
+        const mb = (bytes: number) => bytes >= 1073741824 ? `${(bytes / 1073741824).toLocaleString(locale, { maximumFractionDigits: 1 })} ${tr('Go', 'GB')}` : `${Math.round(bytes / 1048576).toLocaleString(locale)} ${tr('Mo', 'MB')}`;
+        usageEl.innerHTML = usage?.enabled ? `
+          <div class="usage-head"><span>${tr('Pièces jointes', 'Attachments')}</span><span class="mono">${mb(usage.usedBytes)} / ${mb(usage.quotaBytes)}</span></div>
+          <div class="usage-bar"><span style="width:${Math.min(100, (usage.usedBytes / Math.max(1, usage.quotaBytes)) * 100).toFixed(1)}%"></span></div>` : `<p class="modal-text">${tr('Pièces jointes désactivées sur ce serveur.', 'Attachments are disabled on this server.')}</p>`;
+        const grid = $('[data-limit-grid]');
+        if (grid) {
+          const l = billing.limits;
+          grid.innerHTML = ([
+            [tr('Coffres', 'Vaults'), l.maxVaults.toLocaleString(locale)],
+            [tr('Identifiants par coffre', 'Credentials per vault'), l.maxCredentialsPerVault.toLocaleString(locale)],
+            [tr('Taille du coffre chiffré', 'Encrypted vault size'), mb(l.maxVaultBytes)],
+            [tr('Taille d’un fichier', 'File size'), mb(l.maxAttachmentBytes ?? 0)],
+            [tr('Espace des pièces jointes', 'Attachment storage'), mb(l.attachmentQuotaBytes ?? 0)],
+            [tr('Longueur d’une note', 'Note length'), l.maxNoteLength.toLocaleString(locale)]
+          ] as Array<[string, string]>).map(([label, value]) => `<span>${label}</span><span>${value}</span>`).join('');
+        }
+        if (!billing.enabled || billing.plans.length === 0) {
+          plansEl.innerHTML = '';
+          return;
+        }
+        const sub = billing.subscription;
+        const boostLabel = (key: string, value: number) => ({
+          attachmentQuotaBytes: `+${mb(value)} ${tr('de pièces jointes', 'attachment storage')}`,
+          maxAttachmentBytes: `+${mb(value)} ${tr('par fichier', 'per file')}`,
+          maxVaultBytes: `+${mb(value)} ${tr('par coffre', 'per vault')}`,
+          maxVaults: `+${value} ${tr('coffres', 'vaults')}`,
+          maxCredentialsPerVault: `+${value.toLocaleString(locale)} ${tr('identifiants par coffre', 'credentials per vault')}`
+        } as Record<string, string>)[key] ?? '';
+        plansEl.innerHTML = `
+          <div class="plan-list">
+            ${billing.plans.map(plan => {
+              const current = sub?.active && sub.planId === plan.id;
+              return `
+                <div class="plan-card ${current ? 'current' : ''}">
+                  <div class="plan-head"><span class="plan-name">${this.escapeHtml(plan.name)}</span><span class="plan-price">${this.escapeHtml(plan.priceLabel)}</span></div>
+                  ${plan.description ? `<p class="modal-text">${this.escapeHtml(plan.description)}</p>` : ''}
+                  <ul class="plan-boosts">${Object.entries(plan.boosts).map(([k, v]) => `<li>${boostLabel(k, v)}</li>`).join('')}</ul>
+                  ${current
+                    ? `<span class="status-pill on">${tr('Offre actuelle', 'Current plan')}${sub?.currentPeriodEnd ? ` · ${tr('jusqu’au', 'until')} ${new Date(sub.currentPeriodEnd).toLocaleDateString(locale)}` : ''}</span>`
+                    : `<button class="btn-primary btn-accent btn-sm" data-checkout="${this.escapeHtml(plan.id)}">${tr('Choisir', 'Choose')}</button>`}
+                </div>`;
+            }).join('')}
+          </div>
+          ${sub ? `<div class="account-actions account-actions-end"><button class="btn-primary btn-ghost btn-sm" data-billing-portal>${tr('Gérer le paiement', 'Manage billing')}</button></div>` : ''}
+          <p class="field-hint">${tr('Paiement sur Stripe. BetterVault ne voit pas vos coordonnées bancaires.', 'Payment on Stripe. BetterVault never sees your card details.')}</p>`;
+        plansEl.querySelectorAll<HTMLButtonElement>('[data-checkout]').forEach(button => button.addEventListener('click', () => {
+          void runBusy(button, '…', async () => {
+            try {
+              const { url } = await accountService.startCheckout(button.dataset.checkout!);
+              window.open(url, '_blank', 'noopener');
+            } catch (err) {
+              this.showToast(accountErrorMessage(err), 'error');
+            }
+          });
+        }));
+        plansEl.querySelector<HTMLButtonElement>('[data-billing-portal]')?.addEventListener('click', event => {
+          void runBusy(event.currentTarget as HTMLButtonElement, '…', async () => {
+            try {
+              window.open((await accountService.openBillingPortal()).url, '_blank', 'noopener');
+            } catch (err) {
+              this.showToast(accountErrorMessage(err), 'error');
+            }
+          });
+        });
+      } catch (err) {
+        usageEl.innerHTML = `<div class="form-error">${this.escapeHtml(accountErrorMessage(err))}</div>`;
+      }
+    };
+
+    // Documents légaux du serveur
+    const loadLegal = async () => {
+      const el = $('[data-legal-links]');
+      if (!el || !isCloud || !account.serverUrl) return;
+      el.innerHTML = '<span class="skeleton skeleton-line" style="width:70%"></span>';
+      try {
+        const legal = await accountService.getLegal();
+        if (!box.isConnected) return;
+        el.innerHTML = `
+          ${legal.operatorName ? `<p class="field-hint">${tr('Serveur hébergé par', 'Server operated by')} ${this.escapeHtml(legal.operatorName)}</p>` : ''}
+          <div class="legal-link-list">${legal.documents.map(doc => `<a href="${this.escapeHtml(account.serverUrl + doc.url)}" target="_blank" rel="noopener">${this.escapeHtml(doc.title)}</a>`).join('')}</div>`;
+      } catch {
+        el.innerHTML = '';
+      }
+    };
 
     action('delete')?.addEventListener('click', async event => {
       const button = event.currentTarget as HTMLButtonElement;
