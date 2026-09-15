@@ -61,6 +61,42 @@ export interface AccountInfo {
   limits: VaultLimits;
 }
 
+export type SharedPermission = 'write' | 'attachments' | 'export' | 'manage_members' | 'manage_roles' | 'delete_vault';
+
+export interface SharedRole {
+  id: string;
+  name: string;
+  builtin: 'owner' | 'admin' | 'editor' | 'viewer' | null;
+  permissions: SharedPermission[];
+}
+
+export interface SharedVaultSummary {
+  id: string;
+  status: 'invited' | 'active';
+  revision: number;
+  updatedAt: number;
+  wrappedKey: string;
+  ownerEmail: string;
+  invitedByEmail: string | null;
+  role: SharedRole;
+}
+
+export interface SharedMember {
+  userId: string;
+  email: string;
+  roleId: string;
+  status: 'invited' | 'active';
+  createdAt: number;
+  publicKey: string | null;
+  invitedByEmail: string | null;
+}
+
+export interface SharedMembers {
+  permissions: SharedPermission[];
+  members: SharedMember[];
+  roles: SharedRole[];
+}
+
 /** Le serveur demande le code de l'application d'authentification */
 export const isTotpRequired = (err: unknown) => err instanceof CloudError && err.code === 'totp_required';
 
@@ -214,6 +250,120 @@ export class CloudClient {
 
   async changePassword(payload: { currentAuthHash: string; newAuthHash: string; kdf: Argon2Params; salt: string; wrappedVaultKey: EncryptedBlob }): Promise<void> {
     await this.request('PUT', '/api/v1/accounts/password', payload);
+  }
+
+  /* ── Partage ─────────────────────────────────────────────────────────── */
+
+  getSharingKeys(): Promise<{ publicKey: string | null; wrappedPrivateKey: EncryptedBlob | null }> {
+    return this.request('GET', '/api/v1/accounts/keys');
+  }
+
+  async setSharingKeys(publicKey: string, wrappedPrivateKey: EncryptedBlob): Promise<void> {
+    await this.request('PUT', '/api/v1/accounts/keys', { publicKey, wrappedPrivateKey });
+  }
+
+  lookupUser(email: string): Promise<{ userId: string; email: string; publicKey: string }> {
+    return this.request('POST', '/api/v1/users/lookup', { email });
+  }
+
+  async listSharedVaults(): Promise<SharedVaultSummary[]> {
+    return (await this.request<{ vaults: SharedVaultSummary[] }>('GET', '/api/v1/shared-vaults')).vaults;
+  }
+
+  createSharedVault(blob: EncryptedBlob, wrappedKey: string): Promise<{ id: string; revision: number; roleId: string }> {
+    return this.request('POST', '/api/v1/shared-vaults', { blob, wrappedKey });
+  }
+
+  getSharedVault(id: string): Promise<CloudVault> {
+    return this.request('GET', `/api/v1/shared-vaults/${encodeURIComponent(id)}`);
+  }
+
+  putSharedVault(id: string, baseRevision: number, blob: EncryptedBlob): Promise<{ revision: number; updatedAt: number }> {
+    return this.request('PUT', `/api/v1/shared-vaults/${encodeURIComponent(id)}`, { baseRevision, blob });
+  }
+
+  async deleteSharedVault(id: string): Promise<void> {
+    await this.request('DELETE', `/api/v1/shared-vaults/${encodeURIComponent(id)}`);
+  }
+
+  sharedMembers(id: string): Promise<SharedMembers> {
+    return this.request('GET', `/api/v1/shared-vaults/${encodeURIComponent(id)}/members`);
+  }
+
+  async inviteMember(id: string, payload: { userId: string; roleId: string; wrappedKey: string }): Promise<void> {
+    await this.request('POST', `/api/v1/shared-vaults/${encodeURIComponent(id)}/members`, payload);
+  }
+
+  async changeMemberRole(id: string, userId: string, roleId: string): Promise<void> {
+    await this.request('PATCH', `/api/v1/shared-vaults/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, { roleId });
+  }
+
+  async removeMember(id: string, userId: string): Promise<void> {
+    await this.request('DELETE', `/api/v1/shared-vaults/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`);
+  }
+
+  async acceptInvitation(id: string): Promise<void> {
+    await this.request('POST', `/api/v1/shared-vaults/${encodeURIComponent(id)}/accept`);
+  }
+
+  async declineInvitation(id: string): Promise<void> {
+    await this.request('POST', `/api/v1/shared-vaults/${encodeURIComponent(id)}/decline`);
+  }
+
+  createRole(id: string, role: { name: string; permissions: SharedPermission[] }): Promise<SharedRole> {
+    return this.request('POST', `/api/v1/shared-vaults/${encodeURIComponent(id)}/roles`, role);
+  }
+
+  async updateRole(id: string, roleId: string, patch: { name?: string; permissions?: SharedPermission[] }): Promise<void> {
+    await this.request('PATCH', `/api/v1/shared-vaults/${encodeURIComponent(id)}/roles/${encodeURIComponent(roleId)}`, patch);
+  }
+
+  async deleteRole(id: string, roleId: string): Promise<void> {
+    await this.request('DELETE', `/api/v1/shared-vaults/${encodeURIComponent(id)}/roles/${encodeURIComponent(roleId)}`);
+  }
+
+  rotateSharedVault(id: string, payload: { baseRevision: number; blob: EncryptedBlob; members: Array<{ userId: string; wrappedKey: string }> }): Promise<{ revision: number; updatedAt: number }> {
+    return this.request('POST', `/api/v1/shared-vaults/${encodeURIComponent(id)}/rotate`, payload);
+  }
+
+  /* ── Pièces jointes ──────────────────────────────────────────────────── */
+
+  private async rawRequest(method: string, path: string, body?: Uint8Array): Promise<Response> {
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}${path}`, {
+        method,
+        headers: {
+          ...(body ? { 'Content-Type': 'application/octet-stream' } : {}),
+          ...(this.token ? { Authorization: `Bearer ${this.token}` } : {})
+        },
+        body: body ? (body.slice().buffer as ArrayBuffer) : undefined
+      });
+    } catch {
+      throw new CloudError('Serveur BetterVault injoignable', 0, 'network');
+    }
+    if (!response.ok) {
+      const json = await response.json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
+      throw new CloudError(json?.error?.message ?? `Erreur serveur (${response.status})`, response.status, json?.error?.code ?? 'http_error');
+    }
+    return response;
+  }
+
+  async uploadAttachment(payload: Uint8Array, sharedVaultId?: string): Promise<{ id: string; size: number }> {
+    const query = sharedVaultId ? `?vault=${encodeURIComponent(sharedVaultId)}` : '';
+    return (await this.rawRequest('POST', `/api/v1/attachments${query}`, payload)).json();
+  }
+
+  async downloadAttachment(id: string): Promise<Uint8Array> {
+    return new Uint8Array(await (await this.rawRequest('GET', `/api/v1/attachments/${encodeURIComponent(id)}`)).arrayBuffer());
+  }
+
+  async deleteAttachment(id: string): Promise<void> {
+    await this.request('DELETE', `/api/v1/attachments/${encodeURIComponent(id)}`);
+  }
+
+  attachmentUsage(): Promise<{ enabled: boolean; usedBytes: number; quotaBytes: number; maxFileBytes: number }> {
+    return this.request('GET', '/api/v1/attachments/usage');
   }
 
   async deleteAccount(authHash: string): Promise<void> {

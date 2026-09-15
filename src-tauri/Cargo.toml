@@ -24,6 +24,10 @@ rand = "0.8"
 [target.'cfg(not(target_os = "android"))'.dependencies]
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 
+# Invite biométrique (Face ID / Touch ID) sur iOS ; Android passe par le Keystore (BetterVaultPlugin.kt)
+[target.'cfg(target_os = "ios")'.dependencies]
+tauri-plugin-biometric = "2"
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

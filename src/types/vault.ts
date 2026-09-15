@@ -1,4 +1,12 @@
 import type { ItemIcon } from '../icons/iconLibrary';
+import type { AttachmentMeta } from '../account/attachmentCrypto';
+import type { SharedRole } from '../account/cloudClient';
+
+/** Coffre partagé : rôle du compte courant (information d'affichage, jamais enregistrée dans le coffre personnel) */
+export interface SharedVaultInfo {
+  role: SharedRole;
+  ownerEmail: string;
+}
 
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';
 export type TaskStatus = 'todo' | 'in_progress' | 'completed' | 'blocked';
@@ -74,6 +82,8 @@ export interface CredentialItem {
   isFavorite?: boolean;
   /** Icône choisie (sinon détectée depuis le site) */
   icon?: ItemIcon;
+  /** Fichiers chiffrés stockés sur le serveur ; leur clé est ici, dans le coffre chiffré */
+  attachments?: AttachmentMeta[];
   tags: string[];
   expiresAt?: number; // Timestamp d'expiration ou de rappel de renouvellement
   createdAt: number;
@@ -85,6 +95,7 @@ export interface VaultMetadata {
   name: string;
   type: 'personal' | 'work' | 'team';
   icon?: ItemIcon;
+  shared?: SharedVaultInfo;
   createdAt: number;
   updatedAt: number;
 }
