@@ -1955,6 +1955,7 @@ input[type="datetime-local"].form-input {
 }
 
 .icon-picker-tabs { flex: 0 0 auto; }
+.icon-picker-tabs .tab-btn { white-space: nowrap; }
 .icon-picker-search { flex: 1 1 180px; }
 .icon-picker-search .search-input { background-color: var(--bg-primary); }
 
@@ -2597,4 +2598,195 @@ input[type="datetime-local"].form-input {
 
 .tag-create-preview {
   align-self: flex-start;
+}
+
+/* ── Téléphone : barre d'onglets, zones sûres, cibles tactiles ────────── */
+.mobile-tabbar {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  body {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .mobile-menu-btn {
+    display: none !important;
+  }
+
+  .search-shortcut {
+    display: none;
+  }
+
+  .mobile-tabbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 300;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    align-items: center;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    background-color: color-mix(in srgb, var(--bg-secondary) 92%, transparent);
+    border-top: 1px solid var(--border-subtle);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .mobile-tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    min-height: 48px;
+    padding: 4px 2px;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+  }
+
+  .mobile-tab span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-tab.active {
+    color: var(--accent);
+  }
+
+  .mobile-tab-add {
+    justify-self: center;
+    width: 48px;
+    height: 48px;
+    min-height: 0;
+    color: #fff;
+    background-color: var(--accent);
+    border-radius: 50%;
+    box-shadow: 0 6px 18px rgba(var(--accent-rgb), 0.45);
+  }
+
+  .items-scroll {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+
+  .detail-pane {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .list-controls #btn-add-item {
+    display: none;
+  }
+
+  .sidebar {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  #toast-container {
+    bottom: calc(80px + env(safe-area-inset-bottom));
+  }
+}
+
+@media (pointer: coarse) {
+  .icon-btn {
+    min-width: 36px;
+    min-height: 36px;
+    justify-content: center;
+  }
+
+  .record-row {
+    padding: 12px;
+  }
+
+  .form-input,
+  .search-input {
+    font-size: 16px; /* évite le zoom automatique d'iOS */
+  }
+}
+
+/* ── Extension : popup, panneau latéral, bandeau du site ouvert ───────── */
+html:has(body.ext-popup),
+body.ext-popup {
+  width: 400px;
+  height: 600px;
+}
+
+body.ext-popup .app-container,
+body.ext-popup .auth-screen {
+  width: 400px;
+  height: 600px;
+}
+
+body.ext-popup .auth-screen {
+  padding: 20px 16px;
+  align-items: flex-start;
+}
+
+body.ext-popup .mobile-tabbar,
+body.ext-panel .mobile-tabbar {
+  padding-bottom: 6px;
+}
+
+.site-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: -12px -16px 0;
+  padding: 10px 16px;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.site-strip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.site-strip-host {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.site-strip-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.site-strip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.site-strip-row .record-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.site-strip-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.site-strip-empty {
+  font-size: 12px;
+  color: var(--text-muted);
 }

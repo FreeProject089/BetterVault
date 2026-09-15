@@ -32,9 +32,9 @@ export default defineConfig({
     emptyOutDir: true,
     target: 'esnext',
     rollupOptions: {
+      // Popup, panneau latéral et onglet affichent tous l'application complète (index.html?surface=…)
       input: {
-        app: resolve(root, 'index.html'),
-        popup: resolve(root, 'extension/popup.html')
+        app: resolve(root, 'index.html')
       }
     }
   },

@@ -11,8 +11,8 @@ fn get_system_status() -> String {
     "BetterVault core ready".into()
 }
 
-/// Trousseau du système (Windows Credential Manager / macOS Keychain / Secret Service)
-#[cfg(not(mobile))]
+/// Trousseau du système (Windows Credential Manager / macOS et iOS Keychain / Secret Service)
+#[cfg(not(target_os = "android"))]
 mod keychain {
     use tauri::command;
 
@@ -60,12 +60,12 @@ mod keychain {
     }
 }
 
-/// Sur Android et iOS, le trousseau n'est pas encore relié : l'interface le signale comme indisponible
-#[cfg(mobile)]
+/// Sur Android, le Keystore n'est pas relié : l'interface le signale comme indisponible
+#[cfg(target_os = "android")]
 mod keychain {
     use tauri::command;
 
-    const UNAVAILABLE: &str = "Trousseau du système non disponible sur mobile";
+    const UNAVAILABLE: &str = "Trousseau du système non disponible sur Android";
 
     #[command]
     pub fn get_os_keychain_available() -> bool {
@@ -157,7 +157,13 @@ fn save_export_file(app: tauri::AppHandle, file_name: String, bytes: Vec<u8>) ->
         return Err("Nom de fichier invalide".into());
     }
 
-    let dir = app.path().download_dir().map_err(|e| e.to_string())?;
+    // Téléchargements sur ordinateur ; sur mobile, Documents puis dossier de l'application
+    let dir = app
+        .path()
+        .download_dir()
+        .or_else(|_| app.path().document_dir())
+        .or_else(|_| app.path().app_data_dir())
+        .map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
     let name_path = std::path::Path::new(&cleaned);

@@ -20,8 +20,8 @@ argon2 = "0.5"
 aes-gcm = "0.10"
 rand = "0.8"
 
-# Trousseau du système : uniquement sur bureau (Android et iOS ne sont pas pris en charge par keyring)
-[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+# Trousseau du système : Windows, macOS, Linux et iOS (keyring ne prend pas en charge Android)
+[target.'cfg(not(target_os = "android"))'.dependencies]
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 
 [features]

@@ -87,7 +87,13 @@ npm run tauri android build
 npm run tauri ios build
 ```
 
-### Limites actuelles
+### Interface
 
-- Le trousseau du système n'est pas relié sur mobile.
+Sur téléphone, la navigation passe dans une barre en bas de l'écran (identifiants, codes 2FA, bouton d'ajout, tâches, menu). Les fiches s'ouvrent en plein écran et les fenêtres deviennent des panneaux glissant du bas. Les marges tiennent compte de l'encoche et de la barre de gestes.
+
+### Spécificités
+
+- Le scan des QR codes 2FA utilise la caméra : Android demande l'autorisation au premier scan. Sur iOS, ajoutez `NSCameraUsageDescription` dans `src-tauri/gen/apple/bettervault_iOS/Info.plist` après `tauri ios init`.
+- Les exports sont enregistrés dans le dossier Documents de l'application.
+- Le trousseau du système est disponible sur iOS (Keychain), pas encore sur Android (Keystore non relié).
 - Un serveur accessible en HTTPS est nécessaire : `127.0.0.1` désigne le téléphone lui-même.
