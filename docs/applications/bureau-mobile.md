@@ -87,6 +87,18 @@ npm run tauri android build
 npm run tauri ios build
 ```
 
+!!! warning "Windows : « Unable to establish loopback connection »"
+    Si Gradle échoue avec ce message, Java n'arrive pas à créer ses sockets locales dans le dossier temporaire. Utilisez un dossier simple :
+
+    ```powershell
+    New-Item -ItemType Directory -Force C:\gradle-tmp
+    $env:TEMP='C:\gradle-tmp'; $env:TMP='C:\gradle-tmp'
+    $env:JAVA_TOOL_OPTIONS='-Djdk.net.unixdomain.tmpdir=C:\gradle-tmp'
+    npm run tauri android build -- --apk --target aarch64
+    ```
+
+    L'APK est créé dans `src-tauri/gen/android/app/build/outputs/apk/universal/release/`. Il n'est pas signé : signez-le avec `apksigner` (ou configurez une clé dans Android Studio) avant de l'installer.
+
 ### Interface
 
 Sur téléphone, la navigation passe dans une barre en bas de l'écran (identifiants, codes 2FA, bouton d'ajout, tâches, menu). Les fiches s'ouvrent en plein écran et les fenêtres deviennent des panneaux glissant du bas. Les marges tiennent compte de l'encoche et de la barre de gestes.
