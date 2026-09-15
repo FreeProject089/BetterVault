@@ -49,6 +49,7 @@ import { formatRecoveryKey, recoveryKeyFile } from './ui/recoveryKey';
 import { CREDENTIAL_FILTERS, countByFilter, queryCredentials, reusedPasswords, type CredentialFilter, type CredentialSort } from './store/credentialFilters';
 import { checkCredential, remainingCapacity } from './account/limits';
 import { renderSVG } from 'uqr';
+import { activeTabHost, extensionSessionStore, extensionSurface, fillActiveTab, matchesSite, openFullTab, openSidePanel } from './extension/surface';
 import { i18n } from './i18n';
 
 type ActiveView = 'all-credentials' | '2fa-tokens' | 'tasks';
@@ -119,6 +120,7 @@ class AppController {
       this.renderList();
       this.renderCounts();
       if (this.selectedItemId) this.renderDetail(this.selectedItemId);
+      void this.renderSiteStrip();
     });
     i18n.subscribe(() => {
       this.applyI18n();
@@ -288,6 +290,8 @@ class AppController {
     };
 
     mobileMenuToggle?.addEventListener('click', openSidebar);
+    document.getElementById('mobile-more')?.addEventListener('click', openSidebar);
+    document.getElementById('mobile-add')?.addEventListener('click', () => document.getElementById('btn-add-item')?.click());
     mobileSidebarClose?.addEventListener('click', closeSidebar);
     overlay?.addEventListener('click', closeSidebar);
     document.querySelectorAll('.sidebar .nav-item').forEach(item => {
@@ -3474,7 +3478,11 @@ class AppController {
     }, SYNC_INTERVAL_MS);
 
     this.renderSyncStatus();
-    this.authScreen.show();
+    // Extension : le coffre reste ouvert quelques minutes entre deux ouvertures du popup
+    void accountService.resumeSession().then(data => {
+      if (data) this.showApp(data);
+      else this.authScreen?.show();
+    });
   }
 
   private showApp(data: UnlockedVaultData): void {
@@ -3486,6 +3494,73 @@ class AppController {
     this.renderDetail(null);
     this.renderSyncStatus();
     void accountService.syncNow();
+    void this.renderSiteStrip();
+  }
+
+  /** Extension : identifiants du site ouvert dans l'onglet actif, remplissage en un clic */
+  private async renderSiteStrip(): Promise<void> {
+    const strip = document.getElementById('site-strip');
+    const surface = extensionSurface();
+    if (!strip || !surface || !vaultStore.isLoaded()) return;
+    const { host } = await activeTabHost();
+    const data = vaultStore.getData();
+    const matches = host ? data.credentials.filter(c => matchesSite(c, host)) : [];
+    const tr = (fr: string, en: string) => this.tr(fr, en);
+
+    strip.hidden = false;
+    strip.innerHTML = `
+      <div class="site-strip-head">
+        <span class="site-strip-host">${host ? this.escapeHtml(host) : tr('Aucun site web dans cet onglet', 'No website in this tab')}</span>
+        <span class="site-strip-actions">
+          ${surface === 'popup' ? `<button type="button" class="icon-btn" data-ext="panel" title="${tr('Ouvrir dans le panneau latéral', 'Open in the side panel')}" aria-label="${tr('Ouvrir dans le panneau latéral', 'Open in the side panel')}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/></svg></button>` : ''}
+          <button type="button" class="icon-btn" data-ext="tab" title="${tr('Ouvrir dans un onglet', 'Open in a tab')}" aria-label="${tr('Ouvrir dans un onglet', 'Open in a tab')}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6M10 14 21 3"/></svg></button>
+        </span>
+      </div>
+      ${matches.map(c => `
+        <div class="site-strip-row" data-id="${c.id}">
+          <span class="record-icon">${this.credentialIcon(c, 16)}</span>
+          <span class="site-strip-text">
+            <span class="record-title">${this.escapeHtml(c.title)}</span>
+            <span class="record-sub">${this.escapeHtml(c.username || '—')}</span>
+          </span>
+          <button type="button" class="icon-btn" data-ext="copy" title="${tr('Copier le mot de passe', 'Copy password')}" aria-label="${tr('Copier le mot de passe', 'Copy password')}">${GEN_ICONS.copy}</button>
+          <button type="button" class="btn-primary btn-accent" data-ext="fill">${tr('Remplir', 'Fill')}</button>
+        </div>`).join('')}
+      ${host && matches.length === 0 ? `<div class="site-strip-empty">${tr('Aucun identifiant enregistré pour ce site', 'No credentials saved for this site')}</div>` : ''}`;
+
+    strip.onclick = async e => {
+      const button = (e.target as HTMLElement).closest<HTMLElement>('[data-ext]');
+      if (!button) return;
+      const action = button.dataset.ext;
+      if (action === 'panel') {
+        if (await openSidePanel()) window.close();
+        else this.showToast(tr('Panneau latéral indisponible dans ce navigateur', 'Side panel not available in this browser'), 'error');
+        return;
+      }
+      if (action === 'tab') {
+        openFullTab();
+        if (surface === 'popup') window.close();
+        return;
+      }
+      const cred = vaultStore.getData().credentials.find(c => c.id === button.closest<HTMLElement>('[data-id]')?.dataset.id);
+      if (!cred) return;
+      if (action === 'copy') {
+        await this.copyToClipboardWithAutoClear(cred.password, tr('Mot de passe copié', 'Password copied'), true);
+        return;
+      }
+      const outcome = await fillActiveTab(cred);
+      if (outcome === 'filled') {
+        if (surface === 'popup') window.close();
+        else this.showToast(tr('Formulaire rempli', 'Form filled'), 'success');
+      } else {
+        this.showToast(
+          outcome === 'domain' ? tr('Refusé : la page n’appartient pas au site de cet identifiant', 'Refused: the page does not belong to this credential’s site')
+            : outcome === 'no-fields' ? tr('Aucun champ de connexion trouvé sur la page', 'No sign-in field found on the page')
+            : tr('Impossible de remplir cette page', 'Cannot fill this page'),
+          'error'
+        );
+      }
+    };
   }
 
   private lockApp(): void {
@@ -4371,7 +4446,9 @@ class AppController {
    ════════════════════════════════════════════════════════════════════════════ */
 // Le stockage de l'appareil est chargé avant l'interface : fichier natif sous Tauri, navigateur sinon
 createDeviceStorage().then(storage => {
-  accountService = new AccountService({ storage });
+  const surface = extensionSurface();
+  if (surface) document.body.classList.add(`ext-${surface}`);
+  accountService = new AccountService({ storage, sessionStore: extensionSessionStore() });
   new AppController();
 }).catch(err => {
   // Ne jamais démarrer sur un stockage vide : un nouveau compte écraserait le fichier existant

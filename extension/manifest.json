@@ -1,21 +1,29 @@
 {
   "manifest_version": 3,
   "name": "BetterVault",
-  "version": "1.0.0",
-  "description": "Remplissage des identifiants et codes 2FA depuis votre coffre BetterVault chiffré.",
+  "version": "1.1.0",
+  "description": "Mots de passe, codes 2FA et tâches chiffrés de bout en bout, avec remplissage des formulaires de connexion.",
   "icons": {
     "32": "icons/32.png",
     "128": "icons/128.png"
   },
   "action": {
-    "default_popup": "extension/popup.html",
+    "default_popup": "index.html?surface=popup",
     "default_title": "BetterVault",
     "default_icon": {
       "32": "icons/32.png",
       "128": "icons/128.png"
     }
   },
-  "permissions": ["activeTab", "scripting", "clipboardWrite", "storage"],
+  "side_panel": {
+    "default_path": "index.html?surface=panel"
+  },
+  "sidebar_action": {
+    "default_panel": "index.html?surface=panel",
+    "default_title": "BetterVault",
+    "default_icon": "icons/32.png"
+  },
+  "permissions": ["activeTab", "scripting", "clipboardWrite", "storage", "sidePanel"],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
   },
