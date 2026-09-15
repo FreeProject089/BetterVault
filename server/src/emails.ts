@@ -99,6 +99,18 @@ export const emails = {
     };
   },
 
+  sharedInvite(ctx: EmailContext, inviterEmail: string): MailMessage {
+    const fr = ctx.locale === 'fr';
+    return {
+      to: ctx.to,
+      subject: fr ? `${inviterEmail} vous invite dans un coffre partagé` : `${inviterEmail} invited you to a shared vault`,
+      text: (fr
+        ? `${inviterEmail} vous a invité dans un coffre BetterVault partagé.\nOuvrez BetterVault, puis Coffres partagés, pour accepter ou refuser.`
+        : `${inviterEmail} invited you to a shared BetterVault vault.\nOpen BetterVault, then Shared vaults, to accept or decline.`)
+        + footer(ctx.locale, ctx.publicUrl)
+    };
+  },
+
   test(to: string, locale: Locale): MailMessage {
     return {
       to,

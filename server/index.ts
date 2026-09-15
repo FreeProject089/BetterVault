@@ -5,6 +5,7 @@ import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { openDatabase } from './src/db.ts';
 import { createApp } from './src/app.ts';
 import { settingsFromEnv } from './src/config.ts';
+import { createBackupService } from './src/backup.ts';
 
 const secret = process.env.BETTERVAULT_SECRET ?? '';
 if (secret.length < 32) {
@@ -31,6 +32,15 @@ try {
 
 mkdirSync(dirname(dbPath), { recursive: true });
 const db = openDatabase(dbPath);
+
+// Pièces jointes chiffrées : à côté de la base par défaut (volume /data dans Docker)
+const filesDir = resolve(process.env.BETTERVAULT_FILES ?? join(dirname(dbPath), 'files'));
+mkdirSync(filesDir, { recursive: true });
+
+const backupKey = process.env.BACKUP_ENCRYPTION_KEY || null;
+if (settings.backup.enabled && !backupKey) {
+  console.warn('Sauvegardes activées sans BACKUP_ENCRYPTION_KEY : les copies de la base ne seront pas chiffrées en plus.');
+}
 
 /**
  * Jeton de la page d'administration : ADMIN_TOKEN s'il est défini,
@@ -61,7 +71,9 @@ const api = createApp({
   corsOrigins,
   trustProxy: process.env.TRUST_PROXY === 'true',
   settings,
-  adminTokenHash: adminTokenHash()
+  adminTokenHash: adminTokenHash(),
+  filesDir,
+  backupFactory: getSettings => createBackupService({ db, filesDir, settings: getSettings, encryptionKey: backupKey })
 });
 
 const MIME_TYPES: Record<string, string> = {
@@ -134,6 +146,7 @@ server.listen(port, host, () => {
 
 // Arrêt propre (docker stop, Ctrl+C) : fin des requêtes en cours puis fermeture de la base
 function shutdown(): void {
+  api.close();
   server.close(() => {
     db.close();
     process.exit(0);

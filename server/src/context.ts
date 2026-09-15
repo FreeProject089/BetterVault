@@ -1,0 +1,40 @@
+import type { IncomingMessage } from 'node:http';
+import type { DatabaseSync } from 'node:sqlite';
+import type { ServerSettings } from './config.ts';
+import type { UserRow } from './app.ts';
+import type { MailMessage } from './mailer.ts';
+import type { Locale } from './emails.ts';
+import type { Reply } from './http.ts';
+
+/** Ce que l'application met à disposition des modules de routes */
+export interface RouteContext {
+  db: DatabaseSync;
+  now: () => number;
+  limit(req: IncomingMessage, bucket: string): void;
+  authenticate(req: IncomingMessage): { userId: string; tokenHash: string };
+  getUser(userId: string): UserRow;
+  verifyAuthHash(user: UserRow | undefined, authHash: string): Promise<boolean>;
+  notify(build: (ctx: { to: string; locale: Locale; publicUrl: string }) => MailMessage, user: UserRow): void;
+  settings(): ServerSettings;
+  filesDir: string | null;
+  maxBody(): number;
+}
+
+export type RouteHandler = (req: IncomingMessage, params: Record<string, string>) => Promise<Reply>;
+
+export interface PatternRoute {
+  method: string;
+  pattern: RegExp;
+  keys: string[];
+  handler: RouteHandler;
+}
+
+/** Route avec paramètres : route('GET', '/api/v1/shared-vaults/:id', handler) */
+export function route(method: string, path: string, handler: RouteHandler): PatternRoute {
+  const keys: string[] = [];
+  const source = path.replace(/:([a-zA-Z]+)/g, (_, key: string) => {
+    keys.push(key);
+    return '([^/]+)';
+  });
+  return { method, pattern: new RegExp(`^${source}$`), keys, handler };
+}
