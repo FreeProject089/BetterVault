@@ -1,6 +1,8 @@
 import type { SmtpConfig, SmtpSecurity } from './mailer.ts';
 import type { BackupSettings } from './backup.ts';
 import type { S3Config } from './s3.ts';
+import { billingFromEnv, DEFAULT_BILLING, parseBillingUpdate, publicBilling, type BillingSettings } from './billing.ts';
+import { DEFAULT_LEGAL, legalFromEnv, parseLegalUpdate, type LegalSettings } from './legal.ts';
 
 /**
  * Réglages du serveur : valeurs du .env, modifiables ensuite depuis la page d'administration.
@@ -26,6 +28,10 @@ export interface ServerLimits {
   maxAttachmentBytes: number;
   /** Espace de pièces jointes par compte */
   attachmentQuotaBytes: number;
+  /** Types de coffres personnalisés par compte */
+  maxVaultTypes: number;
+  maxMembersPerSharedVault: number;
+  maxRolesPerSharedVault: number;
 }
 
 export interface ServerSettings {
@@ -36,6 +42,8 @@ export interface ServerSettings {
   publicUrl: string;
   smtp: SmtpConfig | null;
   backup: BackupSettings;
+  billing: BillingSettings;
+  legal: LegalSettings;
 }
 
 const MB = 1024 * 1024;
@@ -53,7 +61,10 @@ export const DEFAULT_LIMITS: ServerLimits = {
   maxTagsPerItem: 20,
   maxVaultBytes: 20 * MB,
   maxAttachmentBytes: 25 * MB,
-  attachmentQuotaBytes: 500 * MB
+  attachmentQuotaBytes: 500 * MB,
+  maxVaultTypes: 20,
+  maxMembersPerSharedVault: 50,
+  maxRolesPerSharedVault: 30
 };
 
 /** Variables d'environnement ; celles en Mo sont converties en octets */
@@ -70,7 +81,10 @@ const LIMIT_ENV: Record<keyof ServerLimits, string> = {
   maxTagsPerItem: 'LIMIT_MAX_TAGS_PER_ITEM',
   maxVaultBytes: 'LIMIT_MAX_VAULT_MB',
   maxAttachmentBytes: 'LIMIT_MAX_ATTACHMENT_MB',
-  attachmentQuotaBytes: 'LIMIT_ATTACHMENT_QUOTA_MB'
+  attachmentQuotaBytes: 'LIMIT_ATTACHMENT_QUOTA_MB',
+  maxVaultTypes: 'LIMIT_MAX_VAULT_TYPES',
+  maxMembersPerSharedVault: 'LIMIT_MAX_MEMBERS_PER_SHARED_VAULT',
+  maxRolesPerSharedVault: 'LIMIT_MAX_ROLES_PER_SHARED_VAULT'
 };
 
 type Env = Record<string, string | undefined>;
@@ -142,7 +156,9 @@ export function settingsFromEnv(env: Env): ServerSettings {
       intervalHours: positiveInt(env.BACKUP_INTERVAL_HOURS, 24, 'BACKUP_INTERVAL_HOURS'),
       retentionDays: positiveInt(env.BACKUP_RETENTION_DAYS, 30, 'BACKUP_RETENTION_DAYS'),
       s3: s3FromEnv(env)
-    }
+    },
+    billing: billingFromEnv(env),
+    legal: legalFromEnv(env)
   };
 }
 
@@ -157,7 +173,9 @@ export function parseSettingsUpdate(input: unknown, current: ServerSettings): Se
   const next: ServerSettings = {
     ...current,
     limits: { ...current.limits },
-    backup: { ...(current.backup ?? { enabled: false, intervalHours: 24, retentionDays: 30, s3: null }) }
+    backup: { ...(current.backup ?? { enabled: false, intervalHours: 24, retentionDays: 30, s3: null }) },
+    billing: parseBillingUpdate(body.billing, current.billing ?? DEFAULT_BILLING),
+    legal: parseLegalUpdate(body.legal, current.legal ?? DEFAULT_LEGAL)
   };
 
   if (body.limits && typeof body.limits === 'object') {
@@ -237,6 +255,7 @@ export function publicSettings(settings: ServerSettings): unknown {
     backup: {
       ...settings.backup,
       s3: settings.backup?.s3 ? { ...settings.backup.s3, secretAccessKey: '', hasSecret: !!settings.backup.s3.secretAccessKey } : null
-    }
+    },
+    billing: publicBilling(settings.billing ?? DEFAULT_BILLING)
   };
 }

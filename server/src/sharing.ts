@@ -181,7 +181,8 @@ export function sharingRoutes(ctx: RouteContext): PatternRoute[] {
       const user = ctx.getUser(userId);
       if (!user.public_key) throw new HttpError(409, 'keys_required', 'Clés de partage manquantes');
       const owned = ctx.db.prepare('SELECT COUNT(*) AS count FROM shared_vaults WHERE owner_id = ?').get(userId) as { count: number };
-      if (owned.count >= ctx.settings().limits.maxVaults) throw new HttpError(403, 'limit_reached', `Limite de ${ctx.settings().limits.maxVaults} coffres partagés atteinte`);
+      const maxVaults = ctx.limitsFor(userId).maxVaults;
+      if (owned.count >= maxVaults) throw new HttpError(403, 'limit_reached', `Limite de ${maxVaults} coffres partagés atteinte`);
 
       const id = randomUUID();
       const now = ctx.now();
@@ -258,6 +259,9 @@ export function sharingRoutes(ctx: RouteContext): PatternRoute[] {
       const target = ctx.db.prepare('SELECT * FROM users WHERE id = ?').get(targetId) as Parameters<RouteContext['notify']>[1] | undefined;
       if (!target?.public_key) throw new HttpError(404, 'user_not_found', 'Compte introuvable');
       if (membership(ctx, params.id, targetId)) throw new HttpError(409, 'already_member', 'Cette personne fait déjà partie du coffre');
+      const memberCount = ctx.db.prepare('SELECT COUNT(*) AS count FROM shared_members WHERE vault_id = ?').get(params.id) as { count: number };
+      const maxMembers = ctx.settings().limits.maxMembersPerSharedVault;
+      if (memberCount.count >= maxMembers) throw new HttpError(403, 'limit_reached', `${maxMembers} membres maximum par coffre partagé`);
 
       ctx.db.prepare('INSERT INTO shared_members (vault_id, user_id, role_id, wrapped_key, status, invited_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .run(params.id, targetId, roleId, wrappedKey, 'invited', userId, ctx.now());
@@ -328,7 +332,8 @@ export function sharingRoutes(ctx: RouteContext): PatternRoute[] {
       const name = parseRoleName(body.name);
       const permissions = parsePermissions(body.permissions, false);
       const count = ctx.db.prepare('SELECT COUNT(*) AS count FROM shared_roles WHERE vault_id = ?').get(params.id) as { count: number };
-      if (count.count >= 30) throw new HttpError(403, 'limit_reached', '30 rôles maximum par coffre');
+      const maxRoles = ctx.settings().limits.maxRolesPerSharedVault;
+      if (count.count >= maxRoles) throw new HttpError(403, 'limit_reached', `${maxRoles} rôles maximum par coffre`);
       const id = randomUUID();
       ctx.db.prepare('INSERT INTO shared_roles (id, vault_id, name, permissions, builtin, created_at) VALUES (?, ?, ?, ?, NULL, ?)').run(id, params.id, name, JSON.stringify(permissions), ctx.now());
       return { status: 201, body: { id, name, permissions, builtin: null } };

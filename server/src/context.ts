@@ -1,6 +1,7 @@
 import type { IncomingMessage } from 'node:http';
 import type { DatabaseSync } from 'node:sqlite';
-import type { ServerSettings } from './config.ts';
+import type { ServerLimits, ServerSettings } from './config.ts';
+import type { GeoLookup } from './geoip.ts';
 import type { UserRow } from './app.ts';
 import type { MailMessage } from './mailer.ts';
 import type { Locale } from './emails.ts';
@@ -18,6 +19,12 @@ export interface RouteContext {
   settings(): ServerSettings;
   filesDir: string | null;
   maxBody(): number;
+  consumeTotp(user: UserRow, code: string | null): boolean;
+  clientAddress(req: IncomingMessage): string;
+  /** Limites du compte, suppléments d'offre compris */
+  limitsFor(userId: string): ServerLimits;
+  audit(type: string, detail?: Record<string, unknown>, userId?: string): void;
+  geo: GeoLookup | null;
 }
 
 export type RouteHandler = (req: IncomingMessage, params: Record<string, string>) => Promise<Reply>;

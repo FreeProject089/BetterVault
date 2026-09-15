@@ -4,8 +4,10 @@ import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { openDatabase } from './src/db.ts';
 import { createApp } from './src/app.ts';
-import { settingsFromEnv } from './src/config.ts';
+import { settingsFromEnv, type ServerSettings } from './src/config.ts';
 import { createBackupService } from './src/backup.ts';
+import { openGeoDatabase, type GeoLookup } from './src/geoip.ts';
+import { createMetrics } from './src/metrics.ts';
 
 const secret = process.env.BETTERVAULT_SECRET ?? '';
 if (secret.length < 32) {
@@ -22,7 +24,7 @@ const corsOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean)
   : '*';
 
-let settings;
+let settings: ServerSettings;
 try {
   settings = settingsFromEnv(process.env);
 } catch (err) {
@@ -36,6 +38,18 @@ const db = openDatabase(dbPath);
 // Pièces jointes chiffrées : à côté de la base par défaut (volume /data dans Docker)
 const filesDir = resolve(process.env.BETTERVAULT_FILES ?? join(dirname(dbPath), 'files'));
 mkdirSync(filesDir, { recursive: true });
+
+// Base de localisation facultative (scripts/download-geoip.mjs) : lieu approximatif des sessions, calculé sur le serveur
+const geoPath = resolve(process.env.GEOIP_DB ?? join(dirname(dbPath), 'geoip.mmdb'));
+let geo: GeoLookup | null = null;
+if (existsSync(geoPath)) {
+  try {
+    geo = openGeoDatabase(geoPath);
+  } catch (err) {
+    console.warn(`Base de localisation ignorée : ${err instanceof Error ? err.message : err}`);
+  }
+}
+const metrics = createMetrics();
 
 const backupKey = process.env.BACKUP_ENCRYPTION_KEY || null;
 if (settings.backup.enabled && !backupKey) {
@@ -73,6 +87,9 @@ const api = createApp({
   settings,
   adminTokenHash: adminTokenHash(),
   filesDir,
+  geo,
+  metrics,
+  dbPath,
   backupFactory: getSettings => createBackupService({ db, filesDir, settings: getSettings, encryptionKey: backupKey })
 });
 
@@ -89,7 +106,8 @@ const MIME_TYPES: Record<string, string> = {
   '.woff2': 'font/woff2'
 };
 
-const CSP = "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://api.pwnedpasswords.com; frame-ancestors 'none'";
+// Aperçu des pièces jointes (blob:), aucun script tiers, pas d'intégration dans un autre site
+const CSP = "default-src 'self'; script-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob:; frame-src blob:; object-src 'none'; base-uri 'self'; form-action 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://api.pwnedpasswords.com; frame-ancestors 'none'";
 
 /** Sert un dossier de fichiers statiques ; les chemins inconnus renvoient index.html */
 function serveStatic(root: string, pathname: string, res: ServerResponse): void {
@@ -100,6 +118,10 @@ function serveStatic(root: string, pathname: string, res: ServerResponse): void 
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Content-Security-Policy', CSP);
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=(), payment=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  if (settings.publicUrl.startsWith('https://')) res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
   res.setHeader('Cache-Control', file.includes(`${sep}assets${sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache');
   res.writeHead(200, { 'Content-Type': MIME_TYPES[extname(file)] ?? 'application/octet-stream' });
   res.end(readFileSync(file));
@@ -114,6 +136,10 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       pathname = decodeURIComponent(new URL(url, 'http://localhost').pathname);
     } catch {
       res.writeHead(400).end();
+      return;
+    }
+    if (pathname === '/legal' || pathname.startsWith('/legal/')) {
+      void api(req, res);
       return;
     }
     if (pathname === '/admin' || pathname.startsWith('/admin/')) {

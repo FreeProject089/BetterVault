@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import {
   HttpError,
   invalid,
@@ -20,7 +21,13 @@ import {
 import type { PatternRoute, RouteContext } from './context.ts';
 import { accountKeyRoutes, sharingRoutes } from './sharing.ts';
 import { attachmentRoutes, deleteUserAttachments } from './attachments.ts';
-import type { BackupService, BackupSettings } from './backup.ts';
+import { databaseSnapshot, encryptBackup, type BackupService, type BackupSettings } from './backup.ts';
+import { sessionRoutes } from './sessions.ts';
+import { billingRoutes, createLimitsResolver } from './billing.ts';
+import { LEGAL_DOCUMENTS, legalConfigured, renderLegalPage } from './legal.ts';
+import { analytics, createAudit, type Metrics } from './metrics.ts';
+import { describeUserAgent, truncateIp, type GeoLookup } from './geoip.ts';
+import { route } from './context.ts';
 import type { DatabaseSync } from 'node:sqlite';
 import { parseSettingsUpdate, publicSettings, settingsFromEnv, type ServerSettings } from './config.ts';
 import { createSmtpMailer, type Mailer, type MailMessage, type SmtpConfig } from './mailer.ts';
@@ -53,6 +60,15 @@ export interface AppOptions {
   filesDir?: string | null;
   /** Service de sauvegarde, construit avec l'accès aux réglages courants */
   backupFactory?: (settings: () => BackupSettings) => BackupService;
+  /** Base de localisation locale (lieu approximatif des sessions) */
+  geo?: GeoLookup | null;
+  metrics?: Metrics | null;
+  /** Chemin du fichier SQLite, pour la taille affichée dans le tableau de bord */
+  dbPath?: string | null;
+  /** Dossier des modèles de documents légaux */
+  legalDir?: string;
+  /** Appels HTTP sortants (Stripe) ; remplaçable dans les tests */
+  fetchImpl?: typeof fetch;
   now?: () => number;
 }
 
@@ -94,6 +110,8 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
   const mailerFactory = options.mailerFactory ?? createSmtpMailer;
   const dummySalt = randomBytes(16);
   const attempts = new Map<string, { count: number; resetAt: number }>();
+  const audit = createAudit(db, serverSecret, now);
+  const fetchImpl = options.fetchImpl ?? fetch;
 
   const readSetting = db.prepare('SELECT value FROM settings WHERE key = ?');
   const writeSetting = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
@@ -108,8 +126,11 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     }
   }
 
+  const limitsFor = createLimitsResolver(db, () => settings, now);
+
   // Le coffre est transmis en base64 dans du JSON : marge de 40 % et quelques Ko pour l'enveloppe
   const maxBody = () => Math.ceil(settings.limits.maxVaultBytes * 1.4) + 64 * 1024;
+  const maxBodyFor = (userId: string) => Math.ceil(limitsFor(userId).maxVaultBytes * 1.4) + 64 * 1024;
 
   const sql = {
     userByEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
@@ -130,8 +151,10 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     vaultByUser: db.prepare('SELECT revision, blob, updated_at FROM vaults WHERE user_id = ?'),
     updateVault: db.prepare('UPDATE vaults SET revision = ?, blob = ?, updated_at = ? WHERE user_id = ? AND revision = ?'),
     replaceVault: db.prepare('UPDATE vaults SET revision = revision + 1, blob = ?, updated_at = ? WHERE user_id = ?'),
-    insertSession: db.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'),
-    sessionByHash: db.prepare('SELECT user_id, expires_at FROM sessions WHERE token_hash = ?'),
+    insertSession: db.prepare(`INSERT INTO sessions (token_hash, user_id, created_at, expires_at, public_id, device, ip_prefix, country, city, last_seen_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    sessionByHash: db.prepare('SELECT user_id, expires_at, last_seen_at FROM sessions WHERE token_hash = ?'),
+    touchSession: db.prepare('UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?'),
     deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash = ?'),
     deleteExpiredSessions: db.prepare('DELETE FROM sessions WHERE expires_at <= ?'),
     upsertEmailCode: db.prepare(`INSERT INTO email_codes (user_id, code_hash, expires_at, attempts) VALUES (?, ?, ?, 0)
@@ -167,9 +190,17 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     }
   };
 
-  const createSession = (userId: string) => {
+  /** Lieu approximatif et appareil : l'adresse IP complète n'est jamais enregistrée */
+  const describeClient = (req: IncomingMessage) => {
+    const ip = clientAddress(req);
+    const place = options.geo?.lookup(ip) ?? null;
+    return { ipPrefix: truncateIp(ip), country: place?.country ?? null, city: place?.city ?? null, device: describeUserAgent(String(req.headers['user-agent'] ?? '')) };
+  };
+
+  const createSession = (userId: string, req: IncomingMessage) => {
     const token = randomBytes(32).toString('base64url');
-    sql.insertSession.run(sha256(token), userId, now(), now() + sessionTtl);
+    const client = describeClient(req);
+    sql.insertSession.run(sha256(token), userId, now(), now() + sessionTtl, randomBytes(8).toString('hex'), client.device, client.ipPrefix, client.country, client.city, now());
     return token;
   };
 
@@ -177,8 +208,10 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(req.headers.authorization ?? '');
     if (!match) throw new HttpError(401, 'unauthorized', 'Session requise');
     const tokenHash = sha256(match[1]);
-    const session = sql.sessionByHash.get(tokenHash) as { user_id: string; expires_at: number } | undefined;
+    const session = sql.sessionByHash.get(tokenHash) as { user_id: string; expires_at: number; last_seen_at: number | null } | undefined;
     if (!session || session.expires_at <= now()) throw new HttpError(401, 'unauthorized', 'Session expirée');
+    // Dernière activité à 5 minutes près : évite une écriture à chaque requête
+    if (!session.last_seen_at || now() - session.last_seen_at > 300_000) sql.touchSession.run(now(), tokenHash);
     return { userId: session.user_id, tokenHash };
   };
 
@@ -300,7 +333,8 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         throw err;
       }
 
-      return { status: 201, body: { token: createSession(userId), revision: 1 } };
+      audit('account.created', {}, userId);
+      return { status: 201, body: { token: createSession(userId, req), revision: 1 } };
     },
 
     'POST /api/v1/sessions': async req => {
@@ -322,11 +356,13 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       if (body.locale === 'fr' || body.locale === 'en') sql.updateLocale.run(body.locale, user.id);
       sql.deleteExpiredSessions.run(now());
       if (body.notify !== false) {
-        notify(ctx => emails.newLogin(ctx, now(), clientAddress(req), String(req.headers['user-agent'] ?? '').slice(0, 160)), user);
+        const client = describeClient(req);
+        const place = [client.city, client.country].filter(Boolean).join(', ');
+        notify(ctx => emails.newLogin(ctx, now(), `${client.ipPrefix}${place ? ` (${place})` : ''}`, client.device), user);
       }
       return {
         status: 200,
-        body: { token: createSession(user.id), wrappedVaultKey: JSON.parse(user.wrapped_key), kdf: JSON.parse(user.kdf), salt: user.salt }
+        body: { token: createSession(user.id, req), wrappedVaultKey: JSON.parse(user.wrapped_key), kdf: JSON.parse(user.kdf), salt: user.salt }
       };
     },
 
@@ -343,15 +379,16 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
 
     'PUT /api/v1/vault': async req => {
       const { userId } = authenticate(req);
-      const body = await readJson(req, maxBody());
+      const maxVaultBytes = limitsFor(userId).maxVaultBytes;
+      const body = await readJson(req, maxBodyFor(userId));
       const baseRevision = body.baseRevision;
       if (!Number.isInteger(baseRevision) || (baseRevision as number) < 0) throw invalid('baseRevision');
       let blob: EncryptedBlob;
       try {
-        blob = parseBlob(body.blob, 'blob', settings.limits.maxVaultBytes);
+        blob = parseBlob(body.blob, 'blob', maxVaultBytes);
       } catch (err) {
-        if (err instanceof HttpError && Buffer.byteLength(String((body.blob as EncryptedBlob | undefined)?.ct ?? ''), 'base64') > settings.limits.maxVaultBytes) {
-          throw new HttpError(413, 'vault_too_large', `Le coffre dépasse la taille autorisée sur ce serveur (${Math.round(settings.limits.maxVaultBytes / 1048576)} Mo)`);
+        if (err instanceof HttpError && Buffer.byteLength(String((body.blob as EncryptedBlob | undefined)?.ct ?? ''), 'base64') > maxVaultBytes) {
+          throw new HttpError(413, 'vault_too_large', `Le coffre dépasse la taille autorisée (${Math.round(maxVaultBytes / 1048576)} Mo)`);
         }
         throw err;
       }
@@ -375,7 +412,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
           totpEnabled: !!user.totp_enabled,
           hasRecoveryKey: !!user.recovery_verifier,
           emailEnabled: !!settings.smtp,
-          limits: settings.limits
+          limits: limitsFor(user.id)
         }
       };
     },
@@ -399,6 +436,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       // Les autres appareils devront se reconnecter avec le nouveau mot de passe
       sql.deleteOtherSessions.run(userId, tokenHash);
       notify(ctx => emails.passwordChanged(ctx, now(), false), user);
+      audit('account.password_changed', {}, userId);
       return { status: 204 };
     },
 
@@ -441,6 +479,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       if (step === null) throw new HttpError(400, 'totp_invalid', 'Code incorrect. Vérifiez l’heure de votre téléphone.');
       sql.enableTotp.run(step, userId);
       notify(ctx => emails.twoFactor(ctx, now(), true), user);
+      audit('account.2fa_enabled', {}, userId);
       return { status: 204 };
     },
 
@@ -455,6 +494,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       if (user.totp_enabled && !consumeTotp(user, code)) throw new HttpError(400, 'totp_invalid', 'Code incorrect ou déjà utilisé');
       sql.disableTotp.run(userId);
       if (user.totp_enabled) notify(ctx => emails.twoFactor(ctx, now(), false), user);
+      audit('account.2fa_disabled', {}, userId);
       return { status: 204 };
     },
 
@@ -466,6 +506,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       if (!(await verifyAuthHash(user, authHash))) throw new HttpError(403, 'invalid_credentials', 'Mot de passe incorrect');
       deleteUserAttachments(context, userId);
       sql.deleteUser.run(userId);
+      audit('account.deleted', {}, userId);
       return { status: 204 };
     },
 
@@ -581,7 +622,8 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       }
 
       notify(ctx => (vault ? emails.vaultReset(ctx, now()) : emails.passwordChanged(ctx, now(), true)), user);
-      return { status: 200, body: { token: createSession(user.id), revision: readVault(user.id).revision } };
+      audit(vault ? 'account.reset_without_key' : 'account.recovered_with_key', {}, user.id);
+      return { status: 200, body: { token: createSession(user.id, req), revision: readVault(user.id).revision } };
     },
 
     /* ── Administration ───────────────────────────────────────────────── */
@@ -611,6 +653,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         throw new HttpError(400, 'invalid_settings', err instanceof Error ? err.message : String(err));
       }
       writeSetting.run('settings', JSON.stringify(settings));
+      audit('admin.settings_updated', { sections: Object.keys(body) });
       return { status: 200, body: { settings: publicSettings(settings) } };
     },
 
@@ -640,10 +683,68 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     notify,
     settings: () => settings,
     filesDir: options.filesDir ?? null,
-    maxBody
+    maxBody,
+    consumeTotp,
+    clientAddress,
+    limitsFor,
+    audit,
+    geo: options.geo ?? null
   };
 
-  Object.assign(routes, accountKeyRoutes(context), {
+  const legalContext = () => ({
+    legal: settings.legal,
+    retentionDays: settings.backup.retentionDays,
+    backupsEnabled: settings.backup.enabled && !!settings.backup.s3,
+    emailEnabled: !!settings.smtp,
+    billingEnabled: settings.billing.enabled,
+    geoEnabled: !!options.geo,
+    sessionDays: Math.round(sessionTtl / 86_400_000)
+  });
+  const legalDir = options.legalDir ?? fileURLToPath(new URL('../legal', import.meta.url));
+
+  Object.assign(routes, accountKeyRoutes(context), sessionRoutes(context), billingRoutes(context, fetchImpl), {
+    'GET /api/v1/legal': async (): Promise<Reply> => ({
+      status: 200,
+      body: {
+        configured: legalConfigured(settings.legal),
+        operatorName: settings.legal.operatorName || null,
+        effectiveDate: settings.legal.effectiveDate || null,
+        documents: LEGAL_DOCUMENTS.map(doc => ({ ...doc, url: `/legal/${doc.slug}` }))
+      }
+    }),
+    'GET /api/v1/admin/dashboard': async (req: IncomingMessage): Promise<Reply> => {
+      requireAdmin(req);
+      return {
+        status: 200,
+        body: {
+          version: SERVER_VERSION,
+          generatedAt: now(),
+          analytics: analytics(db, { now: now(), filesDir: options.filesDir ?? null, dbPath: options.dbPath ?? null }),
+          system: options.metrics?.snapshot() ?? null,
+          backups: { enabled: settings.backup.enabled, runs: backup?.history().slice(0, 5) ?? [] },
+          security: {
+            geoEnabled: !!options.geo,
+            emailEnabled: !!settings.smtp,
+            registrationOpen: settings.registrationOpen,
+            legalConfigured: legalConfigured(settings.legal),
+            backupEncrypted: !!process.env.BACKUP_ENCRYPTION_KEY
+          }
+        }
+      };
+    },
+    'GET /api/v1/admin/audit': async (req: IncomingMessage): Promise<Reply> => {
+      requireAdmin(req);
+      const rows = db.prepare('SELECT at, type, subject, detail FROM audit_events ORDER BY id DESC LIMIT 300').all() as Array<{ at: number; type: string; subject: string | null; detail: string }>;
+      return { status: 200, body: { events: rows.map(r => ({ ...r, detail: JSON.parse(r.detail) })) } };
+    },
+    'POST /api/v1/admin/backup/download': async (req: IncomingMessage): Promise<Reply> => {
+      requireAdmin(req);
+      const passphrase = String((await readJson(req, 2048)).passphrase ?? '');
+      if (passphrase.length < 12) throw new HttpError(400, 'weak_passphrase', 'Phrase de chiffrement de 12 caractères minimum');
+      const payload = encryptBackup(databaseSnapshot(db), passphrase);
+      audit('admin.backup_downloaded', { bytes: payload.length });
+      return { status: 200, raw: payload, contentType: 'application/octet-stream' };
+    },
     'GET /api/v1/admin/backup': async (req: IncomingMessage): Promise<Reply> => {
       requireAdmin(req);
       return {
@@ -655,7 +756,9 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       requireAdmin(req);
       if (!backup) throw new HttpError(503, 'backup_unavailable', 'Sauvegardes indisponibles sur ce serveur');
       try {
-        return { status: 200, body: await backup.runNow('manual') };
+        const run = await backup.runNow('manual');
+        audit('admin.backup_run', { status: run.status });
+        return { status: 200, body: run };
       } catch (err) {
         throw new HttpError(502, 'backup_failed', err instanceof Error ? err.message : String(err));
       }
@@ -671,7 +774,18 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       return { status: 204 };
     }
   });
-  const patternRoutes: PatternRoute[] = [...sharingRoutes(context), ...attachmentRoutes(context)];
+  const legalPage = (slug: string): Reply => {
+    const html = renderLegalPage(legalDir, slug, legalContext());
+    if (!html) throw new HttpError(404, 'not_found', 'Document inconnu');
+    return { status: 200, raw: Buffer.from(html), contentType: 'text/html; charset=utf-8' };
+  };
+
+  const patternRoutes: PatternRoute[] = [
+    ...sharingRoutes(context),
+    ...attachmentRoutes(context),
+    route('GET', '/legal', async () => legalPage('privacy')),
+    route('GET', '/legal/:slug', async (_req, params) => legalPage(params.slug))
+  ];
   backup?.start();
 
   const applyHeaders = (req: IncomingMessage, res: ServerResponse) => {
@@ -687,6 +801,11 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     res.setHeader('Access-Control-Max-Age', '600');
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Cross-Origin-Resource-Policy', corsOrigins === '*' ? 'cross-origin' : 'same-site');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+    if (settings.publicUrl.startsWith('https://')) res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
   };
 
   const send = (res: ServerResponse, status: number, body?: unknown) => {
@@ -698,6 +817,9 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
   };
 
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
+    const startedAt = performance.now();
+    let routeLabel = 'unknown';
+    res.once('finish', () => options.metrics?.record(routeLabel, res.statusCode, performance.now() - startedAt));
     applyHeaders(req, res);
     if (req.method === 'OPTIONS') {
       send(res, 204);
@@ -708,6 +830,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       let reply: Reply;
       const exact = routes[`${req.method} ${pathname}`];
       if (exact) {
+        routeLabel = `${req.method} ${pathname}`;
         reply = await exact(req);
       } else {
         let matched: { run: PatternRoute['handler']; params: Record<string, string> } | null = null;
@@ -715,6 +838,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
           if (candidate.method !== req.method) continue;
           const match = candidate.pattern.exec(pathname);
           if (!match) continue;
+          routeLabel = `${req.method} ${candidate.pattern.source.replace(/\(\[\^\/\]\+\)/g, ':param').replace(/^\^|\$$/g, '')}`;
           matched = { run: candidate.handler, params: Object.fromEntries(candidate.keys.map((key, i) => [key, decodeURIComponent(match[i + 1])])) };
           break;
         }

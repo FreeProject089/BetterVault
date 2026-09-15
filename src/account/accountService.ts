@@ -24,7 +24,7 @@ import {
   wrapVaultKey,
   type EncryptedBlob
 } from './accountCrypto';
-import { CloudClient, CloudError, type AccountInfo } from './cloudClient';
+import { CloudClient, CloudError, type AccountInfo, type AccountSession, type BillingInfo } from './cloudClient';
 import { sanitizeLimits, type VaultLimits } from './limits';
 import { generateSharingKeyPair, unwrapPrivateKey, wrapPrivateKey, type SharingKeyPair } from './sharingCrypto';
 import { mergeVaultData } from './merge';
@@ -767,6 +767,34 @@ export class AccountService {
   getCloudAccountInfo(): Promise<AccountInfo> {
     const client = this.cloudClient();
     return this.withSessionRetry(() => client.me());
+  }
+
+  listSessions(): Promise<AccountSession[]> {
+    const client = this.cloudClient();
+    return this.withSessionRetry(async () => (await client.listSessions()).sessions);
+  }
+
+  /** Ferme une session (ou toutes sauf celle-ci) : mot de passe principal et code 2FA s'il est activé */
+  async revokeSessions(password: string, target: { sessionId: string } | { all: true }, totp?: string): Promise<number> {
+    const client = this.cloudClient();
+    const { authHash } = await this.verifyPassword(password);
+    const code = totp?.replace(/\s/g, '') || undefined;
+    return (await this.withSessionRetry(() => client.revokeSessions({ authHash, ...target, totp: code }))).revoked;
+  }
+
+  getBilling(): Promise<BillingInfo> {
+    const client = this.cloudClient();
+    return this.withSessionRetry(() => client.billing());
+  }
+
+  startCheckout(planId: string): Promise<{ url: string }> {
+    const client = this.cloudClient();
+    return this.withSessionRetry(() => client.checkout(planId));
+  }
+
+  openBillingPortal(): Promise<{ url: string }> {
+    const client = this.cloudClient();
+    return this.withSessionRetry(() => client.billingPortal());
   }
 
   /** Première étape : le serveur crée un secret à scanner dans l'application d'authentification */

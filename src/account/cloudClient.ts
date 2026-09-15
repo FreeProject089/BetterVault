@@ -61,6 +61,41 @@ export interface AccountInfo {
   limits: VaultLimits;
 }
 
+export interface AccountSession {
+  id: string;
+  current: boolean;
+  device: string | null;
+  ipPrefix: string | null;
+  country: string | null;
+  city: string | null;
+  createdAt: number;
+  lastSeenAt: number;
+  expiresAt: number;
+}
+
+export interface BillingPlanInfo {
+  id: string;
+  name: string;
+  description: string;
+  priceLabel: string;
+  mode: 'subscription' | 'payment';
+  boosts: Record<string, number>;
+}
+
+export interface BillingInfo {
+  enabled: boolean;
+  plans: BillingPlanInfo[];
+  subscription: { planId: string; status: string; currentPeriodEnd: number | null; active: boolean } | null;
+  limits: VaultLimits & Record<string, number>;
+}
+
+export interface LegalInfo {
+  configured: boolean;
+  operatorName: string | null;
+  effectiveDate: string | null;
+  documents: Array<{ slug: string; title: string; url: string }>;
+}
+
 export type SharedPermission = 'write' | 'attachments' | 'export' | 'manage_members' | 'manage_roles' | 'delete_vault';
 
 export interface SharedRole {
@@ -195,6 +230,30 @@ export class CloudClient {
 
   me(): Promise<AccountInfo> {
     return this.request('GET', '/api/v1/accounts/me');
+  }
+
+  listSessions(): Promise<{ sessions: AccountSession[] }> {
+    return this.request('GET', '/api/v1/accounts/sessions');
+  }
+
+  revokeSessions(payload: { authHash: string; sessionId?: string; all?: boolean; totp?: string }): Promise<{ revoked: number }> {
+    return this.request('POST', '/api/v1/accounts/sessions/revoke', payload);
+  }
+
+  billing(): Promise<BillingInfo> {
+    return this.request('GET', '/api/v1/billing');
+  }
+
+  checkout(planId: string): Promise<{ url: string }> {
+    return this.request('POST', '/api/v1/billing/checkout', { planId });
+  }
+
+  billingPortal(): Promise<{ url: string }> {
+    return this.request('POST', '/api/v1/billing/portal', {});
+  }
+
+  legal(): Promise<LegalInfo> {
+    return this.request('GET', '/api/v1/legal');
   }
 
   setupTotp(authHash: string): Promise<{ secret: string; uri: string }> {

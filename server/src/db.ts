@@ -112,6 +112,33 @@ export function openDatabase(path: string): DatabaseSync {
       deleted_at INTEGER NOT NULL
     );
 
+    -- Offres payantes (optionnelles) : état fourni par les webhooks Stripe
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      plan_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      current_period_end INTEGER,
+      stripe_customer_id TEXT,
+      stripe_subscription_id TEXT,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS billing_events (
+      id TEXT PRIMARY KEY,
+      received_at INTEGER NOT NULL
+    );
+
+    -- Journal de sécurité : identifiants de compte pseudonymisés, aucune adresse IP ni email
+    CREATE TABLE IF NOT EXISTS audit_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      at INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      subject TEXT,
+      detail TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS audit_events_at ON audit_events(at);
+
     CREATE TABLE IF NOT EXISTS backup_runs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       trigger TEXT NOT NULL,
@@ -134,5 +161,13 @@ export function openDatabase(path: string): DatabaseSync {
   addColumn(db, 'users', 'recovery_wrapped_key TEXT');
   addColumn(db, 'users', 'public_key TEXT');
   addColumn(db, 'users', 'wrapped_private_key TEXT');
+  // Sessions : identifiant public (révocation), appareil, IP tronquée et lieu approximatif, dernière activité
+  addColumn(db, 'sessions', 'public_id TEXT');
+  addColumn(db, 'sessions', 'device TEXT');
+  addColumn(db, 'sessions', 'ip_prefix TEXT');
+  addColumn(db, 'sessions', 'country TEXT');
+  addColumn(db, 'sessions', 'city TEXT');
+  addColumn(db, 'sessions', 'last_seen_at INTEGER');
+  db.exec("UPDATE sessions SET public_id = lower(hex(randomblob(8))) WHERE public_id IS NULL");
   return db;
 }
