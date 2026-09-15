@@ -70,6 +70,18 @@ export function decryptBackup(data: Buffer, passphrase: string): Buffer {
   }
 }
 
+/** Copie cohérente et compressée de la base (utilisée par les sauvegardes et le téléchargement depuis /admin) */
+export function databaseSnapshot(db: DatabaseSync): Buffer {
+  const temp = mkdtempSync(join(tmpdir(), 'bettervault-snapshot-'));
+  try {
+    const copy = join(temp, 'bettervault.db');
+    db.exec(`VACUUM INTO '${copy.replace(/'/g, "''")}'`);
+    return gzipSync(readFileSync(copy), { level: 9 });
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+}
+
 const normalizePrefix = (prefix: string) => (prefix ? `${prefix.replace(/^\/+|\/+$/g, '')}/` : '');
 
 export function createBackupService(options: {

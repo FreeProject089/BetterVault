@@ -74,7 +74,7 @@ export function attachmentRoutes(ctx: RouteContext): PatternRoute[] {
   return [
     route('GET', '/api/v1/attachments/usage', async req => {
       const { userId } = ctx.authenticate(req);
-      const { limits } = ctx.settings();
+      const limits = ctx.limitsFor(userId);
       return { status: 200, body: { enabled: !!ctx.filesDir, usedBytes: usedBytes(ctx, userId), quotaBytes: limits.attachmentQuotaBytes, maxFileBytes: limits.maxAttachmentBytes } };
     }),
 
@@ -82,7 +82,6 @@ export function attachmentRoutes(ctx: RouteContext): PatternRoute[] {
       const { userId } = ctx.authenticate(req);
       ctx.limit(req, 'attachments');
       requireFiles(ctx);
-      const { limits } = ctx.settings();
       const vaultParam = new URL(req.url ?? '/', 'http://localhost').searchParams.get('vault');
       let quotaOwner = userId;
       let vaultId: string | null = null;
@@ -92,10 +91,11 @@ export function attachmentRoutes(ctx: RouteContext): PatternRoute[] {
         quotaOwner = (ctx.db.prepare('SELECT owner_id FROM shared_vaults WHERE id = ?').get(vaultId) as { owner_id: string }).owner_id;
       }
 
-      const data = await readRaw(req, limits.maxAttachmentBytes + 64);
+      const ownerLimits = ctx.limitsFor(quotaOwner);
+      const data = await readRaw(req, ctx.limitsFor(userId).maxAttachmentBytes + 64);
       if (data.length === 0) throw new HttpError(400, 'empty_file', 'Fichier vide');
-      if (usedBytes(ctx, quotaOwner) + data.length > limits.attachmentQuotaBytes) {
-        throw new HttpError(413, 'quota_exceeded', `Espace de stockage plein (${Math.round(limits.attachmentQuotaBytes / 1048576)} Mo)`);
+      if (usedBytes(ctx, quotaOwner) + data.length > ownerLimits.attachmentQuotaBytes) {
+        throw new HttpError(413, 'quota_exceeded', `Espace de stockage plein (${Math.round(ownerLimits.attachmentQuotaBytes / 1048576)} Mo)`);
       }
 
       const id = randomUUID();
