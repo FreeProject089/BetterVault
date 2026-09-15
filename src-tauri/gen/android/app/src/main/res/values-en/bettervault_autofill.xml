@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="autofill_unlock">Unlock BetterVault</string>
+    <string name="autofill_prompt_title">Fill with BetterVault</string>
+    <string name="autofill_no_match">No BetterVault credentials for this screen</string>
+</resources>

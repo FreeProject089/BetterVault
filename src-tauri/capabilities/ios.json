@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "ios-biometric",
+  "description": "Face ID / Touch ID pour le déverrouillage sur iOS",
+  "platforms": ["iOS"],
+  "windows": ["main"],
+  "permissions": ["biometric:default"]
+}

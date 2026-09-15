@@ -7,6 +7,7 @@ import { downloadExportFile } from '../import_export/importEngine';
 import { createEmptyVaultData } from '../store/vaultStore';
 import type { UnlockedVaultData } from '../types/vault';
 import { formatRecoveryKey, recoveryKeyFile } from './recoveryKey';
+import { BiometricCancelledError, type DeviceSecretStore } from '../platform/biometric';
 
 const isTauriRuntime = typeof (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined';
 
@@ -33,9 +34,16 @@ export function accountErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export function mountAuthScreen(root: HTMLElement, service: AccountService, onUnlocked: (data: UnlockedVaultData) => void): { show(): void } {
+export function mountAuthScreen(
+  root: HTMLElement,
+  service: AccountService,
+  onUnlocked: (data: UnlockedVaultData) => void,
+  options: { deviceStore?: DeviceSecretStore | null } = {}
+): { show(): void } {
   // Données à ouvrir une fois la clé de secours confirmée
   let pending: { data: UnlockedVaultData; key: string; intro: string } | null = null;
+  // L'invite biométrique s'ouvre d'elle-même une seule fois par affichage de l'écran
+  let autoPrompted = false;
 
   const brand = () => `
     <div class="auth-brand">
@@ -97,6 +105,11 @@ export function mountAuthScreen(root: HTMLElement, service: AccountService, onUn
           ${passwordField('auth-password', tr('Mot de passe principal', 'Master password'), 'current-password')}
           <div class="auth-error" role="alert" hidden></div>
           <button type="submit" class="btn-primary btn-accent auth-submit">${tr('Déverrouiller', 'Unlock')}</button>
+          ${options.deviceStore && service.hasDeviceUnlock() ? `
+            <button type="button" class="btn-primary auth-submit" data-action="device-unlock">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 11c0 3.5-1 6.5-3 9"/><path d="M8 7.5A5 5 0 0 1 17 11c0 3-.5 5.5-1.5 8"/><path d="M4.5 9a8 8 0 0 1 15 2c0 2-.2 4-.7 6"/><path d="M12 15c-.3 2-1 4-2 5.5"/></svg>
+              ${tr(`Utiliser ${options.deviceStore.label}`, `Use ${options.deviceStore.label}`)}
+            </button>` : ''}
         </form>
         <div style="display:flex;justify-content:center;gap:16px;flex-wrap:wrap;">
           <button type="button" class="auth-link" data-screen="recover">${tr('Mot de passe oublié ?', 'Forgot password?')}</button>
@@ -432,6 +445,31 @@ export function mountAuthScreen(root: HTMLElement, service: AccountService, onUn
       finish(data);
     });
 
+    const deviceButton = card.querySelector<HTMLButtonElement>('[data-action="device-unlock"]');
+    if (deviceButton && options.deviceStore) {
+      const store = options.deviceStore;
+      const unlockWithDevice = async () => {
+        const errorEl = card.querySelector<HTMLElement>('.auth-error')!;
+        errorEl.hidden = true;
+        deviceButton.disabled = true;
+        try {
+          finish(await service.unlockWithDevice(store, tr('Déverrouiller BetterVault', 'Unlock BetterVault')));
+        } catch (err) {
+          if (!(err instanceof BiometricCancelledError)) {
+            errorEl.textContent = accountErrorMessage(err);
+            errorEl.hidden = false;
+          }
+        } finally {
+          if (deviceButton.isConnected) deviceButton.disabled = false;
+        }
+      };
+      deviceButton.addEventListener('click', () => void unlockWithDevice());
+      if (!autoPrompted) {
+        autoPrompted = true;
+        void store.available().then(ok => { if (ok && deviceButton.isConnected) void unlockWithDevice(); });
+      }
+    }
+
     card.querySelector<HTMLButtonElement>('[data-action="signout"]')?.addEventListener('click', async event => {
       const button = event.currentTarget as HTMLButtonElement;
       button.disabled = true;
@@ -452,6 +490,7 @@ export function mountAuthScreen(root: HTMLElement, service: AccountService, onUn
   return {
     show: () => {
       root.hidden = false;
+      autoPrompted = false;
       render(service.hasAccount() ? 'unlock' : 'create');
     }
   };

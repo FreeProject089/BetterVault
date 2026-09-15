@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Fenêtre principale de BetterVault (bureau et mobile)","local":true,"windows":["main"],"permissions":["core:default"]}}
+{"default":{"identifier":"default","description":"Fenêtre principale de BetterVault (bureau et mobile)","local":true,"windows":["main"],"permissions":["core:default"]},"ios-biometric":{"identifier":"ios-biometric","description":"Face ID / Touch ID pour le déverrouillage sur iOS","local":true,"windows":["main"],"permissions":["biometric:default"],"platforms":["iOS"]}}

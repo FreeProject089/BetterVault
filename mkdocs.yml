@@ -54,6 +54,8 @@ nav:
       - Import et export: guide/import-export.md
       - Compte et synchronisation: guide/synchronisation.md
       - Sécurité du compte: guide/securite-compte.md
+      - Coffres partagés: guide/partage.md
+      - Pièces jointes: guide/pieces-jointes.md
       - Extension navigateur: guide/extension.md
       - Raccourcis clavier: guide/raccourcis.md
   - Déploiement:
@@ -61,8 +63,10 @@ nav:
       - Docker: deploiement/docker.md
       - Sans Docker: deploiement/sans-docker.md
       - Configuration et sauvegardes: deploiement/configuration.md
+      - Sauvegardes S3 et RGPD: deploiement/sauvegardes.md
   - Applications:
       - Bureau et mobile: applications/bureau-mobile.md
+      - Biométrie et remplissage automatique: applications/biometrie-autofill.md
   - Sécurité: securite.md
   - Développement:
       - Architecture: developpement/architecture.md

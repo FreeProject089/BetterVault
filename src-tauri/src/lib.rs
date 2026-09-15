@@ -181,6 +181,95 @@ fn save_export_file(app: tauri::AppHandle, file_name: String, bytes: Vec<u8>) ->
     Ok(target.to_string_lossy().into_owned())
 }
 
+/* ── Fonctions natives Android (Keystore, remplissage automatique) ───────── */
+
+#[cfg(target_os = "android")]
+mod native {
+    use tauri::{
+        plugin::{Builder, PluginHandle, TauriPlugin},
+        Manager, Runtime,
+    };
+
+    pub struct Native<R: Runtime>(pub PluginHandle<R>);
+
+    /// Le code Kotlin est dans gen/android/app/src/main/java/app/bettervault/BetterVaultPlugin.kt
+    pub fn init<R: Runtime>() -> TauriPlugin<R> {
+        Builder::new("bettervault-native")
+            .setup(|app, api| {
+                let handle = api.register_android_plugin("app.bettervault", "BetterVaultPlugin")?;
+                app.manage(Native(handle));
+                Ok(())
+            })
+            .build()
+    }
+}
+
+const NATIVE_METHODS: &[&str] = &["status", "secureStore", "secureRead", "secureDelete", "autofillUpdate", "autofillClear", "openAutofillSettings"];
+
+/// Appelle une fonction du plugin Android ; l'appel peut attendre l'invite biométrique
+#[command]
+async fn native_call(app: tauri::AppHandle, method: String, payload: serde_json::Value) -> Result<serde_json::Value, String> {
+    if !NATIVE_METHODS.contains(&method.as_str()) {
+        return Err("Fonction native inconnue".into());
+    }
+    #[cfg(target_os = "android")]
+    {
+        let handle = app.state::<native::Native<tauri::Wry>>().0.clone();
+        return tauri::async_runtime::spawn_blocking(move || handle.run_mobile_plugin::<serde_json::Value>(&method, payload))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string());
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, payload);
+        Err(format!("« {method} » n'est disponible que sur Android"))
+    }
+}
+
+/* ── Windows Hello ───────────────────────────────────────────────────────── */
+
+#[command]
+async fn desktop_biometric_status() -> bool {
+    #[cfg(windows)]
+    {
+        use windows::Security::Credentials::UI::{UserConsentVerifier, UserConsentVerifierAvailability};
+        return tauri::async_runtime::spawn_blocking(|| {
+            UserConsentVerifier::CheckAvailabilityAsync()
+                .and_then(|op| op.get())
+                .map(|availability| availability == UserConsentVerifierAvailability::Available)
+                .unwrap_or(false)
+        })
+        .await
+        .unwrap_or(false);
+    }
+    #[cfg(not(windows))]
+    false
+}
+
+/// Demande une vérification Windows Hello (visage, empreinte ou code PIN de l'appareil)
+#[command]
+async fn desktop_biometric_verify(reason: String) -> Result<bool, String> {
+    #[cfg(windows)]
+    {
+        use windows::core::HSTRING;
+        use windows::Security::Credentials::UI::{UserConsentVerificationResult, UserConsentVerifier};
+        return tauri::async_runtime::spawn_blocking(move || {
+            UserConsentVerifier::RequestVerificationAsync(&HSTRING::from(reason))
+                .and_then(|op| op.get())
+                .map(|result| result == UserConsentVerificationResult::Verified)
+                .map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = reason;
+        Err("Windows Hello n'est disponible que sous Windows".into())
+    }
+}
+
 #[command]
 fn generate_secure_bytes(count: usize) -> Vec<u8> {
     let mut bytes = vec![0u8; count];
@@ -226,8 +315,17 @@ fn decrypt_data_aes_gcm(ciphertext: Vec<u8>, nonce_bytes: Vec<u8>, key_bytes: Ve
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(native::init());
+    #[cfg(target_os = "ios")]
+    let builder = builder.plugin(tauri_plugin_biometric::init());
+
+    builder
         .invoke_handler(tauri::generate_handler![
+            native_call,
+            desktop_biometric_status,
+            desktop_biometric_verify,
             get_system_status,
             get_os_keychain_available,
             keychain_set_secret,

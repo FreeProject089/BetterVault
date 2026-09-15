@@ -27,6 +27,26 @@
             </intent-filter>
         </activity>
 
+        <!-- Remplissage automatique des identifiants dans les autres applications et navigateurs -->
+        <service
+            android:name=".BetterVaultAutofillService"
+            android:label="BetterVault"
+            android:permission="android.permission.BIND_AUTOFILL_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.autofill.AutofillService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.autofill"
+                android:resource="@xml/autofill_service" />
+        </service>
+
+        <activity
+            android:name=".AutofillAuthActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@style/BetterVault.Translucent" />
+
         <provider
           android:name="androidx.core.content.FileProvider"
           android:authorities="${applicationId}.fileprovider"
