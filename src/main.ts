@@ -24,6 +24,9 @@ import { exportCredentialsAsCxf } from './import_export/cxf';
 import { normalizeTotpInput, parseOtpAuthUri } from './crypto/otpauthUri';
 import { CameraQrScanner, decodeQrFromFile } from './crypto/qrScanner';
 import { AccountService, type SyncStatus } from './account/accountService';
+import { SharedReadOnlyError, SharedVaultManager } from './account/sharedVaults';
+import type { SharedMember, SharedPermission, SharedRole } from './account/cloudClient';
+import { decryptFile, encryptFile, type AttachmentMeta } from './account/attachmentCrypto';
 import { createDeviceStorage } from './platform/storage';
 import { isTauri } from './platform/tauriBridge';
 import type { UnlockedVaultData } from './types/vault';
@@ -84,6 +87,7 @@ const GENERIC_FILE_ICON = '<svg width="22" height="22" viewBox="0 0 24 24" fill=
 
 // Créé au démarrage, une fois le stockage de l'appareil chargé (voir la fin du fichier)
 let accountService: AccountService;
+let sharedVaults: SharedVaultManager;
 
 /* ════════════════════════════════════════════════════════════════════════════
    APP CONTROLLER — Zero-Knowledge Vault Manager
@@ -543,19 +547,23 @@ class AppController {
       work: i18n.t.common.work,
       team: i18n.t.common.team
     };
+    const SHARED_ICON = '<svg class="nav-shared-mark" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
 
     vaultListEl.innerHTML = '';
     data.vaults.forEach(vault => {
       const li = document.createElement('li');
       li.className = `nav-item ${vault.id === data.activeVaultId ? 'active' : ''}`;
       li.tabIndex = 0;
+      const badge = vault.shared
+        ? `<span class="vault-type-badge shared" title="${this.escapeHtml(this.tr(`Partagé par ${vault.shared.ownerEmail}`, `Shared by ${vault.shared.ownerEmail}`))}">${SHARED_ICON}${this.escapeHtml(this.roleLabel(vault.shared.role))}</span>`
+        : `<span class="vault-type-badge ${vault.type}">${typeLabels[vault.type] ?? vault.type}</span>`;
       li.innerHTML = `
         <span class="nav-item-left">
           <span class="nav-vault-icon">${vault.icon ? renderItemIcon(vault.icon, 15) : VAULT_ICON}</span>
           <span>${this.escapeHtml(vault.name)}</span>
         </span>
         <span class="nav-item-right">
-          <span class="vault-type-badge ${vault.type}">${typeLabels[vault.type] ?? vault.type}</span>
+          ${badge}
           <button class="icon-btn nav-item-edit" type="button" title="${this.tr('Modifier le coffre', 'Edit vault')}" aria-label="${this.tr('Modifier le coffre', 'Edit vault')} ${this.escapeHtml(vault.name)}">${ACTION_ICONS.edit}</button>
         </span>
       `;
@@ -1578,6 +1586,8 @@ class AppController {
           </div>
         </div>
 
+        ${this.renderAttachments(cred)}
+
         <div class="field-group">
           <div class="section-divider" style="margin-bottom:8px;">${this.tr('Tâches liées', 'Linked tasks')} (${linkedTasks.length})</div>
           ${linkedTasksHTML}
@@ -1665,6 +1675,7 @@ class AppController {
     });
 
     document.getElementById('btn-delete-cred')?.addEventListener('click', async () => {
+      if (!this.canEdit(cred.vaultId)) return;
       const confirmed = await this.confirmDialog({
         title: this.tr('Supprimer l’identifiant ?', 'Delete credential?'),
         message: this.tr(
@@ -1675,6 +1686,10 @@ class AppController {
         danger: true
       });
       if (confirmed) {
+        // Les fichiers chiffrés de l'identifiant sont retirés du serveur
+        for (const file of cred.attachments ?? []) {
+          void accountService.withCloud(client => client.deleteAttachment(file.id)).catch(() => undefined);
+        }
         vaultStore.deleteCredential(cred.id);
         this.selectedItemId = null;
         this.renderDetail(null);
@@ -1770,6 +1785,8 @@ class AppController {
     document.getElementById('btn-add-task-for-cred')?.addEventListener('click', () => {
       this.openCreateTaskModal(cred.id);
     });
+
+    this.bindAttachments(container, cred);
 
     document.getElementById('btn-detail-back-cred')?.addEventListener('click', () => {
       document.getElementById('detail-container')?.classList.remove('mobile-active');
@@ -2016,6 +2033,7 @@ class AppController {
     const limits = accountService.getLimits();
     const tr = (fr: string, en: string) => this.tr(fr, en);
     const attr = (value?: string) => this.escapeHtml(value ?? '');
+    if (!this.canEdit(existing?.vaultId ?? data.activeVaultId)) return;
 
     if (!isEdit && remainingCapacity(data, data.activeVaultId, limits).credentials === 0) {
       this.showToast(tr(`Ce coffre contient déjà ${limits.maxCredentialsPerVault} identifiants, la limite du serveur`, `This vault already holds ${limits.maxCredentialsPerVault} credentials, the server limit`), 'error');
@@ -2395,6 +2413,7 @@ class AppController {
     const data = vaultStore.getData();
     const existing = existingTaskId ? data.tasks.find(t => t.id === existingTaskId) : null;
     const isEdit = !!existing;
+    if (!this.canEdit(existing?.vaultId ?? data.activeVaultId)) return;
 
     const targetLinkedCredId = existing ? existing.linkedCredentialId : linkedCredentialId;
 
@@ -3458,8 +3477,15 @@ class AppController {
   private initAccount(): void {
     this.authScreen = mountAuthScreen(document.getElementById('auth-screen') as HTMLElement, accountService, data => this.showApp(data));
 
+    sharedVaults.onSaveError((vaultId, err) => {
+      this.showToast(err instanceof SharedReadOnlyError ? err.message : `${this.tr('Coffre partagé non enregistré', 'Shared vault not saved')} : ${accountErrorMessage(err)}`, 'error', 5000);
+      this.reloadWithShared();
+      void this.refreshSharedVaults();
+      if (vaultId === this.selectedItemId) this.renderDetail(null);
+    });
+
     accountService.onRemoteData(data => {
-      vaultStore.load(data);
+      vaultStore.load(sharedVaults.mergeInto(data));
       const exists = data.credentials.some(c => c.id === this.selectedItemId) || data.tasks.some(t => t.id === this.selectedItemId);
       if (this.selectedItemId && !exists) {
         this.selectedItemId = null;
@@ -3474,7 +3500,9 @@ class AppController {
       if (accountService.isUnlocked()) void accountService.syncNow();
     });
     window.setInterval(() => {
-      if (accountService.isUnlocked()) void accountService.syncNow();
+      if (!accountService.isUnlocked()) return;
+      void accountService.syncNow();
+      void this.refreshSharedVaults();
     }, SYNC_INTERVAL_MS);
 
     this.renderSyncStatus();
@@ -3485,9 +3513,198 @@ class AppController {
     });
   }
 
+  /** Coffres partagés : liste, contenu et invitations */
+  private async refreshSharedVaults(): Promise<void> {
+    if (!sharedVaults.isAvailable()) {
+      this.renderInvitations();
+      return;
+    }
+    try {
+      if (await sharedVaults.refresh()) this.reloadWithShared();
+    } catch (err) {
+      console.warn('Coffres partagés indisponibles', err);
+    }
+    this.renderInvitations();
+  }
+
+  private reloadWithShared(): void {
+    const personal = accountService.getLatestData();
+    if (!personal) return;
+    const activeVaultId = vaultStore.getData().activeVaultId;
+    vaultStore.load(sharedVaults.mergeInto(personal));
+    if (vaultStore.getData().vaults.some(v => v.id === activeVaultId)) vaultStore.setActiveVault(activeVaultId);
+  }
+
+  /** Vrai si le rôle de l'utilisateur permet de modifier le coffre (toujours vrai pour un coffre personnel) */
+  private canEdit(vaultId: string, permission: SharedPermission = 'write'): boolean {
+    if (sharedVaults.can(vaultId, permission)) return true;
+    this.showToast(this.tr('Votre rôle dans ce coffre partagé ne permet pas cette action', 'Your role in this shared vault does not allow this'), 'error');
+    return false;
+  }
+
+  private renderInvitations(): void {
+    const host = document.getElementById('shared-invitations');
+    if (!host) return;
+    const invitations = sharedVaults.isAvailable() ? sharedVaults.invitations() : [];
+    host.hidden = invitations.length === 0;
+    host.innerHTML = invitations.length ? `
+      <button type="button" class="invitation-banner" data-action="invitations">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>${this.tr(`${invitations.length} invitation${invitations.length > 1 ? 's' : ''} à un coffre partagé`, `${invitations.length} shared vault invitation${invitations.length > 1 ? 's' : ''}`)}</span>
+      </button>` : '';
+    host.querySelector('[data-action="invitations"]')?.addEventListener('click', () => this.openInvitationsModal());
+  }
+
+  private openInvitationsModal(): void {
+    const tr = (fr: string, en: string) => this.tr(fr, en);
+    const render = () => sharedVaults.invitations().map(inv => `
+      <div class="member-row" data-vault="${inv.id}">
+        <div class="member-main">
+          <div class="member-email">${this.escapeHtml(inv.invitedByEmail ?? inv.ownerEmail)}</div>
+          <div class="field-hint">${tr('Rôle proposé', 'Offered role')} : ${this.escapeHtml(this.roleLabel(inv.role))} · ${tr('propriétaire', 'owner')} ${this.escapeHtml(inv.ownerEmail)}</div>
+        </div>
+        <button class="btn-primary btn-ghost" data-action="decline">${tr('Refuser', 'Decline')}</button>
+        <button class="btn-primary btn-accent" data-action="accept">${tr('Accepter', 'Accept')}</button>
+      </div>`).join('') || `<p class="modal-text">${tr('Aucune invitation en attente.', 'No pending invitations.')}</p>`;
+
+    const box = this.openModal(`
+      <div class="modal-header">
+        <div class="modal-title">${tr('Invitations', 'Invitations')}</div>
+        <button class="modal-close">${GEN_ICONS.close}</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-text">${tr('Le nom et le contenu du coffre s’affichent après acceptation : ils sont chiffrés pour les membres uniquement.', 'The vault name and content appear after you accept: they are encrypted for members only.')}</p>
+        <div class="member-list" data-list>${render()}</div>
+      </div>
+      <div class="modal-footer"><button class="btn-primary" data-close>${tr('Fermer', 'Close')}</button></div>
+    `);
+    const list = box.querySelector('[data-list]') as HTMLElement;
+    list.addEventListener('click', async e => {
+      const button = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-action]');
+      const vaultId = button?.closest<HTMLElement>('[data-vault]')?.dataset.vault;
+      if (!button || !vaultId) return;
+      button.disabled = true;
+      try {
+        if (button.dataset.action === 'accept') {
+          await sharedVaults.accept(vaultId);
+          this.reloadWithShared();
+          this.showToast(tr('Vous avez rejoint le coffre partagé', 'You joined the shared vault'), 'success');
+        } else {
+          await sharedVaults.decline(vaultId);
+        }
+        list.innerHTML = render();
+        this.renderInvitations();
+        if (sharedVaults.invitations().length === 0) this.closeModal();
+      } catch (err) {
+        button.disabled = false;
+        this.showToast(accountErrorMessage(err), 'error');
+      }
+    });
+  }
+
+  private roleLabel(role: SharedRole): string {
+    const labels: Record<string, string> = {
+      owner: this.tr('Propriétaire', 'Owner'),
+      admin: this.tr('Administrateur', 'Administrator'),
+      editor: this.tr('Éditeur', 'Editor'),
+      viewer: this.tr('Lecteur', 'Viewer')
+    };
+    return role.builtin ? labels[role.builtin] : role.name;
+  }
+
+  /* ── Pièces jointes ──────────────────────────────────────────────────── */
+  private renderAttachments(cred: CredentialItem): string {
+    const tr = (fr: string, en: string) => this.tr(fr, en);
+    const files = cred.attachments ?? [];
+    const formatSize = (bytes: number) => bytes < 1024 ? `${bytes} o` : bytes < 1048576 ? `${Math.round(bytes / 1024)} Ko` : `${(bytes / 1048576).toFixed(1)} Mo`;
+    const available = accountService.isCloud();
+    return `
+      <div class="field-group">
+        <div class="section-divider" style="margin-bottom:8px;">${tr('Pièces jointes', 'Attachments')} (${files.length})</div>
+        <div class="attachment-list">
+          ${files.map(file => `
+            <div class="attachment-row" data-attachment="${file.id}">
+              <span class="attachment-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></span>
+              <span class="attachment-text"><span class="attachment-name">${this.escapeHtml(file.name)}</span><span class="field-hint">${formatSize(file.size)}</span></span>
+              <button class="icon-btn" type="button" data-attachment-action="download" title="${tr('Télécharger', 'Download')}" aria-label="${tr('Télécharger', 'Download')}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
+              <button class="icon-btn" type="button" data-attachment-action="delete" title="${tr('Supprimer', 'Delete')}" aria-label="${tr('Supprimer', 'Delete')}">${ACTION_ICONS.trash}</button>
+            </div>`).join('')}
+        </div>
+        ${available
+          ? `<label class="btn-primary btn-ghost" style="align-self:flex-start;cursor:pointer;">+ ${tr('Ajouter un fichier', 'Add a file')}<input type="file" data-attachment-input multiple hidden></label>`
+          : `<div class="field-hint">${tr('Les pièces jointes demandent un compte synchronisé : elles sont chiffrées puis stockées sur votre serveur.', 'Attachments need a synced account: they are encrypted and stored on your server.')}</div>`}
+      </div>`;
+  }
+
+  private bindAttachments(container: HTMLElement, cred: CredentialItem): void {
+    const tr = (fr: string, en: string) => this.tr(fr, en);
+    const sharedId = sharedVaults.isShared(cred.vaultId) ? cred.vaultId : undefined;
+    const current = () => vaultStore.getData().credentials.find(c => c.id === cred.id);
+
+    container.querySelector<HTMLInputElement>('[data-attachment-input]')?.addEventListener('change', async e => {
+      const input = e.target as HTMLInputElement;
+      const files = [...(input.files ?? [])];
+      input.value = '';
+      if (!files.length || !this.canEdit(cred.vaultId, 'attachments')) return;
+      const limits = accountService.getLimits();
+      for (const file of files) {
+        if (file.size > limits.maxAttachmentBytes) {
+          this.showToast(tr(`${file.name} dépasse ${Math.round(limits.maxAttachmentBytes / 1048576)} Mo`, `${file.name} is larger than ${Math.round(limits.maxAttachmentBytes / 1048576)} MB`), 'error');
+          continue;
+        }
+        try {
+          const { payload, key } = await encryptFile(new Uint8Array(await file.arrayBuffer()));
+          const uploaded = await accountService.withCloud(client => client.uploadAttachment(payload, sharedId));
+          const meta: AttachmentMeta = { id: uploaded.id, name: file.name, size: file.size, type: file.type, key, createdAt: Date.now() };
+          vaultStore.updateCredential(cred.id, { attachments: [...(current()?.attachments ?? []), meta] });
+          this.showToast(tr(`${file.name} ajouté`, `${file.name} added`), 'success');
+        } catch (err) {
+          this.showToast(`${file.name} : ${accountErrorMessage(err)}`, 'error');
+        }
+      }
+    });
+
+    container.querySelectorAll<HTMLButtonElement>('[data-attachment-action]').forEach(button => {
+      button.addEventListener('click', async () => {
+        const id = button.closest<HTMLElement>('[data-attachment]')?.dataset.attachment;
+        const meta = current()?.attachments?.find(a => a.id === id);
+        if (!meta) return;
+        if (button.dataset.attachmentAction === 'download') {
+          button.disabled = true;
+          try {
+            const payload = await accountService.withCloud(client => client.downloadAttachment(meta.id));
+            downloadExportFile(await decryptFile(payload, meta.key), meta.name, meta.type || 'application/octet-stream');
+          } catch (err) {
+            this.showToast(accountErrorMessage(err), 'error');
+          } finally {
+            button.disabled = false;
+          }
+          return;
+        }
+        if (!this.canEdit(cred.vaultId, 'attachments')) return;
+        const confirmed = await this.confirmDialog({
+          title: tr('Supprimer la pièce jointe ?', 'Delete attachment?'),
+          message: tr(`${meta.name} sera supprimé du serveur.`, `${meta.name} will be deleted from the server.`),
+          confirmLabel: tr('Supprimer', 'Delete'),
+          danger: true
+        });
+        if (!confirmed) return;
+        try {
+          await accountService.withCloud(client => client.deleteAttachment(meta.id)).catch(err => {
+            if (!(err instanceof Error && 'status' in err && (err as { status: number }).status === 404)) throw err;
+          });
+          vaultStore.updateCredential(cred.id, { attachments: (current()?.attachments ?? []).filter(a => a.id !== meta.id) });
+        } catch (err) {
+          this.showToast(accountErrorMessage(err), 'error');
+        }
+      });
+    });
+  }
+
   private showApp(data: UnlockedVaultData): void {
     vaultStore.load(data);
-    vaultStore.setPersistence(snapshot => void accountService.save(snapshot));
+    vaultStore.setPersistence(snapshot => void accountService.save(sharedVaults.split(snapshot)));
+    void this.refreshSharedVaults();
     this.selectedItemId = null;
     this.activeTag = null;
     (document.getElementById('app') as HTMLElement).hidden = false;
@@ -3566,6 +3783,8 @@ class AppController {
   private lockApp(): void {
     if (!accountService.isUnlocked()) return;
     accountService.lock();
+    sharedVaults.clear();
+    this.renderInvitations();
     vaultStore.setPersistence(null);
     vaultStore.unload();
     this.closeModal();
@@ -3599,6 +3818,8 @@ class AppController {
     if (!confirmed) return;
 
     await accountService.signOut();
+    sharedVaults.clear();
+    this.renderInvitations();
     vaultStore.setPersistence(null);
     vaultStore.unload();
     this.closeModal();
@@ -4079,10 +4300,15 @@ class AppController {
   private openVaultModal(vaultId?: string): void {
     const data = vaultStore.getData();
     const existing = vaultId ? data.vaults.find(v => v.id === vaultId) : undefined;
+    const shared = existing?.shared ? sharedVaults.summary(existing.id) : undefined;
     const credentialCount = existing ? data.credentials.filter(c => c.vaultId === existing.id).length : 0;
     const taskCount = existing ? data.tasks.filter(t => t.vaultId === existing.id).length : 0;
     const limits = accountService.getLimits();
     const tr = (fr: string, en: string) => this.tr(fr, en);
+    const cloud = accountService.isCloud();
+    const permissions = new Set<SharedPermission>(shared?.role.permissions ?? ['write', 'attachments', 'export', 'manage_members', 'manage_roles', 'delete_vault']);
+    const isOwner = !shared || shared.role.builtin === 'owner';
+    const personalCount = data.vaults.filter(v => !v.shared).length;
     const typeOption = (type: 'personal' | 'work' | 'team', label: string) =>
       `<option value="${type}" ${existing?.type === type ? 'selected' : ''}>${label}</option>`;
 
@@ -4094,47 +4320,127 @@ class AppController {
     let icon: ItemIcon | undefined = existing?.icon;
     const box = this.openModal(`
       <div class="modal-header">
-        <div class="modal-title">${existing ? tr('Modifier le coffre', 'Edit vault') : i18n.t.vault.newVaultModalTitle}</div>
+        <div class="modal-title">${existing ? this.escapeHtml(existing.name) : i18n.t.vault.newVaultModalTitle}</div>
         <button class="modal-close">${GEN_ICONS.close}</button>
       </div>
       <div class="modal-body">
-        <div class="cred-identity">
-          <button type="button" class="cred-icon-button" data-icon-button aria-expanded="false" title="${tr('Choisir une icône', 'Choose an icon')}" aria-label="${tr('Choisir une icône', 'Choose an icon')}">
-            <span data-icon-preview style="display:flex;"></span>
-            <span class="cred-icon-edit">${ACTION_ICONS.edit}</span>
-          </button>
-          <div class="form-field">
-            <label class="form-label" for="vault-name">${i18n.t.vault.vaultNameLabel}</label>
-            <input class="form-input cred-title-input" id="vault-name" type="text" maxlength="40" value="${this.escapeHtml(existing?.name ?? '')}" placeholder="${tr('Personnel, Travail, Famille…', 'Personal, Work, Family…')}" autocomplete="off" data-autofocus>
-          </div>
-        </div>
-        <div data-icon-panel hidden></div>
-        <div class="form-field">
-          <label class="form-label" for="vault-type">${i18n.t.vault.vaultTypeLabel}</label>
-          <select class="form-input" id="vault-type">
-            ${typeOption('personal', i18n.t.common.personal)}
-            ${typeOption('work', i18n.t.common.work)}
-            ${typeOption('team', i18n.t.common.team)}
-          </select>
-        </div>
-        ${existing && data.vaults.length > 1 ? `
-          <section class="account-section account-danger">
-            <h3 class="account-section-title">${tr('Supprimer ce coffre', 'Delete this vault')}</h3>
-            <p class="modal-text">${tr(`${credentialCount} identifiant(s) et ${taskCount} tâche(s) seront supprimés.`, `${credentialCount} credential(s) and ${taskCount} task(s) will be deleted.`)}</p>
-            <div class="account-actions account-actions-end">
-              <button class="btn-primary btn-danger" data-action="delete-vault">${tr('Supprimer le coffre', 'Delete vault')}</button>
+        ${shared ? `
+          <div class="tab-btn-group" role="tablist">
+            <button type="button" class="tab-btn active" data-tab="general" role="tab">${tr('Général', 'General')}</button>
+            <button type="button" class="tab-btn" data-tab="members" role="tab">${tr('Membres', 'Members')}</button>
+            <button type="button" class="tab-btn" data-tab="roles" role="tab">${tr('Rôles', 'Roles')}</button>
+          </div>` : ''}
+
+        <div data-panel="general" style="display:flex;flex-direction:column;gap:16px;">
+          ${shared ? `<div class="notice">${tr('Coffre partagé par', 'Vault shared by')} <strong>${this.escapeHtml(shared.ownerEmail)}</strong> · ${tr('votre rôle', 'your role')} : <strong>${this.escapeHtml(this.roleLabel(shared.role))}</strong></div>` : ''}
+          <div class="cred-identity">
+            <button type="button" class="cred-icon-button" data-icon-button aria-expanded="false" title="${tr('Choisir une icône', 'Choose an icon')}" aria-label="${tr('Choisir une icône', 'Choose an icon')}" ${permissions.has('write') ? '' : 'disabled'}>
+              <span data-icon-preview style="display:flex;"></span>
+              <span class="cred-icon-edit">${ACTION_ICONS.edit}</span>
+            </button>
+            <div class="form-field">
+              <label class="form-label" for="vault-name">${i18n.t.vault.vaultNameLabel}</label>
+              <input class="form-input cred-title-input" id="vault-name" type="text" maxlength="40" value="${this.escapeHtml(existing?.name ?? '')}" placeholder="${tr('Personnel, Travail, Famille…', 'Personal, Work, Family…')}" autocomplete="off" data-autofocus ${permissions.has('write') ? '' : 'disabled'}>
             </div>
-          </section>` : ''}
+          </div>
+          <div data-icon-panel hidden></div>
+          <div class="form-field">
+            <label class="form-label" for="vault-type">${i18n.t.vault.vaultTypeLabel}</label>
+            <select class="form-input" id="vault-type" ${permissions.has('write') ? '' : 'disabled'}>
+              ${typeOption('personal', i18n.t.common.personal)}
+              ${typeOption('work', i18n.t.common.work)}
+              ${typeOption('team', i18n.t.common.team)}
+            </select>
+          </div>
+
+          ${!existing && cloud ? `
+            <label class="switch-row">
+              <span>${tr('Coffre partagé', 'Shared vault')}<small>${tr('Invitez d’autres comptes de ce serveur et choisissez leur rôle', 'Invite other accounts on this server and pick their role')}</small></span>
+              <input type="checkbox" class="switch" id="vault-shared">
+            </label>` : ''}
+
+          ${existing && !shared && cloud ? `
+            <section class="account-section">
+              <h3 class="account-section-title">${tr('Partager ce coffre', 'Share this vault')}</h3>
+              <p class="modal-text">${tr(`Ses ${credentialCount} identifiant(s) et ${taskCount} tâche(s) deviennent un coffre partagé, chiffré avec une nouvelle clé. Vous en êtes propriétaire.`, `Its ${credentialCount} credential(s) and ${taskCount} task(s) become a shared vault encrypted with a new key. You own it.`)}</p>
+              <div class="account-actions account-actions-end">
+                <button class="btn-primary" data-action="share-existing" ${personalCount <= 1 ? 'disabled' : ''}>${tr('Transformer en coffre partagé', 'Turn into a shared vault')}</button>
+              </div>
+              ${personalCount <= 1 ? `<div class="field-hint">${tr('Gardez au moins un autre coffre personnel.', 'Keep at least one other personal vault.')}</div>` : ''}
+            </section>` : ''}
+
+          ${existing && !shared && data.vaults.filter(v => !v.shared).length > 1 ? `
+            <section class="account-section account-danger">
+              <h3 class="account-section-title">${tr('Supprimer ce coffre', 'Delete this vault')}</h3>
+              <p class="modal-text">${tr(`${credentialCount} identifiant(s) et ${taskCount} tâche(s) seront supprimés.`, `${credentialCount} credential(s) and ${taskCount} task(s) will be deleted.`)}</p>
+              <div class="account-actions account-actions-end">
+                <button class="btn-primary btn-danger" data-action="delete-vault">${tr('Supprimer le coffre', 'Delete vault')}</button>
+              </div>
+            </section>` : ''}
+
+          ${shared ? `
+            <section class="account-section account-danger">
+              <h3 class="account-section-title">${isOwner ? tr('Supprimer le coffre partagé', 'Delete shared vault') : tr('Quitter le coffre', 'Leave vault')}</h3>
+              <p class="modal-text">${isOwner
+                ? tr('Le coffre, ses pièces jointes et l’accès de tous les membres seront supprimés.', 'The vault, its attachments and every member’s access will be deleted.')
+                : tr('Vous perdez l’accès à ce coffre. Un membre autorisé pourra vous réinviter.', 'You lose access to this vault. An authorized member can invite you again.')}</p>
+              <div class="account-actions account-actions-end">
+                ${isOwner
+                  ? (permissions.has('delete_vault') ? `<button class="btn-primary btn-danger" data-action="delete-shared">${tr('Supprimer', 'Delete')}</button>` : '')
+                  : `<button class="btn-primary btn-danger" data-action="leave-shared">${tr('Quitter', 'Leave')}</button>`}
+              </div>
+            </section>` : ''}
+        </div>
+
+        ${shared ? `
+          <div data-panel="members" hidden style="display:flex;flex-direction:column;gap:12px;">
+            ${permissions.has('manage_members') ? `
+              <form class="form-section" data-invite>
+                <div class="form-section-title">${tr('Inviter un compte', 'Invite an account')}</div>
+                <div class="form-row" style="grid-template-columns:minmax(0,1fr) auto;">
+                  <input class="form-input" type="email" data-invite-email placeholder="${tr('Email du compte BetterVault', 'BetterVault account email')}" autocomplete="off">
+                  <button class="btn-primary" type="submit">${tr('Rechercher', 'Look up')}</button>
+                </div>
+                <div data-invite-found hidden></div>
+              </form>` : ''}
+            <div class="member-list" data-members><div class="icon-picker-loading"></div></div>
+          </div>
+
+          <div data-panel="roles" hidden style="display:flex;flex-direction:column;gap:12px;">
+            <p class="modal-text">${tr('Les rôles décident de qui peut modifier, gérer les membres ou supprimer. Toute personne membre peut lire le contenu du coffre.', 'Roles decide who can edit, manage members or delete. Every member can read the vault content.')}</p>
+            <div class="role-list" data-roles></div>
+            ${permissions.has('manage_roles') ? `
+              <form class="form-section" data-role-create>
+                <div class="form-section-title">${tr('Nouveau rôle', 'New role')}</div>
+                <input class="form-input" data-role-name maxlength="40" placeholder="${tr('Nom du rôle', 'Role name')}">
+                <div class="permission-grid" data-role-permissions></div>
+                <div class="account-actions account-actions-end"><button class="btn-primary btn-accent" type="submit">${tr('Créer le rôle', 'Create role')}</button></div>
+              </form>` : ''}
+          </div>` : ''}
       </div>
       <div class="modal-footer">
         <button class="btn-primary" data-close>${i18n.t.common.cancel}</button>
-        <button class="btn-primary" id="modal-confirm">${existing ? tr('Enregistrer', 'Save') : i18n.t.vault.createVaultButton}</button>
+        ${!shared || permissions.has('write') ? `<button class="btn-primary" id="modal-confirm">${existing ? tr('Enregistrer', 'Save') : i18n.t.vault.createVaultButton}</button>` : ''}
       </div>
     `);
 
-    const preview = box.querySelector('[data-icon-preview]') as HTMLElement;
-    const panel = box.querySelector('[data-icon-panel]') as HTMLElement;
-    const iconButton = box.querySelector('[data-icon-button]') as HTMLButtonElement;
+    const $ = <T extends HTMLElement>(selector: string) => box.querySelector(selector) as T | null;
+
+    // Onglets
+    box.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(tab => {
+      tab.addEventListener('click', () => {
+        box.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(t => t.classList.toggle('active', t === tab));
+        box.querySelectorAll<HTMLElement>('[data-panel]').forEach(panel => { panel.hidden = panel.dataset.panel !== tab.dataset.tab; });
+        const confirm = $<HTMLButtonElement>('#modal-confirm');
+        if (confirm) confirm.hidden = tab.dataset.tab !== 'general';
+        if (tab.dataset.tab === 'members' || tab.dataset.tab === 'roles') void loadMembers();
+      });
+    });
+
+    // Icône
+    const preview = $<HTMLElement>('[data-icon-preview]')!;
+    const panel = $<HTMLElement>('[data-icon-panel]')!;
+    const iconButton = $<HTMLButtonElement>('[data-icon-button]')!;
     const renderPreview = () => { preview.innerHTML = icon ? renderItemIcon(icon, 28) : VAULT_ICON.replace(/width="15" height="15"/, 'width="28" height="28"'); };
     const closePanel = () => {
       panel.hidden = true;
@@ -4146,40 +4452,71 @@ class AppController {
       if (!panel.hidden) return closePanel();
       panel.hidden = false;
       iconButton.setAttribute('aria-expanded', 'true');
-      mountIconPicker(panel, {
-        tr,
-        current: icon,
-        initialSet: 'lucide',
-        onPick: picked => {
-          icon = picked;
-          renderPreview();
-          closePanel();
-          iconButton.focus();
-        }
-      }).focus();
+      mountIconPicker(panel, { tr, current: icon, initialSet: 'lucide', onPick: picked => { icon = picked; renderPreview(); closePanel(); iconButton.focus(); } }).focus();
     });
     renderPreview();
 
-    box.querySelector('#modal-confirm')?.addEventListener('click', () => {
-      const name = (box.querySelector('#vault-name') as HTMLInputElement).value.trim();
-      const type = (box.querySelector('#vault-type') as HTMLSelectElement).value as 'personal' | 'work' | 'team';
+    $<HTMLButtonElement>('#modal-confirm')?.addEventListener('click', async event => {
+      const button = event.currentTarget as HTMLButtonElement;
+      const name = ($<HTMLInputElement>('#vault-name')?.value ?? '').trim();
+      const type = $<HTMLSelectElement>('#vault-type')!.value as 'personal' | 'work' | 'team';
       if (!name) {
         this.showToast(tr('Donnez un nom au coffre', 'Give the vault a name'), 'error');
         return;
       }
       if (existing) {
         vaultStore.updateVault(existing.id, { name, type, icon });
+        this.closeModal();
         this.showToast(tr('Coffre enregistré', 'Vault saved'), 'success');
-      } else {
-        vaultStore.addVault(name, type, icon);
-        this.selectedItemId = null;
-        this.renderDetail(null);
-        this.showToast(tr(`Coffre ${name} créé`, `Vault ${name} created`), 'success');
+        return;
       }
+      if ($<HTMLInputElement>('#vault-shared')?.checked) {
+        button.disabled = true;
+        try {
+          const id = await sharedVaults.create(name, type, icon);
+          this.reloadWithShared();
+          vaultStore.setActiveVault(id);
+          this.closeModal();
+          this.showToast(tr(`Coffre partagé ${name} créé. Invitez des membres depuis ses réglages.`, `Shared vault ${name} created. Invite members from its settings.`), 'success', 5000);
+          this.openVaultModal(id);
+        } catch (err) {
+          button.disabled = false;
+          this.showToast(accountErrorMessage(err), 'error');
+        }
+        return;
+      }
+      vaultStore.addVault(name, type, icon);
+      this.selectedItemId = null;
+      this.renderDetail(null);
       this.closeModal();
+      this.showToast(tr(`Coffre ${name} créé`, `Vault ${name} created`), 'success');
     });
 
-    box.querySelector('[data-action="delete-vault"]')?.addEventListener('click', async () => {
+    $<HTMLButtonElement>('[data-action="share-existing"]')?.addEventListener('click', async event => {
+      if (!existing) return;
+      const confirmed = await this.confirmDialog({
+        title: tr('Transformer en coffre partagé ?', 'Turn into a shared vault?'),
+        message: tr('Le contenu est déplacé dans un coffre partagé. Vous pourrez ensuite inviter des membres.', 'The content moves to a shared vault. You can then invite members.'),
+        confirmLabel: tr('Transformer', 'Convert')
+      });
+      if (!confirmed) return;
+      const button = event.currentTarget as HTMLButtonElement;
+      button.disabled = true;
+      try {
+        const id = await sharedVaults.shareExisting(vaultStore.getData(), existing.id);
+        vaultStore.removeVaultSilently(existing.id);
+        await accountService.flush();
+        this.reloadWithShared();
+        vaultStore.setActiveVault(id);
+        this.closeModal();
+        this.openVaultModal(id);
+      } catch (err) {
+        button.disabled = false;
+        this.showToast(accountErrorMessage(err), 'error');
+      }
+    });
+
+    $<HTMLButtonElement>('[data-action="delete-vault"]')?.addEventListener('click', async () => {
       if (!existing) return;
       const confirmed = await this.confirmDialog({
         title: tr('Supprimer le coffre ?', 'Delete vault?'),
@@ -4193,6 +4530,251 @@ class AppController {
       this.renderDetail(null);
       this.closeModal();
       this.showToast(tr('Coffre supprimé', 'Vault deleted'), 'success');
+    });
+
+    const leaveOrDelete = async (kind: 'delete' | 'leave') => {
+      if (!existing) return;
+      const confirmed = await this.confirmDialog({
+        title: kind === 'delete' ? tr('Supprimer le coffre partagé ?', 'Delete shared vault?') : tr('Quitter le coffre ?', 'Leave vault?'),
+        message: kind === 'delete'
+          ? tr(`« ${existing.name} » sera supprimé pour tous ses membres.`, `"${existing.name}" will be deleted for all members.`)
+          : tr(`Vous n’aurez plus accès à « ${existing.name} ».`, `You will no longer have access to "${existing.name}".`),
+        confirmLabel: kind === 'delete' ? tr('Supprimer', 'Delete') : tr('Quitter', 'Leave'),
+        danger: true
+      });
+      if (!confirmed) return;
+      try {
+        if (kind === 'delete') await sharedVaults.deleteVault(existing.id);
+        else await sharedVaults.leave(existing.id);
+        this.selectedItemId = null;
+        this.reloadWithShared();
+        this.renderDetail(null);
+        this.closeModal();
+      } catch (err) {
+        this.showToast(accountErrorMessage(err), 'error');
+      }
+    };
+    $<HTMLButtonElement>('[data-action="delete-shared"]')?.addEventListener('click', () => void leaveOrDelete('delete'));
+    $<HTMLButtonElement>('[data-action="leave-shared"]')?.addEventListener('click', () => void leaveOrDelete('leave'));
+
+    if (!shared || !existing) return;
+
+    /* ── Membres et rôles ── */
+    const PERMISSION_LABELS: Record<SharedPermission, string> = {
+      write: tr('Ajouter et modifier', 'Add and edit'),
+      attachments: tr('Pièces jointes', 'Attachments'),
+      export: tr('Exporter', 'Export'),
+      manage_members: tr('Gérer les membres', 'Manage members'),
+      manage_roles: tr('Gérer les rôles', 'Manage roles'),
+      delete_vault: tr('Supprimer le coffre', 'Delete the vault')
+    };
+    const EDITABLE_PERMISSIONS: SharedPermission[] = ['write', 'attachments', 'export', 'manage_members', 'manage_roles'];
+    let roles: SharedRole[] = [];
+    let members: SharedMember[] = [];
+    const myEmail = accountService.getAccount()?.email ?? '';
+
+    const roleOptions = (selected: string, includeOwner: boolean) => roles
+      .filter(r => includeOwner || r.builtin !== 'owner')
+      .map(r => `<option value="${r.id}" ${r.id === selected ? 'selected' : ''}>${this.escapeHtml(this.roleLabel(r))}</option>`).join('');
+
+    const renderMembers = () => {
+      const host = $<HTMLElement>('[data-members]')!;
+      host.innerHTML = members.map(member => {
+        const role = roles.find(r => r.id === member.roleId);
+        const self = member.email === myEmail;
+        const editable = permissions.has('manage_members') && role?.builtin !== 'owner' && !self;
+        return `
+          <div class="member-row" data-user="${member.userId}">
+            <div class="member-avatar">${this.escapeHtml(member.email.charAt(0).toUpperCase())}</div>
+            <div class="member-main">
+              <div class="member-email">${this.escapeHtml(member.email)}${self ? ` <span class="field-hint">(${tr('vous', 'you')})</span>` : ''}</div>
+              <div class="field-hint">${member.status === 'invited' ? `<span class="status-pill off">${tr('Invitation envoyée', 'Invitation sent')}</span>` : ''}
+                <button type="button" class="link-btn" data-fingerprint="${member.publicKey ?? ''}">${tr('Empreinte de clé', 'Key fingerprint')}</button></div>
+            </div>
+            ${editable
+              ? `<select class="form-input member-role" data-role-select>${roleOptions(member.roleId, isOwner && member.status === 'active')}</select>
+                 <button type="button" class="icon-btn" data-remove title="${tr('Retirer', 'Remove')}" aria-label="${tr('Retirer', 'Remove')}">${ACTION_ICONS.trash}</button>`
+              : `<span class="vault-type-badge shared">${this.escapeHtml(role ? this.roleLabel(role) : '')}</span>`}
+          </div>`;
+      }).join('');
+    };
+
+    const permissionChecks = (selected: SharedPermission[], disabled: boolean) => EDITABLE_PERMISSIONS.map(p => `
+      <label class="check-row"><input type="checkbox" value="${p}" ${selected.includes(p) ? 'checked' : ''} ${disabled ? 'disabled' : ''}> ${PERMISSION_LABELS[p]}</label>`).join('');
+
+    const renderRoles = () => {
+      const host = $<HTMLElement>('[data-roles]')!;
+      host.innerHTML = roles.map(role => {
+        const editable = permissions.has('manage_roles') && !role.builtin;
+        const usedBy = members.filter(m => m.roleId === role.id).length;
+        return `
+          <div class="form-section role-card" data-role="${role.id}">
+            <div class="form-section-head">
+              ${editable
+                ? `<input class="form-input" data-role-rename value="${this.escapeHtml(role.name)}" maxlength="40" style="max-width:240px;">`
+                : `<div class="form-section-title">${this.escapeHtml(this.roleLabel(role))}${role.builtin ? ` <span class="field-hint">${tr('prédéfini', 'built-in')}</span>` : ''}</div>`}
+              <span class="field-hint">${tr(`${usedBy} membre${usedBy > 1 ? 's' : ''}`, `${usedBy} member${usedBy === 1 ? '' : 's'}`)}</span>
+            </div>
+            ${role.builtin === 'owner'
+              ? `<div class="field-hint">${tr('Toutes les permissions, dont la suppression du coffre.', 'All permissions, including deleting the vault.')}</div>`
+              : `<div class="permission-grid">${permissionChecks(role.permissions, !editable)}</div>`}
+            ${role.builtin === 'viewer' ? `<div class="field-hint">${tr('Lecture seule.', 'Read only.')}</div>` : ''}
+            ${editable ? `<div class="account-actions account-actions-end"><button type="button" class="btn-primary btn-ghost" data-role-delete>${tr('Supprimer', 'Delete')}</button><button type="button" class="btn-primary" data-role-save>${tr('Enregistrer', 'Save')}</button></div>` : ''}
+          </div>`;
+      }).join('');
+      const create = $<HTMLElement>('[data-role-permissions]');
+      if (create && !create.childElementCount) create.innerHTML = permissionChecks(['write'], false);
+    };
+
+    const loadMembers = async () => {
+      try {
+        const result = await sharedVaults.members(existing.id);
+        roles = result.roles;
+        members = result.members;
+        renderMembers();
+        renderRoles();
+      } catch (err) {
+        $<HTMLElement>('[data-members]')!.innerHTML = `<div class="notice notice-danger">${this.escapeHtml(accountErrorMessage(err))}</div>`;
+      }
+    };
+
+    // Invitation : recherche du compte, affichage de l'empreinte, choix du rôle
+    const inviteForm = $<HTMLFormElement>('[data-invite]');
+    inviteForm?.addEventListener('submit', async e => {
+      e.preventDefault();
+      const found = $<HTMLElement>('[data-invite-found]')!;
+      const email = $<HTMLInputElement>('[data-invite-email]')!.value.trim();
+      found.hidden = false;
+      found.innerHTML = `<div class="field-hint">${tr('Recherche…', 'Looking up…')}</div>`;
+      try {
+        if (!roles.length) await loadMembers();
+        const user = await sharedVaults.lookup(email);
+        found.innerHTML = `
+          <div class="invite-card">
+            <div><strong>${this.escapeHtml(user.email)}</strong></div>
+            <div class="field-hint">${tr('Empreinte de sa clé : vérifiez-la avec la personne (appel, message) avant d’inviter.', 'Key fingerprint: check it with the person (call, message) before inviting.')}</div>
+            <code class="secret-text">${user.fingerprint}</code>
+            <div class="form-row" style="grid-template-columns:minmax(0,1fr) auto;">
+              <select class="form-input" data-invite-role>${roleOptions(roles.find(r => r.builtin === 'editor')?.id ?? '', false)}</select>
+              <button type="button" class="btn-primary btn-accent" data-invite-send>${tr('Inviter', 'Invite')}</button>
+            </div>
+          </div>`;
+        found.querySelector<HTMLButtonElement>('[data-invite-send]')?.addEventListener('click', async ev => {
+          const button = ev.currentTarget as HTMLButtonElement;
+          button.disabled = true;
+          try {
+            await sharedVaults.invite(existing.id, user, found.querySelector<HTMLSelectElement>('[data-invite-role]')!.value);
+            found.hidden = true;
+            $<HTMLInputElement>('[data-invite-email]')!.value = '';
+            this.showToast(tr(`Invitation envoyée à ${user.email}`, `Invitation sent to ${user.email}`), 'success');
+            await loadMembers();
+          } catch (err) {
+            button.disabled = false;
+            this.showToast(accountErrorMessage(err), 'error');
+          }
+        });
+      } catch (err) {
+        found.innerHTML = `<div class="notice notice-danger">${this.escapeHtml(accountErrorMessage(err))}</div>`;
+      }
+    });
+
+    const membersHost = $<HTMLElement>('[data-members]')!;
+    membersHost.addEventListener('click', async e => {
+      const target = e.target as HTMLElement;
+      const fingerprintButton = target.closest<HTMLButtonElement>('[data-fingerprint]');
+      if (fingerprintButton) {
+        const key = fingerprintButton.dataset.fingerprint;
+        fingerprintButton.textContent = key ? await sharedVaults.fingerprintOf(key) : tr('Pas de clé', 'No key');
+        return;
+      }
+      if (!target.closest('[data-remove]')) return;
+      const userId = target.closest<HTMLElement>('[data-user]')?.dataset.user;
+      const member = members.find(m => m.userId === userId);
+      if (!member) return;
+      const confirmed = await this.confirmDialog({
+        title: tr('Retirer ce membre ?', 'Remove this member?'),
+        message: tr(`${member.email} perd l’accès. Le coffre est rechiffré avec une nouvelle clé pour les membres restants.`, `${member.email} loses access. The vault is re-encrypted with a new key for the remaining members.`),
+        confirmLabel: tr('Retirer', 'Remove'),
+        danger: true
+      });
+      if (!confirmed) return;
+      try {
+        await sharedVaults.removeMember(existing.id, member.userId);
+        this.showToast(tr(`${member.email} retiré, nouvelle clé en place`, `${member.email} removed, new key in place`), 'success');
+        await loadMembers();
+      } catch (err) {
+        this.showToast(accountErrorMessage(err), 'error');
+      }
+    });
+    membersHost.addEventListener('change', async e => {
+      const select = (e.target as HTMLElement).closest<HTMLSelectElement>('[data-role-select]');
+      const userId = select?.closest<HTMLElement>('[data-user]')?.dataset.user;
+      const member = members.find(m => m.userId === userId);
+      const role = roles.find(r => r.id === select?.value);
+      if (!select || !member || !role) return;
+      if (role.builtin === 'owner') {
+        const confirmed = await this.confirmDialog({
+          title: tr('Transférer la propriété ?', 'Transfer ownership?'),
+          message: tr(`${member.email} devient propriétaire. Vous passez administrateur.`, `${member.email} becomes owner. You become administrator.`),
+          confirmLabel: tr('Transférer', 'Transfer'),
+          danger: true
+        });
+        if (!confirmed) {
+          select.value = member.roleId;
+          return;
+        }
+      }
+      try {
+        await sharedVaults.changeRole(existing.id, member.userId, role.id);
+        this.reloadWithShared();
+        if (role.builtin === 'owner') {
+          this.closeModal();
+          this.openVaultModal(existing.id);
+          return;
+        }
+        await loadMembers();
+      } catch (err) {
+        select.value = member.roleId;
+        this.showToast(accountErrorMessage(err), 'error');
+      }
+    });
+
+    const rolesHost = $<HTMLElement>('[data-roles]')!;
+    rolesHost.addEventListener('click', async e => {
+      const target = e.target as HTMLElement;
+      const card = target.closest<HTMLElement>('[data-role]');
+      const roleId = card?.dataset.role;
+      if (!card || !roleId) return;
+      try {
+        if (target.closest('[data-role-save]')) {
+          const name = card.querySelector<HTMLInputElement>('[data-role-rename]')?.value.trim();
+          const selected = [...card.querySelectorAll<HTMLInputElement>('.permission-grid input:checked')].map(i => i.value as SharedPermission);
+          await sharedVaults.updateRole(existing.id, roleId, { name, permissions: selected });
+          this.showToast(tr('Rôle enregistré', 'Role saved'), 'success');
+          await loadMembers();
+        } else if (target.closest('[data-role-delete]')) {
+          await sharedVaults.deleteRole(existing.id, roleId);
+          await loadMembers();
+        }
+      } catch (err) {
+        this.showToast(accountErrorMessage(err), 'error');
+      }
+    });
+
+    $<HTMLFormElement>('[data-role-create]')?.addEventListener('submit', async e => {
+      e.preventDefault();
+      const form = e.currentTarget as HTMLFormElement;
+      const name = form.querySelector<HTMLInputElement>('[data-role-name]')!.value.trim();
+      const selected = [...form.querySelectorAll<HTMLInputElement>('[data-role-permissions] input:checked')].map(i => i.value as SharedPermission);
+      if (!name) return this.showToast(tr('Donnez un nom au rôle', 'Give the role a name'), 'error');
+      try {
+        await sharedVaults.createRole(existing.id, name, selected);
+        form.querySelector<HTMLInputElement>('[data-role-name]')!.value = '';
+        this.showToast(tr(`Rôle ${name} créé`, `Role ${name} created`), 'success');
+        await loadMembers();
+      } catch (err) {
+        this.showToast(accountErrorMessage(err), 'error');
+      }
     });
   }
 
@@ -4449,6 +5031,7 @@ createDeviceStorage().then(storage => {
   const surface = extensionSurface();
   if (surface) document.body.classList.add(`ext-${surface}`);
   accountService = new AccountService({ storage, sessionStore: extensionSessionStore() });
+  sharedVaults = new SharedVaultManager(accountService);
   new AppController();
 }).catch(err => {
   // Ne jamais démarrer sur un stockage vide : un nouveau compte écraserait le fichier existant

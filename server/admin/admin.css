@@ -100,6 +100,12 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 0;
 .stat-value { font-size: 22px; font-weight: 700; }
 .stat-label { font-size: 12px; color: var(--muted); }
 
+.runs { display: grid; gap: 6px; margin-top: 12px; font-size: 12px; }
+.run { display: grid; grid-template-columns: 150px 90px 1fr; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; }
+.run .ok { color: var(--ok); }
+.run .fail { color: var(--danger); }
+@media (max-width: 720px) { .run { grid-template-columns: 1fr; } }
+
 .actions { display: flex; align-items: center; justify-content: flex-end; gap: 16px; }
 .actions .status { margin: 0; }
 

@@ -26,6 +26,7 @@ import {
 } from './accountCrypto';
 import { CloudClient, CloudError, type AccountInfo } from './cloudClient';
 import { sanitizeLimits, type VaultLimits } from './limits';
+import { generateSharingKeyPair, unwrapPrivateKey, wrapPrivateKey, type SharingKeyPair } from './sharingCrypto';
 import { mergeVaultData } from './merge';
 
 async function createRecoveryMaterial(rawVaultKey: Uint8Array): Promise<{ recoveryKey: string; authHash: string; wrappedVaultKey: EncryptedBlob }> {
@@ -130,6 +131,7 @@ export class AccountService {
   private readonly locale: () => 'fr' | 'en';
 
   private vaultKey: CryptoKey | null = null;
+  private sharingKeys: SharingKeyPair | null = null;
   private authHash: string | null = null;
   private cloud: CloudClient | null = null;
   private latestData: UnlockedVaultData | null = null;
@@ -358,6 +360,8 @@ export class AccountService {
     if (this.pushTimer) clearTimeout(this.pushTimer);
     this.pushTimer = null;
     this.vaultKey = null;
+    this.sharingKeys?.privateKey.fill(0);
+    this.sharingKeys = null;
     this.authHash = null;
     this.latestData = null;
     this.cloud = null;
@@ -610,6 +614,41 @@ export class AccountService {
     this.authHash = keys.authHash;
     this.setSyncState({ status: 'synced', lastSyncAt: Date.now() });
     return { recoveryKey: recovery.recoveryKey };
+  }
+
+  /* ── Partage et pièces jointes ─────────────────────────────────────── */
+
+  /** Dernière version du coffre personnel déchiffré (enregistrée ou reçue du serveur) */
+  getLatestData(): UnlockedVaultData | null {
+    return this.latestData;
+  }
+
+  isCloud(): boolean {
+    return this.getAccount()?.mode === 'cloud';
+  }
+
+  /** Appel au serveur avec renouvellement automatique de la session */
+  withCloud<T>(operation: (client: CloudClient) => Promise<T>): Promise<T> {
+    const client = this.cloudClient();
+    return this.withSessionRetry(() => operation(client));
+  }
+
+  /** Clés de partage X25519 du compte : créées au premier besoin, clé privée chiffrée par la clé du coffre */
+  async getSharingKeys(): Promise<SharingKeyPair> {
+    if (this.sharingKeys) return this.sharingKeys;
+    const vaultKey = this.vaultKey;
+    if (!vaultKey) throw new Error('Coffre verrouillé');
+    const remote = await this.withCloud(client => client.getSharingKeys());
+    let pair: SharingKeyPair;
+    if (remote.publicKey && remote.wrappedPrivateKey) {
+      pair = { publicKey: fromBase64(remote.publicKey), privateKey: await unwrapPrivateKey(vaultKey, remote.wrappedPrivateKey) };
+    } else {
+      pair = generateSharingKeyPair();
+      const wrapped = await wrapPrivateKey(vaultKey, pair.privateKey);
+      await this.withCloud(client => client.setSharingKeys(toBase64(pair.publicKey), wrapped));
+    }
+    this.sharingKeys = pair;
+    return pair;
   }
 
   /* ── Limites, double authentification, clé de secours ──────────────── */

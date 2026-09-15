@@ -30,6 +30,19 @@ services:
       LIMIT_MAX_CUSTOM_FIELDS: ${LIMIT_MAX_CUSTOM_FIELDS:-}
       LIMIT_MAX_TAGS_PER_ITEM: ${LIMIT_MAX_TAGS_PER_ITEM:-}
       LIMIT_MAX_VAULT_MB: ${LIMIT_MAX_VAULT_MB:-}
+      LIMIT_MAX_ATTACHMENT_MB: ${LIMIT_MAX_ATTACHMENT_MB:-}
+      LIMIT_ATTACHMENT_QUOTA_MB: ${LIMIT_ATTACHMENT_QUOTA_MB:-}
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-false}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      BACKUP_ENCRYPTION_KEY: ${BACKUP_ENCRYPTION_KEY:-}
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      BACKUP_S3_REGION: ${BACKUP_S3_REGION:-us-east-1}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-bettervault-backups}
+      BACKUP_S3_ACCESS_KEY: ${BACKUP_S3_ACCESS_KEY:-}
+      BACKUP_S3_SECRET_KEY: ${BACKUP_S3_SECRET_KEY:-}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-}
+      BACKUP_S3_PATH_STYLE: ${BACKUP_S3_PATH_STYLE:-true}
     volumes:
       - bettervault-data:/data
     ports:
@@ -56,7 +69,37 @@ services:
       - caddy-data:/data
       - caddy-config:/config
 
+  # Stockage S3 auto-hébergé pour les sauvegardes : docker compose --profile backup up -d
+  # Pour un S3 externe (AWS, Backblaze, Scaleway…), ne lancez pas ce profil et renseignez BACKUP_S3_ENDPOINT.
+  minio:
+    image: minio/minio:latest
+    profiles: ["backup"]
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${BACKUP_S3_ACCESS_KEY:-bettervault}
+      MINIO_ROOT_PASSWORD: ${BACKUP_S3_SECRET_KEY:-}
+    volumes:
+      - minio-data:/data
+    ports:
+      # Console web de MinIO, accessible depuis la machine hôte uniquement
+      - "127.0.0.1:9001:9001"
+
+  minio-init:
+    image: minio/mc:latest
+    profiles: ["backup"]
+    depends_on:
+      - minio
+    environment:
+      MINIO_ROOT_USER: ${BACKUP_S3_ACCESS_KEY:-bettervault}
+      MINIO_ROOT_PASSWORD: ${BACKUP_S3_SECRET_KEY:-}
+      BUCKET: ${BACKUP_S3_BUCKET:-bettervault-backups}
+    entrypoint: >
+      sh -c "until mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD >/dev/null 2>&1; do sleep 2; done;
+      mc mb --ignore-existing local/$$BUCKET && mc anonymous set none local/$$BUCKET"
+
 volumes:
   bettervault-data:
   caddy-data:
   caddy-config:
+  minio-data:

@@ -1,5 +1,6 @@
 import type { CredentialItem, Task, TagDef, UnlockedVaultData, VaultMetadata } from '../types/vault';
 import { normalizeItemIcon } from '../icons/iconLibrary';
+import { normalizeAttachments } from '../account/attachmentCrypto';
 
 export const DEFAULT_VAULT_NAME = 'Personnel';
 export const MAX_TAG_LENGTH = 32;
@@ -39,15 +40,17 @@ export function normalizeVaultData(input: Partial<UnlockedVaultData> | null | un
       name: v.name,
       type: v.type,
       ...(normalizeItemIcon(v.icon) ? { icon: normalizeItemIcon(v.icon) } : {}),
+      ...(v.shared ? { shared: v.shared } : {}),
       createdAt: v.createdAt ?? now,
       updatedAt: v.updatedAt ?? now
     })),
     activeVaultId: source.activeVaultId ?? '',
     // Les icônes viennent aussi d'imports et d'autres appareils : leur SVG est toujours re-nettoyé
     credentials: (Array.isArray(source.credentials) ? source.credentials : []).map(c => {
-      const { icon, ...rest } = c;
+      const { icon, attachments, ...rest } = c;
       const clean = normalizeItemIcon(icon);
-      return { ...rest, ...(clean ? { icon: clean } : {}), tags: Array.isArray(c.tags) ? c.tags : [] };
+      const files = normalizeAttachments(attachments);
+      return { ...rest, ...(clean ? { icon: clean } : {}), ...(files ? { attachments: files } : {}), tags: Array.isArray(c.tags) ? c.tags : [] };
     }),
     tasks: (Array.isArray(source.tasks) ? source.tasks : []).map(t => ({ ...t, tags: Array.isArray(t.tags) ? t.tags : [] })),
     tagDefs: Array.isArray(source.tagDefs) ? [...source.tagDefs] : [],
@@ -169,6 +172,19 @@ export class VaultStore {
     this.data.credentials.filter(c => c.vaultId === vaultId).forEach(c => this.markDeleted(c.id, now));
     this.data.tasks.filter(t => t.vaultId === vaultId).forEach(t => this.markDeleted(t.id, now));
     this.markDeleted(vaultId, now);
+    this.data.credentials = this.data.credentials.filter(c => c.vaultId !== vaultId);
+    this.data.tasks = this.data.tasks.filter(t => t.vaultId !== vaultId);
+    this.data.vaults = this.data.vaults.filter(v => v.id !== vaultId);
+    if (this.data.activeVaultId === vaultId) this.data.activeVaultId = this.data.vaults[0].id;
+    this.commit();
+  }
+
+  /**
+   * Retire un coffre et son contenu de la copie personnelle sans marque de suppression :
+   * utilisé quand le coffre est déplacé vers un coffre partagé (ses éléments continuent d'exister ailleurs).
+   */
+  removeVaultSilently(vaultId: string): void {
+    if (this.data.vaults.length <= 1) throw new Error('Gardez au moins un coffre personnel');
     this.data.credentials = this.data.credentials.filter(c => c.vaultId !== vaultId);
     this.data.tasks = this.data.tasks.filter(t => t.vaultId !== vaultId);
     this.data.vaults = this.data.vaults.filter(v => v.id !== vaultId);
