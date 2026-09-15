@@ -28,6 +28,10 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 [target.'cfg(target_os = "ios")'.dependencies]
 tauri-plugin-biometric = "2"
 
+# Windows Hello (visage, empreinte ou code PIN) pour le déverrouillage de l'application de bureau
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Security_Credentials_UI", "Foundation"] }
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

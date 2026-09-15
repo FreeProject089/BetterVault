@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="autofill_unlock">Déverrouiller BetterVault</string>
+    <string name="autofill_prompt_title">Remplir avec BetterVault</string>
+    <string name="autofill_no_match">Aucun identifiant BetterVault pour cet écran</string>
+
+    <!-- Activité d'authentification : fenêtre transparente, seule l'invite biométrique est visible -->
+    <style name="BetterVault.Translucent" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
+</resources>

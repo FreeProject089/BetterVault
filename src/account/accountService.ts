@@ -59,6 +59,8 @@ export interface AccountRecord {
   recoveryWrappedVaultKey?: EncryptedBlob;
   /** Limites annoncées par le serveur (compte synchronisé) */
   limits?: VaultLimits;
+  /** Déverrouillage biométrique : clé du coffre chiffrée par un secret gardé par l'appareil */
+  deviceUnlock?: { name: string; blob: EncryptedBlob };
   createdAt: number;
 }
 
@@ -570,7 +572,9 @@ export class AccountService {
       }));
     }
 
-    this.writeJson(STORAGE_KEYS.account, updated);
+    // Le secret biométrique contient l'ancienne preuve d'authentification : il faut le réactiver
+    const { deviceUnlock: _stale, ...withoutDeviceUnlock } = updated;
+    this.writeJson(STORAGE_KEYS.account, withoutDeviceUnlock);
     this.authHash = newKeys.authHash;
   }
 
@@ -614,6 +618,75 @@ export class AccountService {
     this.authHash = keys.authHash;
     this.setSyncState({ status: 'synced', lastSyncAt: Date.now() });
     return { recoveryKey: recovery.recoveryKey };
+  }
+
+  /* ── Déverrouillage biométrique ────────────────────────────────────── */
+
+  hasDeviceUnlock(): boolean {
+    return !!this.getAccount()?.deviceUnlock;
+  }
+
+  /**
+   * Active le déverrouillage biométrique : un secret aléatoire, gardé par l'appareil (Keystore, trousseau,
+   * Windows Hello), chiffre la clé du coffre. Le mot de passe principal reste nécessaire après un redémarrage du secret.
+   */
+  async enableDeviceUnlock(password: string, store: { save(name: string, secret: string): Promise<void> }): Promise<void> {
+    const account = this.getAccount();
+    if (!account) throw new Error('Aucun compte sur cet appareil');
+    const keys = await deriveAccountKeys(password, fromBase64(account.salt), account.kdf);
+    const exportable = await unwrapVaultKey(keys.encKey, account.wrappedVaultKey, true);
+    const raw = await exportVaultKey(exportable);
+    const secret = crypto.getRandomValues(new Uint8Array(32));
+    try {
+      const secretKey = await importVaultKey(secret);
+      const payload = JSON.stringify({ k: toBase64(raw), a: keys.authHash });
+      const blob = await encryptVaultJson(secretKey, payload);
+      const name = `bettervault-unlock-${toBase64(crypto.getRandomValues(new Uint8Array(6))).replace(/[^A-Za-z0-9]/g, '')}`;
+      await store.save(name, toBase64(secret));
+      const previous = this.getAccount()?.deviceUnlock;
+      this.writeJson(STORAGE_KEYS.account, { ...this.getAccount()!, deviceUnlock: { name, blob } });
+      return void previous;
+    } finally {
+      raw.fill(0);
+      secret.fill(0);
+    }
+  }
+
+  async unlockWithDevice(store: { read(name: string, reason: string): Promise<string> }, reason: string): Promise<UnlockedVaultData> {
+    const account = this.getAccount();
+    if (!account?.deviceUnlock) throw new Error('Déverrouillage biométrique non activé');
+    const secret = fromBase64(await store.read(account.deviceUnlock.name, reason));
+    let payload: { k: string; a: string };
+    try {
+      payload = await decryptVaultData<{ k: string; a: string }>(await importVaultKey(secret), account.deviceUnlock.blob);
+    } catch {
+      throw new Error('Déverrouillage biométrique invalide : utilisez le mot de passe principal puis réactivez-le');
+    } finally {
+      secret.fill(0);
+    }
+    const raw = fromBase64(payload.k);
+    const vaultKey = await importVaultKey(raw, !!this.sessionStore);
+    raw.fill(0);
+    const stored = this.readStoredVault();
+    if (!stored) throw new Error('Données du coffre introuvables sur cet appareil');
+    const data = await decryptVaultData<UnlockedVaultData>(vaultKey, stored.blob);
+
+    this.vaultKey = vaultKey;
+    this.authHash = payload.a;
+    this.latestData = data;
+    if (account.mode === 'cloud' && account.serverUrl) {
+      this.cloud = new CloudClient(account.serverUrl, this.readSession()?.token ?? null);
+    }
+    await this.rememberSession(vaultKey);
+    return data;
+  }
+
+  async disableDeviceUnlock(store?: { remove(name: string): Promise<void> } | null): Promise<void> {
+    const account = this.getAccount();
+    if (!account?.deviceUnlock) return;
+    await store?.remove(account.deviceUnlock.name).catch(() => undefined);
+    const { deviceUnlock: _removed, ...rest } = account;
+    this.writeJson(STORAGE_KEYS.account, rest);
   }
 
   /* ── Partage et pièces jointes ─────────────────────────────────────── */

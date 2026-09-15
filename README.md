@@ -22,6 +22,10 @@ Une seule interface pour le web, l'application de bureau, l'extension navigateur
 - Tags avec couleur exacte, filtres (favoris, 2FA, expirés, faibles, réutilisés…) et tri
 - Icônes au choix : logos Simple Icons, Lucide ou Phosphor, pour les identifiants et les coffres
 - Plusieurs coffres (personnel, travail, équipe)
+- Coffres partagés entre comptes : rôles Propriétaire, Administrateur, Éditeur, Lecteur et rôles personnalisés, clé changée au retrait d'un membre
+- Pièces jointes chiffrées (quota par compte)
+- Déverrouillage biométrique (Android, Windows Hello, iOS) et remplissage automatique Android
+- Sauvegardes automatiques du serveur vers S3 (MinIO fourni), chiffrées, avec durée de conservation
 - Import : KeePass (`.kdbx`, `.xml`), 1Password (`.1pux`, CSV), Bitwarden (JSON, CSV), FIDO CXF, LastPass, Dashlane, Chrome, Firefox
 - Export : JSON chiffré, KeePass `.kdbx`, FIDO CXF, JSON, CSV
 

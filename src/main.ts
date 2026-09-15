@@ -53,6 +53,7 @@ import { CREDENTIAL_FILTERS, countByFilter, queryCredentials, reusedPasswords, t
 import { checkCredential, remainingCapacity } from './account/limits';
 import { renderSVG } from 'uqr';
 import { activeTabHost, extensionSessionStore, extensionSurface, fillActiveTab, matchesSite, openFullTab, openSidePanel } from './extension/surface';
+import { biometricStore, isAndroidApp, nativeCall, type DeviceSecretStore } from './platform/biometric';
 import { i18n } from './i18n';
 
 type ActiveView = 'all-credentials' | '2fa-tokens' | 'tasks';
@@ -81,6 +82,7 @@ const GENERATOR_PREFS_KEY = 'bettervault.generator-prefs';
 const REMINDER_CHECK_INTERVAL_MS = 30_000;
 const SYNC_INTERVAL_MS = 60_000;
 const LIST_PREFS_KEY = 'bettervault.list-prefs';
+const AUTOFILL_KEY = 'bettervault.android-autofill';
 
 const VAULT_ICON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
 const GENERIC_FILE_ICON = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>';
@@ -107,6 +109,8 @@ class AppController {
   private credentialSort: CredentialSort = 'name';
   /** Faux pour une fenêtre qui ne doit pas se fermer par Échap ou clic sur le fond (clé de secours) */
   private modalDismissible = true;
+  private readonly deviceStore: DeviceSecretStore | null = biometricStore();
+  private autofillTimer = 0;
 
   constructor() {
     this.loadListPrefs();
@@ -125,6 +129,7 @@ class AppController {
       this.renderCounts();
       if (this.selectedItemId) this.renderDetail(this.selectedItemId);
       void this.renderSiteStrip();
+      this.scheduleAutofillSync();
     });
     i18n.subscribe(() => {
       this.applyI18n();
@@ -3475,7 +3480,7 @@ class AppController {
 
   /* ── Compte : déverrouillage, verrouillage, synchronisation ─────────── */
   private initAccount(): void {
-    this.authScreen = mountAuthScreen(document.getElementById('auth-screen') as HTMLElement, accountService, data => this.showApp(data));
+    this.authScreen = mountAuthScreen(document.getElementById('auth-screen') as HTMLElement, accountService, data => this.showApp(data), { deviceStore: this.deviceStore });
 
     sharedVaults.onSaveError((vaultId, err) => {
       this.showToast(err instanceof SharedReadOnlyError ? err.message : `${this.tr('Coffre partagé non enregistré', 'Shared vault not saved')} : ${accountErrorMessage(err)}`, 'error', 5000);
@@ -3954,6 +3959,8 @@ class AppController {
           </div>
         </section>
 
+        <section class="account-section" data-device-section hidden></section>
+
         <section class="account-section">
           <h3 class="account-section-title">${tr('Changer le mot de passe principal', 'Change master password')}</h3>
           <div class="form-field">
@@ -4216,6 +4223,8 @@ class AppController {
       });
     });
 
+    void this.bindDeviceSection(box.querySelector('[data-device-section]') as HTMLElement);
+
     action('change-password')?.addEventListener('click', event => {
       const value = (id: string) => ($<HTMLInputElement>(`#${id}`)?.value ?? '');
       hideError('password');
@@ -4260,6 +4269,120 @@ class AppController {
         }
       });
     });
+  }
+
+  /* ── Appareil : déverrouillage biométrique et remplissage automatique ── */
+  private async bindDeviceSection(section: HTMLElement): Promise<void> {
+    const tr = (fr: string, en: string) => this.tr(fr, en);
+    const store = this.deviceStore;
+    const biometricOk = !!store && await store.available();
+    const android = isAndroidApp();
+    let autofill: { autofillSupported: boolean; autofillEnabled: boolean; autofillReady: boolean } | null = null;
+    if (android) {
+      try {
+        autofill = await nativeCall('status');
+      } catch {
+        autofill = null;
+      }
+    }
+    if (!section.isConnected || (!biometricOk && !autofill?.autofillSupported)) return;
+
+    const render = () => {
+      const enabled = accountService.hasDeviceUnlock();
+      const autofillOn = localStorage.getItem(AUTOFILL_KEY) === 'on';
+      section.hidden = false;
+      section.innerHTML = `
+        <h3 class="account-section-title">${tr('Cet appareil', 'This device')}</h3>
+        ${biometricOk ? `
+          <div class="switch-row" style="cursor:default;">
+            <span>${tr('Déverrouillage biométrique', 'Biometric unlock')}<small>${tr(`Ouvrir le coffre avec ${store!.label}. Le mot de passe principal reste utilisable.`, `Open the vault with ${store!.label}. The master password still works.`)}</small></span>
+            <span class="status-pill ${enabled ? 'on' : 'off'}">${enabled ? tr('Activé', 'On') : tr('Désactivé', 'Off')}</span>
+          </div>
+          ${enabled
+            ? `<div class="account-actions account-actions-end"><button class="btn-primary" data-device="disable">${tr('Désactiver', 'Turn off')}</button></div>`
+            : `<div class="form-row" style="grid-template-columns:minmax(0,1fr) auto;">
+                 <input class="form-input" type="password" data-device-password autocomplete="current-password" placeholder="${tr('Mot de passe principal', 'Master password')}">
+                 <button class="btn-primary btn-accent" data-device="enable">${tr('Activer', 'Turn on')}</button>
+               </div>`}
+          <div class="form-error" data-device-error role="alert" hidden></div>` : ''}
+        ${autofill?.autofillSupported ? `
+          <div class="switch-row" style="cursor:default;">
+            <span>${tr('Remplissage automatique Android', 'Android autofill')}<small>${tr('Propose vos identifiants dans les applications et navigateurs, après empreinte ou visage.', 'Offers your credentials in apps and browsers, after fingerprint or face.')}</small></span>
+            <span class="status-pill ${autofill.autofillEnabled && autofillOn ? 'on' : 'off'}">${autofill.autofillEnabled ? (autofillOn ? tr('Actif', 'On') : tr('En pause', 'Paused')) : tr('Non choisi', 'Not selected')}</span>
+          </div>
+          <div class="account-actions account-actions-end">
+            ${autofill.autofillEnabled ? '' : `<button class="btn-primary" data-device="autofill-settings">${tr('Choisir BetterVault dans Android', 'Select BetterVault in Android')}</button>`}
+            <button class="btn-primary ${autofillOn ? '' : 'btn-accent'}" data-device="autofill-toggle">${autofillOn ? tr('Arrêter', 'Stop') : tr('Préparer les identifiants', 'Prepare credentials')}</button>
+          </div>` : ''}`;
+    };
+
+    section.addEventListener('click', async e => {
+      const button = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-device]');
+      if (!button) return;
+      const errorEl = section.querySelector<HTMLElement>('[data-device-error]');
+      if (errorEl) errorEl.hidden = true;
+      button.disabled = true;
+      try {
+        switch (button.dataset.device) {
+          case 'enable': {
+            const password = section.querySelector<HTMLInputElement>('[data-device-password]')?.value ?? '';
+            await accountService.enableDeviceUnlock(password, store!);
+            this.showToast(tr('Déverrouillage biométrique activé', 'Biometric unlock turned on'), 'success');
+            break;
+          }
+          case 'disable':
+            await accountService.disableDeviceUnlock(store);
+            break;
+          case 'autofill-settings':
+            await nativeCall('openAutofillSettings');
+            break;
+          case 'autofill-toggle':
+            if (localStorage.getItem(AUTOFILL_KEY) === 'on') {
+              localStorage.removeItem(AUTOFILL_KEY);
+              await nativeCall('autofillClear');
+            } else {
+              localStorage.setItem(AUTOFILL_KEY, 'on');
+              await this.syncAutofill();
+              this.showToast(tr('Identifiants prêts pour le remplissage automatique', 'Credentials ready for autofill'), 'success');
+            }
+            break;
+        }
+        if (android) autofill = await nativeCall('status');
+      } catch (err) {
+        if (errorEl) {
+          errorEl.textContent = accountErrorMessage(err);
+          errorEl.hidden = false;
+        } else {
+          this.showToast(accountErrorMessage(err), 'error');
+        }
+        button.disabled = false;
+        return;
+      }
+      render();
+    });
+
+    render();
+  }
+
+  /** Android : met à jour le cache chiffré du remplissage automatique après chaque modification */
+  private scheduleAutofillSync(): void {
+    if (!isAndroidApp() || localStorage.getItem(AUTOFILL_KEY) !== 'on' || !vaultStore.isLoaded()) return;
+    window.clearTimeout(this.autofillTimer);
+    this.autofillTimer = window.setTimeout(() => void this.syncAutofill().catch(err => console.warn('Remplissage automatique non mis à jour', err)), 2000);
+  }
+
+  private async syncAutofill(): Promise<void> {
+    const entries = vaultStore.getData().credentials
+      .filter(c => c.password)
+      .map(c => ({
+        title: c.title,
+        username: c.username,
+        password: c.password,
+        domains: [extractDomain(c.website) || c.domain].filter(Boolean),
+        // Une URL « androidapp://nom.du.paquet » associe l'identifiant à une application
+        packages: /^androidapp:\/\//i.test(c.website) ? [c.website.replace(/^androidapp:\/\//i, '').split(/[/?#]/)[0]] : []
+      }));
+    await nativeCall('autofillUpdate', { entries: JSON.stringify(entries) });
   }
 
   /** Affiche une clé de secours ; la fenêtre ne se ferme qu'après confirmation de l'enregistrement */
