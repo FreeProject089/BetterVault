@@ -24,7 +24,7 @@ import {
   wrapVaultKey,
   type EncryptedBlob
 } from './accountCrypto';
-import { CloudClient, CloudError, type AccountInfo, type AccountSession, type BillingInfo } from './cloudClient';
+import { CloudClient, CloudError, type AccountInfo, type AccountSession, type BillingInfo, type LegalInfo } from './cloudClient';
 import { sanitizeLimits, type VaultLimits } from './limits';
 import { generateSharingKeyPair, unwrapPrivateKey, wrapPrivateKey, type SharingKeyPair } from './sharingCrypto';
 import { mergeVaultData } from './merge';
@@ -780,6 +780,15 @@ export class AccountService {
     const { authHash } = await this.verifyPassword(password);
     const code = totp?.replace(/\s/g, '') || undefined;
     return (await this.withSessionRetry(() => client.revokeSessions({ authHash, ...target, totp: code }))).revoked;
+  }
+
+  getAttachmentUsage(): Promise<{ enabled: boolean; usedBytes: number; quotaBytes: number; maxFileBytes: number }> {
+    const client = this.cloudClient();
+    return this.withSessionRetry(() => client.attachmentUsage());
+  }
+
+  getLegal(): Promise<LegalInfo> {
+    return this.cloudClient().legal();
   }
 
   getBilling(): Promise<BillingInfo> {
