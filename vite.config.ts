@@ -3,6 +3,10 @@ import { iconDataPlugin } from './build/iconDataPlugin.ts';
 
 export default defineConfig({
   plugins: [iconDataPlugin(import.meta.dirname)],
+  // Argon2id, scrypt et chiffrement des sauvegardes sont volontairement lents : délai large quand les tests tournent en parallèle
+  test: {
+    testTimeout: 30_000
+  },
   server: {
     port: 3000,
     open: false,

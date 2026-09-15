@@ -1,5 +1,26 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createHash, createHmac, randomBytes, randomInt, randomUUID, scrypt, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
+import {
+  HttpError,
+  invalid,
+  parseBase64,
+  parseBlob,
+  parseCode,
+  parseEmail,
+  parseKdf,
+  parseRecovery,
+  readJson,
+  scryptVerifier,
+  sha256,
+  type EncryptedBlob,
+  type KdfParams,
+  type RecoveryMaterial,
+  type Reply
+} from './http.ts';
+import type { PatternRoute, RouteContext } from './context.ts';
+import { accountKeyRoutes, sharingRoutes } from './sharing.ts';
+import { attachmentRoutes, deleteUserAttachments } from './attachments.ts';
+import type { BackupService, BackupSettings } from './backup.ts';
 import type { DatabaseSync } from 'node:sqlite';
 import { parseSettingsUpdate, publicSettings, settingsFromEnv, type ServerSettings } from './config.ts';
 import { createSmtpMailer, type Mailer, type MailMessage, type SmtpConfig } from './mailer.ts';
@@ -12,17 +33,7 @@ import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.ts';
  * et la protège à nouveau avec scrypt.
  */
 
-export interface KdfParams {
-  t: number;
-  m: number;
-  p: number;
-}
-
-export interface EncryptedBlob {
-  v: 1;
-  iv: string;
-  ct: string;
-}
+export type { EncryptedBlob, KdfParams } from './http.ts';
 
 export interface AppOptions {
   db: DatabaseSync;
@@ -38,10 +49,14 @@ export interface AppOptions {
   /** Empreinte SHA-256 (base64) du jeton d'administration ; sans elle, l'API d'administration est désactivée */
   adminTokenHash?: string | null;
   mailerFactory?: (smtp: SmtpConfig) => Mailer;
+  /** Dossier des pièces jointes chiffrées ; sans lui, les pièces jointes sont désactivées */
+  filesDir?: string | null;
+  /** Service de sauvegarde, construit avec l'accès aux réglages courants */
+  backupFactory?: (settings: () => BackupSettings) => BackupService;
   now?: () => number;
 }
 
-interface UserRow {
+export interface UserRow {
   id: string;
   email: string;
   auth_verifier: string;
@@ -57,118 +72,17 @@ interface UserRow {
   recovery_verifier: string | null;
   recovery_salt: string | null;
   recovery_wrapped_key: string | null;
-}
-
-interface Reply {
-  status: number;
-  body?: unknown;
+  public_key: string | null;
+  wrapped_private_key: string | null;
 }
 
 export const SERVER_VERSION = '1.1.0';
 const DEFAULT_KDF: KdfParams = { t: 3, m: 65536, p: 4 };
-const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 const EMAIL_CODE_TTL_MS = 15 * 60 * 1000;
 const RECOVERY_TOKEN_TTL_MS = 10 * 60 * 1000;
 const MAX_EMAIL_CODE_ATTEMPTS = 5;
 
-class HttpError extends Error {
-  readonly status: number;
-  readonly code: string;
-  readonly details?: unknown;
-
-  constructor(status: number, code: string, message: string, details?: unknown) {
-    super(message);
-    this.status = status;
-    this.code = code;
-    this.details = details;
-  }
-}
-
-const sha256 = (value: string) => createHash('sha256').update(value).digest('base64');
-
-function scryptVerifier(authHash: string, salt: Buffer): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    scrypt(authHash, salt, 32, { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }, (err, key) => (err ? reject(err) : resolve(key)));
-  });
-}
-
-function invalid(field: string): HttpError {
-  return new HttpError(400, 'invalid_request', `Champ « ${field} » invalide`);
-}
-
-function parseBase64(value: unknown, field: string, length: { exact?: number; max?: number }): string {
-  if (typeof value !== 'string' || value.length % 4 !== 0 || !BASE64.test(value)) throw invalid(field);
-  const size = Buffer.from(value, 'base64').length;
-  if ((length.exact !== undefined && size !== length.exact) || (length.max !== undefined && size > length.max)) throw invalid(field);
-  return value;
-}
-
-function parseEmail(value: unknown): string {
-  if (typeof value !== 'string') throw invalid('email');
-  const email = value.trim().toLowerCase();
-  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw invalid('email');
-  return email;
-}
-
-function parseKdf(value: unknown, minMemoryKib: number): KdfParams {
-  const kdf = value as Partial<KdfParams> | null;
-  const valid = !!kdf && typeof kdf === 'object'
-    && Number.isInteger(kdf.t) && kdf.t! >= 1 && kdf.t! <= 10
-    && Number.isInteger(kdf.p) && kdf.p! >= 1 && kdf.p! <= 8
-    && Number.isInteger(kdf.m) && kdf.m! >= Math.max(minMemoryKib, 8 * kdf.p!) && kdf.m! <= 1048576;
-  if (!valid) throw invalid('kdf');
-  return { t: kdf.t!, m: kdf.m!, p: kdf.p! };
-}
-
-function parseBlob(value: unknown, field: string, maxBytes: number): EncryptedBlob {
-  const blob = value as Partial<EncryptedBlob> | null;
-  if (!blob || typeof blob !== 'object' || blob.v !== 1) throw invalid(field);
-  return { v: 1, iv: parseBase64(blob.iv, `${field}.iv`, { exact: 12 }), ct: parseBase64(blob.ct, `${field}.ct`, { max: maxBytes }) };
-}
-
-function parseCode(value: unknown, field: string): string | null {
-  if (value === undefined || value === null || value === '') return null;
-  if (typeof value !== 'string' || !/^\d{6}$/.test(value.replace(/\s/g, ''))) throw invalid(field);
-  return value.replace(/\s/g, '');
-}
-
-interface RecoveryMaterial {
-  authHash: string;
-  wrappedVaultKey: EncryptedBlob;
-}
-
-function parseRecovery(value: unknown): RecoveryMaterial | null {
-  if (value === undefined || value === null) return null;
-  const recovery = value as Partial<RecoveryMaterial>;
-  if (typeof recovery !== 'object') throw invalid('recovery');
-  return {
-    authHash: parseBase64(recovery.authHash, 'recovery.authHash', { exact: 32 }),
-    wrappedVaultKey: parseBlob(recovery.wrappedVaultKey, 'recovery.wrappedVaultKey', 64)
-  };
-}
-
-async function readJson(req: IncomingMessage, maxBytes: number): Promise<Record<string, unknown>> {
-  if (!(req.headers['content-type'] ?? '').startsWith('application/json')) {
-    throw new HttpError(415, 'unsupported_media_type', 'Corps JSON attendu');
-  }
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > maxBytes) throw new HttpError(413, 'payload_too_large', 'Requête trop volumineuse');
-    chunks.push(chunk as Buffer);
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  } catch {
-    throw new HttpError(400, 'invalid_json', 'JSON invalide');
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new HttpError(400, 'invalid_json', 'Objet JSON attendu');
-  return parsed as Record<string, unknown>;
-}
-
-export function createApp(options: AppOptions): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
+export function createApp(options: AppOptions): ((req: IncomingMessage, res: ServerResponse) => Promise<void>) & { close(): void } {
   const { db, serverSecret } = options;
   if (serverSecret.length < 32) throw new Error('Le secret serveur doit contenir au moins 32 caractères');
 
@@ -550,6 +464,7 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
       const authHash = parseBase64((await readJson(req, 4096)).authHash, 'authHash', { exact: 32 });
       const user = sql.userById.get(userId) as UserRow | undefined;
       if (!(await verifyAuthHash(user, authHash))) throw new HttpError(403, 'invalid_credentials', 'Mot de passe incorrect');
+      deleteUserAttachments(context, userId);
       sql.deleteUser.run(userId);
       return { status: 204 };
     },
@@ -713,6 +628,52 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
     }
   };
 
+  const backup: BackupService | null = options.backupFactory ? options.backupFactory(() => settings.backup) : null;
+
+  const context: RouteContext = {
+    db,
+    now,
+    limit,
+    authenticate,
+    getUser,
+    verifyAuthHash,
+    notify,
+    settings: () => settings,
+    filesDir: options.filesDir ?? null,
+    maxBody
+  };
+
+  Object.assign(routes, accountKeyRoutes(context), {
+    'GET /api/v1/admin/backup': async (req: IncomingMessage): Promise<Reply> => {
+      requireAdmin(req);
+      return {
+        status: 200,
+        body: { available: !!backup, running: backup?.isRunning() ?? false, runs: backup?.history() ?? [], encrypted: !!options.backupFactory && process.env.BACKUP_ENCRYPTION_KEY !== undefined && process.env.BACKUP_ENCRYPTION_KEY !== '' }
+      };
+    },
+    'POST /api/v1/admin/backup/run': async (req: IncomingMessage): Promise<Reply> => {
+      requireAdmin(req);
+      if (!backup) throw new HttpError(503, 'backup_unavailable', 'Sauvegardes indisponibles sur ce serveur');
+      try {
+        return { status: 200, body: await backup.runNow('manual') };
+      } catch (err) {
+        throw new HttpError(502, 'backup_failed', err instanceof Error ? err.message : String(err));
+      }
+    },
+    'POST /api/v1/admin/backup/test': async (req: IncomingMessage): Promise<Reply> => {
+      requireAdmin(req);
+      if (!backup) throw new HttpError(503, 'backup_unavailable', 'Sauvegardes indisponibles sur ce serveur');
+      try {
+        await backup.test();
+      } catch (err) {
+        throw new HttpError(502, 'backup_test_failed', err instanceof Error ? err.message : String(err));
+      }
+      return { status: 204 };
+    }
+  });
+  const patternRoutes: PatternRoute[] = [...sharingRoutes(context), ...attachmentRoutes(context)];
+  backup?.start();
+
   const applyHeaders = (req: IncomingMessage, res: ServerResponse) => {
     const origin = req.headers.origin;
     if (corsOrigins === '*') {
@@ -722,7 +683,7 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
       res.setHeader('Vary', 'Origin');
     }
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     res.setHeader('Access-Control-Max-Age', '600');
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -736,7 +697,7 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }).end(JSON.stringify(body));
   };
 
-  return async (req, res) => {
+  const handler = async (req: IncomingMessage, res: ServerResponse) => {
     applyHeaders(req, res);
     if (req.method === 'OPTIONS') {
       send(res, 204);
@@ -744,10 +705,27 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
     }
     try {
       const { pathname } = new URL(req.url ?? '/', 'http://localhost');
-      const route = routes[`${req.method} ${pathname}`];
-      if (!route) throw new HttpError(404, 'not_found', 'Route inconnue');
-      const reply = await route(req);
-      send(res, reply.status, reply.body);
+      let reply: Reply;
+      const exact = routes[`${req.method} ${pathname}`];
+      if (exact) {
+        reply = await exact(req);
+      } else {
+        let matched: { run: PatternRoute['handler']; params: Record<string, string> } | null = null;
+        for (const candidate of patternRoutes) {
+          if (candidate.method !== req.method) continue;
+          const match = candidate.pattern.exec(pathname);
+          if (!match) continue;
+          matched = { run: candidate.handler, params: Object.fromEntries(candidate.keys.map((key, i) => [key, decodeURIComponent(match[i + 1])])) };
+          break;
+        }
+        if (!matched) throw new HttpError(404, 'not_found', 'Route inconnue');
+        reply = await matched.run(req, matched.params);
+      }
+      if (reply.raw) {
+        res.writeHead(reply.status, { 'Content-Type': reply.contentType ?? 'application/octet-stream', 'Content-Length': reply.raw.length }).end(reply.raw);
+      } else {
+        send(res, reply.status, reply.body);
+      }
     } catch (err) {
       if (err instanceof HttpError) {
         send(res, err.status, { error: { code: err.code, message: err.message, ...(err.details === undefined ? {} : { details: err.details }) } });
@@ -757,4 +735,6 @@ export function createApp(options: AppOptions): (req: IncomingMessage, res: Serv
       }
     }
   };
+
+  return Object.assign(handler, { close: () => backup?.stop() });
 }

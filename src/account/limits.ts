@@ -16,6 +16,8 @@ export interface VaultLimits {
   maxCustomFields: number;
   maxTagsPerItem: number;
   maxVaultBytes: number;
+  maxAttachmentBytes: number;
+  attachmentQuotaBytes: number;
 }
 
 export const DEFAULT_VAULT_LIMITS: VaultLimits = {
@@ -29,7 +31,9 @@ export const DEFAULT_VAULT_LIMITS: VaultLimits = {
   maxNoteLength: 20000,
   maxCustomFields: 50,
   maxTagsPerItem: 20,
-  maxVaultBytes: 20 * 1024 * 1024
+  maxVaultBytes: 20 * 1024 * 1024,
+  maxAttachmentBytes: 25 * 1024 * 1024,
+  attachmentQuotaBytes: 500 * 1024 * 1024
 };
 
 type Tr = (fr: string, en: string) => string;
