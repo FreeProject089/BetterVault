@@ -11,6 +11,7 @@ import { BiometricCancelledError, type DeviceSecretStore } from '../platform/bio
 import { renderSVG } from 'uqr';
 import { secretGridHtml } from './secretDisplay';
 import { translateError } from '../i18n/errorMessages';
+import { tabIcon } from './tabIcons';
 
 const isTauriRuntime = typeof (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined';
 
@@ -110,8 +111,8 @@ export function mountAuthScreen(
 
   const tabs = (active: 'create' | 'signin') => `
     <div class="tab-btn-group" role="tablist">
-      <button type="button" class="tab-btn ${active === 'create' ? 'active' : ''}" role="tab" aria-selected="${active === 'create'}" data-screen="create">${tr('Créer un compte', 'Create account')}</button>
-      <button type="button" class="tab-btn ${active === 'signin' ? 'active' : ''}" role="tab" aria-selected="${active === 'signin'}" data-screen="signin">${tr('Se connecter', 'Sign in')}</button>
+      <button type="button" class="tab-btn ${active === 'create' ? 'active' : ''}" role="tab" aria-selected="${active === 'create'}" data-screen="create">${tabIcon('create')}<span>${tr('Créer un compte', 'Create account')}</span></button>
+      <button type="button" class="tab-btn ${active === 'signin' ? 'active' : ''}" role="tab" aria-selected="${active === 'signin'}" data-screen="signin">${tabIcon('signin')}<span>${tr('Se connecter', 'Sign in')}</span></button>
     </div>`;
 
   const templates: Record<Screen, () => string> = {

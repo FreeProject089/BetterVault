@@ -161,3 +161,31 @@ table.audit.compact td, table.audit.compact th { padding: 4px 6px; }
   .grid { grid-template-columns: 1fr; }
   .perf { grid-template-columns: 1fr; }
 }
+
+/* Téléphone : rien ne doit être écrasé ni déborder sur la largeur d'un écran étroit */
+@media (max-width: 560px) {
+  .shell { padding: 16px 12px 40px; }
+  .card { padding: 16px; }
+  .card.narrow { margin: 24px auto; }
+
+  .top { flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .brand { flex-wrap: wrap; row-gap: 0; }
+
+  /* Le libellé et son bouton passent l'un sous l'autre plutôt que de se réduire */
+  .panel-head { flex-direction: column; align-items: stretch; }
+  .panel-head .btn { align-self: flex-start; }
+
+  .actions { flex-wrap: wrap; justify-content: stretch; gap: 8px; }
+  .actions .btn { flex: 1 1 auto; }
+  .actions .status { flex-basis: 100%; text-align: center; }
+
+  .limits { grid-template-columns: 1fr; }
+  .row > .small { flex: 1 1 140px; }
+
+  /* Cible tactile : au moins 40 px de haut sur les commandes */
+  .btn { padding: 10px 16px; }
+  .tab { padding: 10px 14px; }
+  label.check { padding: 4px 0; }
+  input, select { padding: 10px; font-size: 16px; } /* 16 px : évite le zoom automatique d'iOS */
+  input[type="checkbox"] { min-width: 18px; min-height: 18px; }
+}
