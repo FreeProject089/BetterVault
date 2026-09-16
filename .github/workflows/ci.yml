@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests, types et builds web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm run build:extension
+      - name: Archive de l'extension
+        run: cd dist-extension && zip -qr ../bettervault-extension.zip .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bettervault-extension
+          path: bettervault-extension.zip
+          retention-days: 14
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+      - run: pip install -r docs/requirements.txt
+      - run: mkdocs build --strict
+
+  docker:
+    name: Image Docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: bettervault:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Démarrage et contrôle de santé
+        run: |
+          docker run -d --name bv -p 8787:8787 \
+            -e BETTERVAULT_SECRET="$(openssl rand -base64 48)" \
+            -e ADMIN_TOKEN="jeton-admin-ci-0123456789" \
+            -e GEOIP_AUTO_UPDATE=false \
+            bettervault:ci
+          for i in $(seq 1 30); do
+            if curl -fs http://127.0.0.1:8787/api/v1/health; then break; fi
+            sleep 1
+          done
+          curl -fs http://127.0.0.1:8787/api/v1/health
+          curl -fs -o /dev/null http://127.0.0.1:8787/
+          curl -fs -o /dev/null http://127.0.0.1:8787/admin
+          curl -fs http://127.0.0.1:8787/legal/dpa | grep -q 'Accord de traitement'
+          curl -fs 'http://127.0.0.1:8787/legal/dpa?lang=en' | grep -q 'Data processing agreement'
+          test "$(docker inspect -f '{{.State.Health.Status}}' bv 2>/dev/null || echo none)" != unhealthy
+      - name: Journaux du conteneur
+        if: always()
+        run: docker logs bv || true
+
+  rust:
+    name: Application de bureau (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dépendances Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libdbus-1-dev libssl-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Dossier de l'application (requis par Tauri)
+        shell: bash
+        run: mkdir -p dist && echo '<!doctype html>' > dist/index.html
+      - run: cargo check --locked
+        working-directory: src-tauri
+      - run: cargo clippy --locked -- -D warnings
+        working-directory: src-tauri
+        continue-on-error: true
