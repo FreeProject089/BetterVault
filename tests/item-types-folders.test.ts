@@ -171,3 +171,29 @@ describe('Dossiers', () => {
     expect(names).toEqual(['Ajouté ailleurs', 'Local récent']);
   });
 });
+
+describe('Aller-retour export / import', () => {
+  it('garde le type et ses champs lors d’un ré-import BetterVault', () => {
+    const store = newStore();
+    const exported = [{
+      type: 'card' as const,
+      title: 'Carte',
+      card: { number: '4111111111111111', holder: 'A B', expMonth: '07', expYear: '2030', cvv: '123', pin: '4321' },
+      tags: []
+    }];
+
+    store.importBulk(exported, []);
+    const imported = store.getData().credentials[0];
+
+    expect(imported.type).toBe('card');
+    expect(imported.card?.number).toBe('4111111111111111');
+    expect(imported.card?.pin).toBe('4321');
+    expect(imported.card?.brand).toBe('Visa');
+  });
+
+  it('range un import sans type parmi les identifiants', () => {
+    const store = newStore();
+    store.importBulk([{ title: 'Ancien', username: 'a@b.c', password: 'x', tags: [] }], []);
+    expect(store.getData().credentials[0].type).toBe('login');
+  });
+});
