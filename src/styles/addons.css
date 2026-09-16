@@ -3568,3 +3568,63 @@ button.shortcut-key:hover { border-color: var(--accent); }
 
 /* Icone de type dans une ligne de liste ou en tete de fiche : elle occupe la place du logo */
 .record-icon .tab-icon, .detail-main-icon .tab-icon { opacity: 1; color: var(--text-secondary); }
+
+/* ── Arborescence de dossiers ───────────────────────────────────────────── */
+.folder-item .nav-item-left { min-width: 0; }
+
+.folder-twisty {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.folder-twisty:hover { background-color: var(--bg-tertiary); color: var(--text-primary); }
+.folder-twisty svg { transition: transform 0.15s ease; }
+.folder-twisty[aria-expanded="true"] svg { transform: rotate(90deg); }
+/* Un dossier sans sous-dossier garde la place du chevron, pour que les noms restent alignés */
+.folder-twisty-spacer { flex-shrink: 0; width: 16px; }
+
+.folder-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-item .tab-icon { flex-shrink: 0; opacity: 0.8; }
+
+/* Les actions ne prennent leur place qu'au survol : sinon elles rognent le nom du dossier */
+.folder-actions { display: flex; gap: 2px; width: 0; overflow: hidden; opacity: 0; }
+.folder-item:hover .folder-actions,
+.folder-item:focus-within .folder-actions { width: auto; overflow: visible; opacity: 1; }
+.folder-actions .icon-btn { padding: 2px; }
+
+@media (pointer: coarse) {
+  /* Sans survol, les actions restent visibles */
+  .folder-actions { width: auto; overflow: visible; opacity: 1; }
+}
+
+.folder-breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.folder-breadcrumb button {
+  padding: 2px 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.folder-breadcrumb button:hover { background-color: var(--bg-tertiary); color: var(--text-primary); }
+.folder-breadcrumb-sep { color: var(--text-muted); }
