@@ -45,11 +45,24 @@ export interface RegisterPayload {
   locale?: string;
 }
 
+export interface AvatarPolicy {
+  uploads: boolean;
+  remoteUrls: boolean;
+  maxBytes: number;
+}
+
+export interface AvatarInfo {
+  kind: 'upload' | 'url';
+  url: string | null;
+  updatedAt: number;
+}
+
 export interface ServerConfig {
   version: string;
   limits: VaultLimits;
   registrationOpen: boolean;
   emailEnabled: boolean;
+  avatars?: AvatarPolicy;
 }
 
 export interface AccountInfo {
@@ -59,6 +72,7 @@ export interface AccountInfo {
   hasRecoveryKey: boolean;
   emailEnabled: boolean;
   limits: VaultLimits;
+  avatar?: AvatarInfo | null;
 }
 
 export interface AccountSession {
@@ -415,6 +429,22 @@ export class CloudClient {
 
   async downloadAttachment(id: string): Promise<Uint8Array> {
     return new Uint8Array(await (await this.rawRequest('GET', `/api/v1/attachments/${encodeURIComponent(id)}`)).arrayBuffer());
+  }
+
+  async uploadAvatar(image: Uint8Array): Promise<AvatarInfo | null> {
+    return (await (await this.rawRequest('PUT', '/api/v1/accounts/avatar', image)).json()).avatar;
+  }
+
+  async downloadAvatar(): Promise<Uint8Array> {
+    return new Uint8Array(await (await this.rawRequest('GET', '/api/v1/accounts/avatar')).arrayBuffer());
+  }
+
+  async setAvatarUrl(url: string): Promise<AvatarInfo | null> {
+    return (await this.request<{ avatar: AvatarInfo | null }>('PUT', '/api/v1/accounts/avatar-url', { url })).avatar;
+  }
+
+  async deleteAvatar(): Promise<void> {
+    await this.request('DELETE', '/api/v1/accounts/avatar');
   }
 
   async deleteAttachment(id: string): Promise<void> {

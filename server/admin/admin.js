@@ -90,7 +90,9 @@ const TEXT = {
   when: ['Date', 'Date'],
   event: ['Événement', 'Event'],
   subject: ['Compte', 'Account'],
-  detail: ['Détails', 'Details']
+  detail: ['Détails', 'Details'],
+  avatarUploads: ['Autoriser l’envoi d’une photo de profil', 'Allow profile picture uploads'],
+  avatarUrls: ['Autoriser un lien vers une image (https)', 'Allow a link to an image (https)']
 };
 const t = key => TEXT[key]?.[fr ? 0 : 1] ?? key;
 
@@ -110,11 +112,14 @@ const LIMITS = [
   ['attachmentQuotaMb', ['Espace fichiers par compte (Mo)', 'File space per account (MB)']],
   ['maxVaultTypes', ['Types de coffres', 'Vault types']],
   ['maxMembersPerSharedVault', ['Membres par coffre partagé', 'Members per shared vault']],
-  ['maxRolesPerSharedVault', ['Rôles par coffre partagé', 'Roles per shared vault']]
+  ['maxRolesPerSharedVault', ['Rôles par coffre partagé', 'Roles per shared vault']],
+  ['maxAvatarKb', ['Photo de profil (Ko)', 'Profile picture (KB)']]
 ];
 
 /** Limites saisies en Mo dans la page, stockées en octets */
 const MB_FIELDS = { maxVaultMb: 'maxVaultBytes', maxAttachmentMb: 'maxAttachmentBytes', attachmentQuotaMb: 'attachmentQuotaBytes' };
+/** Limites saisies en Ko */
+const KB_FIELDS = { maxAvatarKb: 'maxAvatarBytes' };
 
 const $ = id => document.getElementById(id);
 const TOKEN_KEY = 'bettervault-admin-token';
@@ -155,8 +160,12 @@ function fill({ settings }) {
   $('publicUrl').value = settings.publicUrl ?? '';
   $('registrationOpen').checked = settings.registrationOpen;
   for (const [key] of LIMITS) {
-    $(`limit-${key}`).value = MB_FIELDS[key] ? Math.round(settings.limits[MB_FIELDS[key]] / 1048576) : settings.limits[key];
+    $(`limit-${key}`).value = MB_FIELDS[key]
+      ? Math.round(settings.limits[MB_FIELDS[key]] / 1048576)
+      : KB_FIELDS[key] ? Math.round(settings.limits[KB_FIELDS[key]] / 1024) : settings.limits[key];
   }
+  $('avatarUploads').checked = settings.avatars?.uploads !== false;
+  $('avatarUrls').checked = settings.avatars?.remoteUrls !== false;
   const backup = settings.backup ?? {};
   const s3 = backup.s3;
   $('backupEnabled').checked = !!backup.enabled;
@@ -220,6 +229,7 @@ $('settings-form').addEventListener('submit', async event => {
   for (const [key] of LIMITS) {
     const value = Number($(`limit-${key}`).value);
     if (MB_FIELDS[key]) limits[MB_FIELDS[key]] = value * 1048576;
+    else if (KB_FIELDS[key]) limits[KB_FIELDS[key]] = value * 1024;
     else limits[key] = value;
   }
   const s3Endpoint = $('s3Endpoint').value.trim();
@@ -243,6 +253,7 @@ $('settings-form').addEventListener('submit', async event => {
     registrationOpen: $('registrationOpen').checked,
     limits,
     backup,
+    avatars: { uploads: $('avatarUploads').checked, remoteUrls: $('avatarUrls').checked },
     billing: readBilling(),
     legal: readLegal(),
     smtp: host ? {

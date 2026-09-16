@@ -208,3 +208,45 @@ describe('Localisation locale des sessions', () => {
     expect(describeUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36')).toBe('Chrome · Windows');
   });
 });
+
+describe('Photo de profil', () => {
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=', 'base64');
+  let ctx: Awaited<ReturnType<typeof startServer>>;
+
+  afterAll(async () => {
+    await ctx?.close();
+  });
+
+  it('accepte une image ou un lien selon les réglages du serveur', async () => {
+    const base = settingsFromEnv({});
+    ctx = await startServer({ avatars: { uploads: true, remoteUrls: false }, limits: { ...base.limits, maxAvatarBytes: 1024 } });
+    const device = newService();
+    await device.createAccount({ email: uniqueEmail('photo'), password: PASSWORD, mode: 'cloud', serverUrl: ctx.url }, createEmptyVaultData());
+
+    expect(await device.getAvatarPolicy()).toEqual({ uploads: true, remoteUrls: false, maxBytes: 1024 });
+    expect(await device.getAvatarSource()).toBeNull();
+
+    await device.setAvatarImage(new Uint8Array(PNG), '');
+    const src = await device.getAvatarSource();
+    expect(src).toMatch(/^blob:/);
+
+    await expect(device.setAvatarImage(new Uint8Array(Buffer.from('<svg onload=alert(1)>')), '')).rejects.toMatchObject({ code: 'invalid_image' });
+    await expect(device.setAvatarImage(new Uint8Array(Buffer.concat([PNG, Buffer.alloc(2048)])), '')).rejects.toMatchObject({ status: 413 });
+    await expect(device.setAvatarUrl('https://exemple.fr/photo.png')).rejects.toMatchObject({ code: 'avatar_urls_disabled' });
+
+    await device.removeAvatar();
+    expect(await device.getAvatarSource()).toBeNull();
+  });
+
+  it('refuse un lien non https et garde la photo d’un compte local sur l’appareil', async () => {
+    const local = newService();
+    await local.createAccount({ email: uniqueEmail('local'), password: PASSWORD, mode: 'local' }, createEmptyVaultData());
+    await expect(local.setAvatarUrl('http://exemple.fr/a.png')).rejects.toThrow(/https/);
+    await local.setAvatarUrl('https://exemple.fr/a.png');
+    expect(await local.getAvatarSource()).toBe('https://exemple.fr/a.png');
+    await local.setAvatarImage(new Uint8Array(PNG), 'data:image/png;base64,AAAA');
+    expect(await local.getAvatarSource()).toBe('data:image/png;base64,AAAA');
+    await local.removeAvatar();
+    expect(await local.getAvatarSource()).toBeNull();
+  });
+});

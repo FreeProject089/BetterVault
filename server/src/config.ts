@@ -3,6 +3,7 @@ import type { BackupSettings } from './backup.ts';
 import type { S3Config } from './s3.ts';
 import { billingFromEnv, DEFAULT_BILLING, parseBillingUpdate, publicBilling, type BillingSettings } from './billing.ts';
 import { DEFAULT_LEGAL, legalFromEnv, parseLegalUpdate, type LegalSettings } from './legal.ts';
+import { avatarsFromEnv, DEFAULT_AVATARS, parseAvatarUpdate, type AvatarSettings } from './avatars.ts';
 
 /**
  * Réglages du serveur : valeurs du .env, modifiables ensuite depuis la page d'administration.
@@ -32,6 +33,8 @@ export interface ServerLimits {
   maxVaultTypes: number;
   maxMembersPerSharedVault: number;
   maxRolesPerSharedVault: number;
+  /** Taille maximale d'une photo de profil envoyée */
+  maxAvatarBytes: number;
 }
 
 export interface ServerSettings {
@@ -44,6 +47,7 @@ export interface ServerSettings {
   backup: BackupSettings;
   billing: BillingSettings;
   legal: LegalSettings;
+  avatars: AvatarSettings;
 }
 
 const MB = 1024 * 1024;
@@ -64,7 +68,8 @@ export const DEFAULT_LIMITS: ServerLimits = {
   attachmentQuotaBytes: 500 * MB,
   maxVaultTypes: 20,
   maxMembersPerSharedVault: 50,
-  maxRolesPerSharedVault: 30
+  maxRolesPerSharedVault: 30,
+  maxAvatarBytes: 512 * 1024
 };
 
 /** Variables d'environnement ; celles en Mo sont converties en octets */
@@ -84,7 +89,8 @@ const LIMIT_ENV: Record<keyof ServerLimits, string> = {
   attachmentQuotaBytes: 'LIMIT_ATTACHMENT_QUOTA_MB',
   maxVaultTypes: 'LIMIT_MAX_VAULT_TYPES',
   maxMembersPerSharedVault: 'LIMIT_MAX_MEMBERS_PER_SHARED_VAULT',
-  maxRolesPerSharedVault: 'LIMIT_MAX_ROLES_PER_SHARED_VAULT'
+  maxRolesPerSharedVault: 'LIMIT_MAX_ROLES_PER_SHARED_VAULT',
+  maxAvatarBytes: 'LIMIT_MAX_AVATAR_KB'
 };
 
 type Env = Record<string, string | undefined>;
@@ -102,7 +108,9 @@ export function limitsFromEnv(env: Env): ServerLimits {
     const name = LIMIT_ENV[key];
     limits[key] = name.endsWith('_MB')
       ? positiveInt(env[name], DEFAULT_LIMITS[key] / MB, name) * MB
-      : positiveInt(env[name], DEFAULT_LIMITS[key], name);
+      : name.endsWith('_KB')
+        ? positiveInt(env[name], DEFAULT_LIMITS[key] / 1024, name) * 1024
+        : positiveInt(env[name], DEFAULT_LIMITS[key], name);
   }
   return limits;
 }
@@ -158,7 +166,8 @@ export function settingsFromEnv(env: Env): ServerSettings {
       s3: s3FromEnv(env)
     },
     billing: billingFromEnv(env),
-    legal: legalFromEnv(env)
+    legal: legalFromEnv(env),
+    avatars: avatarsFromEnv(env)
   };
 }
 
@@ -175,7 +184,8 @@ export function parseSettingsUpdate(input: unknown, current: ServerSettings): Se
     limits: { ...current.limits },
     backup: { ...(current.backup ?? { enabled: false, intervalHours: 24, retentionDays: 30, s3: null }) },
     billing: parseBillingUpdate(body.billing, current.billing ?? DEFAULT_BILLING),
-    legal: parseLegalUpdate(body.legal, current.legal ?? DEFAULT_LEGAL)
+    legal: parseLegalUpdate(body.legal, current.legal ?? DEFAULT_LEGAL),
+    avatars: parseAvatarUpdate(body.avatars, current.avatars ?? DEFAULT_AVATARS)
   };
 
   if (body.limits && typeof body.limits === 'object') {

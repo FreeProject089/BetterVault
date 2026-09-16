@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { avatarInfo, avatarRoutes, DEFAULT_AVATARS } from './avatars.ts';
 import {
   HttpError,
   invalid,
@@ -287,7 +288,8 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         version: SERVER_VERSION,
         limits: settings.limits,
         registrationOpen: settings.registrationOpen,
-        emailEnabled: !!settings.smtp
+        emailEnabled: !!settings.smtp,
+        avatars: { ...(settings.avatars ?? DEFAULT_AVATARS), maxBytes: settings.limits.maxAvatarBytes }
       }
     }),
 
@@ -412,7 +414,8 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
           totpEnabled: !!user.totp_enabled,
           hasRecoveryKey: !!user.recovery_verifier,
           emailEnabled: !!settings.smtp,
-          limits: limitsFor(user.id)
+          limits: limitsFor(user.id),
+          avatar: avatarInfo(context, user.id)
         }
       };
     },
@@ -702,7 +705,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
   });
   const legalDir = options.legalDir ?? fileURLToPath(new URL('../legal', import.meta.url));
 
-  Object.assign(routes, accountKeyRoutes(context), sessionRoutes(context), billingRoutes(context, fetchImpl), {
+  Object.assign(routes, accountKeyRoutes(context), sessionRoutes(context), billingRoutes(context, fetchImpl), avatarRoutes(context), {
     'GET /api/v1/legal': async (): Promise<Reply> => ({
       status: 200,
       body: {
