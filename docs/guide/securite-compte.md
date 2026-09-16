@@ -53,3 +53,11 @@ Si le serveur envoie des emails, vous êtes prévenu :
 - d'un changement de mot de passe principal ;
 - de l'activation ou de la désactivation de la double authentification ;
 - d'une nouvelle clé de secours ou d'une réinitialisation du compte.
+
+## Appareils connectés
+
+**Compte > Sessions** liste les appareils connectés au compte synchronisé : appareil, adresse IP tronquée, lieu approximatif, dernière activité. La session en cours est marquée.
+
+Fermer une session (ou toutes les autres) demande le mot de passe principal, et le code de l'application d'authentification si la double authentification est activée. L'appareil concerné est déconnecté dès son prochain échange avec le serveur.
+
+Le lieu est calculé par votre serveur à partir d'une base locale, sans appel à un service tiers, et l'adresse IP complète n'est jamais conservée. Voir [Sessions et lieu](../deploiement/sessions-lieu.md) pour l'installer.
