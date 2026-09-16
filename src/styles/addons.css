@@ -2844,6 +2844,65 @@ input[type="datetime-local"].form-input {
   color: var(--tag-color);
 }
 
+/* ── Secret à recopier : clé de secours, clé 2FA ─────────────────────────── */
+.secret-card {
+  padding: 12px;
+  background: var(--bg-primary);
+  border: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: var(--radius-lg);
+}
+
+.secret-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.secret-card-label {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.secret-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(66px, 1fr));
+  gap: 6px;
+}
+
+.secret-card.compact .secret-grid { grid-template-columns: repeat(auto-fit, minmax(58px, 1fr)); gap: 4px; }
+
+.secret-group {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px;
+  padding: 7px 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  user-select: all;
+}
+
+.secret-group i {
+  font-style: normal;
+  font-size: 9px;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.secret-group b {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--text-primary);
+}
+
+.secret-card.compact .secret-group { padding: 5px 3px; }
+.secret-card.compact .secret-group b { font-size: 12.5px; letter-spacing: 0.5px; }
+
 .type-manage { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 
 .type-chip {
