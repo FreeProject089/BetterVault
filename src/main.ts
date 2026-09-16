@@ -28,7 +28,7 @@ import { SharedReadOnlyError, SharedVaultManager } from './account/sharedVaults'
 import type { AccountSession, SharedMember, SharedPermission, SharedRole } from './account/cloudClient';
 import { decryptFile, encryptFile, type AttachmentMeta } from './account/attachmentCrypto';
 import { createDeviceStorage } from './platform/storage';
-import { isTauri } from './platform/tauriBridge';
+import { isTauri, openExternal } from './platform/tauriBridge';
 import type { UnlockedVaultData } from './types/vault';
 import {
   EisenhowerQuadrant,
@@ -4615,7 +4615,7 @@ class AppController {
           void runBusy(button, '…', async () => {
             try {
               const { url } = await accountService.startCheckout(button.dataset.checkout!);
-              window.open(url, '_blank', 'noopener');
+              await openExternal(url);
             } catch (err) {
               this.showToast(accountErrorMessage(err), 'error');
             }
@@ -4624,7 +4624,7 @@ class AppController {
         plansEl.querySelector<HTMLButtonElement>('[data-billing-portal]')?.addEventListener('click', event => {
           void runBusy(event.currentTarget as HTMLButtonElement, '…', async () => {
             try {
-              window.open((await accountService.openBillingPortal()).url, '_blank', 'noopener');
+              await openExternal((await accountService.openBillingPortal()).url);
             } catch (err) {
               this.showToast(accountErrorMessage(err), 'error');
             }
@@ -5652,6 +5652,17 @@ class AppController {
 /* ════════════════════════════════════════════════════════════════════════════
    BOOTSTRAP
    ════════════════════════════════════════════════════════════════════════════ */
+// Liens externes (documents légaux, site d'un identifiant, paiement) : dans les applications de bureau
+// et mobiles, target="_blank" n'ouvre rien ; on passe par le navigateur du système.
+document.addEventListener('click', event => {
+  const link = (event.target as HTMLElement | null)?.closest?.('a[target="_blank"]') as HTMLAnchorElement | null;
+  if (!link || !isTauri()) return;
+  const url = link.href;
+  if (!/^https?:\/\//i.test(url)) return;
+  event.preventDefault();
+  void openExternal(url).catch(err => console.warn('Lien non ouvert', err));
+});
+
 // Le stockage de l'appareil est chargé avant l'interface : fichier natif sous Tauri, navigateur sinon
 createDeviceStorage().then(storage => {
   const surface = extensionSurface();

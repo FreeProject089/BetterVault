@@ -10,9 +10,12 @@ export default defineConfig({
   server: {
     port: 3000,
     open: false,
-    // Même origine que l'application : le serveur BetterVault local (npm run server) répond sous /api
+    // Même origine que l'application, comme en production : le serveur BetterVault local (npm run server)
+    // répond sous /api, sert les documents légaux (/legal) et la page d'administration (/admin)
     proxy: {
-      '/api': 'http://127.0.0.1:8787'
+      '/api': 'http://127.0.0.1:8787',
+      '/legal': 'http://127.0.0.1:8787',
+      '/admin': 'http://127.0.0.1:8787'
     }
   },
   build: {

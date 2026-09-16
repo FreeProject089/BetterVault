@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Fenêtre principale de BetterVault (bureau et mobile)",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "opener:allow-open-url"]
 }
