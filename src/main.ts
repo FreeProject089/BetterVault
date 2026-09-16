@@ -359,11 +359,111 @@ class AppController {
 
     mobileMenuToggle?.addEventListener('click', openSidebar);
     document.getElementById('mobile-more')?.addEventListener('click', openSidebar);
-    document.getElementById('mobile-add')?.addEventListener('click', () => document.getElementById('btn-add-item')?.click());
+    document.getElementById('mobile-add')?.addEventListener('click', () => this.openCreateSheet());
     mobileSidebarClose?.addEventListener('click', closeSidebar);
     overlay?.addEventListener('click', closeSidebar);
     document.querySelectorAll('.sidebar .nav-item').forEach(item => {
       item.addEventListener('click', closeSidebar);
+    });
+
+    this.initSidebarSwipe(sidebar as HTMLElement | null, openSidebar, closeSidebar);
+  }
+
+  /**
+   * Ouverture et fermeture du menu au doigt.
+   *
+   * Un glissement vers la droite parti du bord gauche ouvre le menu ; un glissement
+   * vers la gauche sur le menu le referme. Le geste n'est suivi que s'il est nettement
+   * horizontal, sinon il rendrait le défilement vertical de la liste impossible.
+   */
+  private initSidebarSwipe(sidebar: HTMLElement | null, open: () => void, close: () => void): void {
+    if (!sidebar) return;
+
+    const EDGE = 24;        // largeur de la zone de départ, au bord gauche
+    const DISTANCE = 60;    // déplacement horizontal à partir duquel le geste compte
+    const SLOPE = 1.2;      // le geste doit être plus horizontal que vertical
+
+    let startX = 0;
+    let startY = 0;
+    let tracking = false;
+    let decided = false;
+
+    const isPhoneLayout = () => window.matchMedia('(max-width: 900px)').matches;
+
+    document.addEventListener('touchstart', event => {
+      if (!isPhoneLayout() || event.touches.length !== 1) return;
+      // Une modale ouverte a ses propres gestes : on ne lui vole pas le doigt
+      if (document.querySelector('.modal-overlay')) return;
+
+      const touch = event.touches[0];
+      const opened = sidebar.classList.contains('mobile-open');
+      if (!opened && touch.clientX > EDGE) return;
+      if (opened && !sidebar.contains(event.target as Node)) return;
+
+      startX = touch.clientX;
+      startY = touch.clientY;
+      tracking = true;
+      decided = false;
+    }, { passive: true });
+
+    document.addEventListener('touchmove', event => {
+      if (!tracking || decided || event.touches.length !== 1) return;
+      const touch = event.touches[0];
+      const dx = touch.clientX - startX;
+      const dy = Math.abs(touch.clientY - startY);
+      if (Math.abs(dx) < DISTANCE || Math.abs(dx) < dy * SLOPE) return;
+
+      decided = true;
+      tracking = false;
+      if (dx > 0 && !sidebar.classList.contains('mobile-open')) open();
+      else if (dx < 0 && sidebar.classList.contains('mobile-open')) close();
+    }, { passive: true });
+
+    const stop = () => { tracking = false; };
+    document.addEventListener('touchend', stop, { passive: true });
+    document.addEventListener('touchcancel', stop, { passive: true });
+  }
+
+  /**
+   * Choix entre un élément du coffre et une tâche.
+   *
+   * Le bouton « + » de la barre du téléphone ouvre les deux mondes de l'application ;
+   * avant, il n'ouvrait que les identifiants et les tâches n'avaient pas de raccourci.
+   */
+  private openCreateSheet(): void {
+    const tr = (fr: string, en: string) => this.tr(fr, en);
+
+    const box = this.openModal(`
+      <div class="modal-header">
+        <div class="modal-title">${tr('Ajouter', 'Add')}</div>
+        <button class="modal-close" type="button">${GEN_ICONS.close}</button>
+      </div>
+      <div class="modal-body">
+        <div class="type-grid">
+          <button type="button" class="type-card" data-create="item" data-autofocus>
+            ${tabIcon('typeLogin', 18)}
+            <span class="type-card-text">
+              <span class="type-card-name">${tr('Élément du coffre', 'Vault item')}</span>
+              <span class="type-card-hint">${tr('Identifiant, note, carte, clé, fichier…', 'Login, note, card, key, file…')}</span>
+            </span>
+          </button>
+          <button type="button" class="type-card" data-create="task">
+            ${tabIcon('typeNote', 18)}
+            <span class="type-card-text">
+              <span class="type-card-name">${tr('Tâche', 'Task')}</span>
+              <span class="type-card-hint">${tr('À faire, échéance, rappel', 'To do, due date, reminder')}</span>
+            </span>
+          </button>
+        </div>
+      </div>`);
+    box.classList.add('modal-sm', 'create-sheet');
+
+    box.addEventListener('click', event => {
+      const choice = (event.target as HTMLElement).closest<HTMLElement>('[data-create]')?.dataset.create;
+      if (!choice) return;
+      this.closeModal();
+      if (choice === 'task') this.openCreateTaskModal();
+      else this.openCreateCredentialModal();
     });
   }
 
@@ -1076,9 +1176,6 @@ class AppController {
   private renderFilterBar(creds: CredentialItem[]): void {
     const bar = document.getElementById('filter-bar');
     if (!bar) return;
-    bar.hidden = creds.length === 0 && this.credentialFilters.size === 0;
-    if (bar.hidden) return;
-
     const counts = countByFilter(creds);
     const labels: Record<CredentialFilter, string> = {
       favorites: this.tr('Favoris', 'Favorites'),
@@ -1093,20 +1190,27 @@ class AppController {
     const visible = CREDENTIAL_FILTERS
       .filter(f => this.activeView !== '2fa-tokens' || f !== 'totp')
       .filter(f => counts[f] > 0 || this.credentialFilters.has(f));
+
+    // Rien à filtrer et rien à trier : la barre disparaît au lieu de tenir une ligne vide
+    bar.hidden = visible.length === 0 && creds.length < 2;
+    if (bar.hidden) return;
     const sorts: Array<[CredentialSort, string]> = [
-      ['name', this.tr('Trier : nom', 'Sort: name')],
-      ['updated', this.tr('Trier : modifiés', 'Sort: updated')],
-      ['recent', this.tr('Trier : ajoutés', 'Sort: added')],
-      ['expiry', this.tr('Trier : expiration', 'Sort: expiry')]
+      ['name', this.tr('Nom', 'Name')],
+      ['updated', this.tr('Modifiés', 'Updated')],
+      ['recent', this.tr('Ajoutés', 'Added')],
+      ['expiry', this.tr('Expiration', 'Expiry')]
     ];
 
+    // Les pastilles défilent dans leur propre bande ; le tri reste en dehors, toujours atteignable
     bar.innerHTML = `
-      ${visible.map(f => {
-        const active = this.credentialFilters.has(f);
-        return `<button type="button" class="filter-chip ${active ? 'active' : ''}" data-filter="${f}" aria-pressed="${active}">${labels[f]}<span class="filter-chip-count">${counts[f]}</span></button>`;
-      }).join('')}
-      ${this.credentialFilters.size ? `<button type="button" class="btn-primary btn-ghost filter-reset" data-action="reset">${this.tr('Effacer', 'Clear')}</button>` : ''}
-      <select class="form-input filter-sort" aria-label="${this.tr('Trier', 'Sort')}">
+      <div class="filter-bar-scroll">
+        ${visible.map(f => {
+          const active = this.credentialFilters.has(f);
+          return `<button type="button" class="filter-chip ${active ? 'active' : ''}" data-filter="${f}" aria-pressed="${active}">${labels[f]}<span class="filter-chip-count">${counts[f]}</span></button>`;
+        }).join('')}
+        ${this.credentialFilters.size ? `<button type="button" class="btn-primary btn-ghost filter-reset" data-action="reset">${this.tr('Effacer', 'Clear')}</button>` : ''}
+      </div>
+      <select class="form-input filter-sort" aria-label="${this.tr('Trier par', 'Sort by')}" title="${this.tr('Trier par', 'Sort by')}">
         ${sorts.map(([value, label]) => `<option value="${value}" ${value === this.credentialSort ? 'selected' : ''}>${label}</option>`).join('')}
       </select>`;
 
@@ -3009,29 +3113,34 @@ class AppController {
         </button>
       </div>
       <div class="modal-body">
+        <div id="task-steps"></div>
+        <div class="task-form">
+        <section data-step="essentiel" hidden>
         <div class="form-field">
-          <label class="form-label">${this.tr('Titre *', 'Title *')}</label>
-          <input class="form-input" id="task-title" type="text" placeholder="${this.tr('Renouveler le mot de passe GitHub…', 'Renew the GitHub password…')}" value="${existing?.title || ''}" autocomplete="off">
+          <label class="form-label" for="task-title">${this.tr('Titre', 'Title')}</label>
+          <input class="form-input" id="task-title" type="text" placeholder="${this.tr('Renouveler le mot de passe GitHub…', 'Renew the GitHub password…')}" value="${existing?.title || ''}" autocomplete="off" data-step-autofocus>
         </div>
         <div class="form-field">
-          <label class="form-label">Description</label>
+          <label class="form-label">${this.tr('Priorité', 'Priority')}</label>
+          <div class="priority-picker" role="radiogroup" aria-label="${this.tr('Priorité', 'Priority')}">
+            ${(['low', 'medium', 'high', 'urgent'] as const).map(level => {
+              const selected = existing ? existing.priority === level : level === 'medium';
+              return `<button type="button" class="priority-option ${selected ? 'active' : ''}" role="radio" aria-checked="${selected}" data-priority="${level}">${i18n.t.common[level]}</button>`;
+            }).join('')}
+          </div>
+          <input type="hidden" id="task-priority" value="${existing?.priority ?? 'medium'}">
+        </div>
+        <div class="form-field">
+          <label class="form-label">${this.tr('Échéance', 'Due date')}</label>
+          <div id="task-due"></div>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="task-desc">Description</label>
           <textarea class="note-editor" id="task-desc" placeholder="${this.tr('Facultatif', 'Optional')}">${existing?.description || ''}</textarea>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-          <div class="form-field">
-            <label class="form-label">${this.tr('Priorité', 'Priority')}</label>
-            <select class="form-input" id="task-priority">
-              <option value="low" ${existing?.priority === 'low' ? 'selected' : ''}>${i18n.t.common.low}</option>
-              <option value="medium" ${(!existing || existing?.priority === 'medium') ? 'selected' : ''}>${i18n.t.common.medium}</option>
-              <option value="high" ${existing?.priority === 'high' ? 'selected' : ''}>${i18n.t.common.high}</option>
-              <option value="urgent" ${existing?.priority === 'urgent' ? 'selected' : ''}>${i18n.t.common.urgent}</option>
-            </select>
-          </div>
-          <div class="form-field">
-            <label class="form-label">${this.tr('Échéance', 'Due date')}</label>
-            <div id="task-due"></div>
-          </div>
-        </div>
+        </section>
+
+        <section data-step="rappel" hidden>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
           <div class="form-field">
             <label class="form-label">${this.tr('Récurrence', 'Recurrence')}</label>
@@ -3058,6 +3167,9 @@ class AppController {
             <div id="task-reminder"></div>
           </div>
         </div>
+        </section>
+
+        <section data-step="liens" hidden>
         <div class="form-field">
           <label class="form-label">Tags</label>
           <div id="task-tags"></div>
@@ -3077,11 +3189,12 @@ class AppController {
               ${credOptions}
             </select>
           </div>` : ''}
+        </section>
+
+        <div class="form-error" id="task-form-error" role="alert" hidden></div>
+        </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn-primary" id="modal-cancel">${this.tr('Annuler', 'Cancel')}</button>
-        <button class="btn-primary" id="modal-confirm">${isEdit ? this.tr('Enregistrer', 'Save') : this.tr('Créer', 'Create')}</button>
-      </div>
+      <div class="modal-footer stepper-footer" id="task-footer"></div>
     `);
 
     box.querySelector('#modal-close-btn')?.addEventListener('click', () => this.closeModal());
@@ -3105,11 +3218,52 @@ class AppController {
       withTime: true, placeholder: trTask('Aucun rappel', 'No reminder'), describe: () => ''
     });
 
-    box.querySelector('#modal-confirm')?.addEventListener('click', () => {
+    // Choix de priorité : des boutons plutôt qu'une liste déroulante, plus rapides au doigt
+    const priorityInput = box.querySelector('#task-priority') as HTMLInputElement;
+    box.querySelector('.priority-picker')?.addEventListener('click', event => {
+      const option = (event.target as HTMLElement).closest<HTMLElement>('[data-priority]');
+      if (!option) return;
+      priorityInput.value = option.dataset.priority ?? 'medium';
+      box.querySelectorAll<HTMLElement>('.priority-option').forEach(el => {
+        const active = el === option;
+        el.classList.toggle('active', active);
+        el.setAttribute('aria-checked', String(active));
+      });
+    });
+
+    const taskError = box.querySelector('#task-form-error') as HTMLElement;
+    const failTask = (message: string, focus?: HTMLElement) => {
+      taskError.textContent = message;
+      taskError.hidden = false;
+      focus?.focus();
+    };
+
+    const checkTitle = (): string | undefined => {
+      const input = box.querySelector('#task-title') as HTMLInputElement;
+      if (input.value.trim()) return undefined;
+      input.focus();
+      return this.tr('Donnez un titre à cette tâche', 'Give this task a title');
+    };
+
+    /** La fin d'une répétition avant son échéance ne produirait jamais d'occurrence */
+    const checkRecurrence = (): string | undefined => {
+      const freq = (box.querySelector('#task-recur-freq') as HTMLSelectElement).value;
+      const until = untilField.getValue();
+      const due = dueField.getValue();
+      if (freq && until && due && until < due) {
+        return this.tr('La fin de récurrence précède l’échéance', 'Recurrence end is before the due date');
+      }
+      return undefined;
+    };
+
+    const saveTask = () => {
+      taskError.hidden = true;
+      const problem = checkTitle() ?? checkRecurrence();
+      if (problem) return failTask(problem);
+
       const title = (box.querySelector('#task-title') as HTMLInputElement)?.value.trim();
-      if (!title) { this.showToast(this.tr('Le titre est obligatoire', 'Title is required'), 'error'); return; }
       const description = (box.querySelector('#task-desc') as HTMLTextAreaElement)?.value;
-      const priority = (box.querySelector('#task-priority') as HTMLSelectElement)?.value as Task['priority'];
+      const priority = priorityInput.value as Task['priority'];
       const dueDate = dueField.getValue();
       const linkedCredSel = box.querySelector('#task-cred') as HTMLSelectElement;
       const linkedCred = linkedCredSel?.value || undefined;
@@ -3118,10 +3272,6 @@ class AppController {
       const interval = Math.min(365, Math.max(1, parseInt((box.querySelector('#task-recur-interval') as HTMLInputElement).value, 10) || 1));
       const until = untilField.getValue() || undefined;
       const recurrence: TaskRecurrence | undefined = freq ? { freq, interval, until } : undefined;
-      if (recurrence && until && dueDate && until < dueDate) {
-        this.showToast(this.tr('La fin de récurrence précède l’échéance', 'Recurrence end is before the due date'), 'error');
-        return;
-      }
 
       const reminderValue = reminderField.getValue();
       const reminderAt = reminderValue ? new Date(reminderValue).getTime() : undefined;
@@ -3131,8 +3281,7 @@ class AppController {
       const dependsOn = Array.from(box.querySelectorAll<HTMLInputElement>('.task-dep-check:checked')).map(el => el.value);
       const allTasks = vaultStore.getData().tasks;
       if (existing && wouldCreateDependencyCycle(allTasks, existing.id, dependsOn)) {
-        this.showToast(this.tr('Dépendance circulaire : une tâche choisie dépend déjà de celle-ci', 'Circular dependency: a selected task already depends on this one'), 'error', 5000);
-        return;
+        return failTask(this.tr('Dépendance circulaire : une tâche choisie dépend déjà de celle-ci', 'Circular dependency: a selected task already depends on this one'));
       }
       const hasOpenBlockers = getOpenBlockers({ dependsOn } as Task, allTasks).length > 0;
 
@@ -3174,6 +3323,23 @@ class AppController {
         this.closeModal();
         this.showToast(this.tr('Tâche créée', 'Task created'), 'success');
       }
+    };
+
+    mountStepper({
+      body: box.querySelector('.task-form') as HTMLElement,
+      header: box.querySelector('#task-steps') as HTMLElement,
+      footer: box.querySelector('#task-footer') as HTMLElement,
+      steps: [
+        { id: 'essentiel', label: this.tr('L’essentiel', 'Essentials'), validate: checkTitle },
+        { id: 'rappel', label: this.tr('Répétition', 'Repeat'), validate: checkRecurrence },
+        { id: 'liens', label: this.tr('Liens', 'Links') }
+      ],
+      tr: (fr, en) => this.tr(fr, en),
+      finishLabel: isEdit ? this.tr('Enregistrer', 'Save') : this.tr('Créer', 'Create'),
+      onFinish: saveTask,
+      onError: message => failTask(message),
+      onStepChange: () => { taskError.hidden = true; },
+      onCancel: () => this.closeModal()
     });
   }
 

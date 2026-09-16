@@ -20,6 +20,7 @@ export interface Translations {
     high: string;
     urgent: string;
     personal: string;
+    add: string;
     work: string;
     team: string;
   };
@@ -98,6 +99,7 @@ export const fr: Translations = {
     high: 'Haute',
     urgent: 'Urgente',
     personal: 'Perso',
+    add: 'Ajouter',
     work: 'Travail',
     team: 'Équipe'
   },
@@ -176,6 +178,7 @@ export const en: Translations = {
     high: 'High',
     urgent: 'Urgent',
     personal: 'Personal',
+    add: 'Add',
     work: 'Work',
     team: 'Team'
   },

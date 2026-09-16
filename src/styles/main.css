@@ -100,7 +100,7 @@ body {
 /* Layout 3 Colonnes */
 .app-container {
   display: grid;
-  grid-template-columns: 260px 380px 1fr;
+  grid-template-columns: 260px 380px minmax(0, 1fr);
   height: 100vh;
   width: 100vw;
   background-color: var(--bg-primary);
@@ -947,7 +947,7 @@ body {
 /* Mobile Responsive Layout & Drawer Navigation */
 @media (max-width: 900px) {
   .app-container {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     position: relative;
     overflow: hidden;
   }
