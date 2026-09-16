@@ -215,10 +215,10 @@ async fn native_call(app: tauri::AppHandle, method: String, payload: serde_json:
     #[cfg(target_os = "android")]
     {
         let handle = app.state::<native::Native<tauri::Wry>>().0.clone();
-        return tauri::async_runtime::spawn_blocking(move || handle.run_mobile_plugin::<serde_json::Value>(&method, payload))
+        tauri::async_runtime::spawn_blocking(move || handle.run_mobile_plugin::<serde_json::Value>(&method, payload))
             .await
             .map_err(|e| e.to_string())?
-            .map_err(|e| e.to_string());
+            .map_err(|e| e.to_string())
     }
     #[cfg(not(target_os = "android"))]
     {
@@ -276,19 +276,19 @@ mod touch_id {
 async fn desktop_biometric_status() -> bool {
     #[cfg(target_os = "macos")]
     {
-        return tauri::async_runtime::spawn_blocking(touch_id::available).await.unwrap_or(false);
+        tauri::async_runtime::spawn_blocking(touch_id::available).await.unwrap_or(false)
     }
     #[cfg(windows)]
     {
         use windows::Security::Credentials::UI::{UserConsentVerifier, UserConsentVerifierAvailability};
-        return tauri::async_runtime::spawn_blocking(|| {
+        tauri::async_runtime::spawn_blocking(|| {
             UserConsentVerifier::CheckAvailabilityAsync()
                 .and_then(|op| op.get())
                 .map(|availability| availability == UserConsentVerifierAvailability::Available)
                 .unwrap_or(false)
         })
         .await
-        .unwrap_or(false);
+        .unwrap_or(false)
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     false
@@ -299,22 +299,22 @@ async fn desktop_biometric_status() -> bool {
 async fn desktop_biometric_verify(reason: String) -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
-        return tauri::async_runtime::spawn_blocking(move || touch_id::verify(&reason))
+        tauri::async_runtime::spawn_blocking(move || touch_id::verify(&reason))
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?
     }
     #[cfg(windows)]
     {
         use windows::core::HSTRING;
         use windows::Security::Credentials::UI::{UserConsentVerificationResult, UserConsentVerifier};
-        return tauri::async_runtime::spawn_blocking(move || {
+        tauri::async_runtime::spawn_blocking(move || {
             UserConsentVerifier::RequestVerificationAsync(&HSTRING::from(reason))
                 .and_then(|op| op.get())
                 .map(|result| result == UserConsentVerificationResult::Verified)
                 .map_err(|e| e.to_string())
         })
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {

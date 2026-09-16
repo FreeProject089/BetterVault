@@ -5917,6 +5917,12 @@ document.addEventListener('click', event => {
   if (!input) return;
   event.preventDefault();
   openFullTab();
+  const fr = i18n.getLocale().startsWith('fr');
+  pushToast(
+    fr ? 'Le choix du fichier s’ouvre dans un onglet : le popup se ferme dès qu’on ouvre le sélecteur.'
+       : 'File picking opens in a tab: the popup closes as soon as the picker opens.',
+    { kind: 'info', duration: 5000, closeLabel: fr ? 'Fermer' : 'Close' }
+  );
 }, true);
 
 // Le stockage de l'appareil est chargé avant l'interface : fichier natif sous Tauri, navigateur sinon
