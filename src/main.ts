@@ -1,4 +1,4 @@
-import { TAG_COLORS, vaultStore } from './store/vaultStore';
+import { randomId, TAG_COLORS, vaultStore } from './store/vaultStore';
 import type { CredentialItem, Task } from './types/vault';
 import { extractDomain, getServiceIconSvg } from './icons/serviceIcons';
 import { renderItemIcon, type ItemIcon } from './icons/iconLibrary';
@@ -26,7 +26,8 @@ import { CameraQrScanner, decodeQrFromFile } from './crypto/qrScanner';
 import { AccountService, type SyncStatus } from './account/accountService';
 import { SharedReadOnlyError, SharedVaultManager } from './account/sharedVaults';
 import { setApiLocale, type AccountSession, type SharedMember, type SharedPermission, type SharedRole } from './account/cloudClient';
-import { decryptFile, encryptFile, type AttachmentMeta } from './account/attachmentCrypto';
+import { decryptFile, encryptFile, formatLimit, localAttachmentBytes, MAX_LOCAL_ATTACHMENT_BYTES, type AttachmentMeta } from './account/attachmentCrypto';
+import { fromBase64, toBase64 } from './account/accountCrypto';
 import { createDeviceStorage } from './platform/storage';
 import { isTauri, openExternal } from './platform/tauriBridge';
 import type { UnlockedVaultData } from './types/vault';
@@ -1768,7 +1769,7 @@ class AppController {
       if (confirmed) {
         // Les fichiers chiffrés de l'identifiant sont retirés du serveur
         for (const file of cred.attachments ?? []) {
-          void accountService.withCloud(client => client.deleteAttachment(file.id)).catch(() => undefined);
+          if (!file.data) void accountService.withCloud(client => client.deleteAttachment(file.id)).catch(() => undefined);
         }
         vaultStore.deleteCredential(cred.id);
         this.selectedItemId = null;
@@ -2376,11 +2377,12 @@ class AppController {
             </label>
             <div class="form-field" id="attachments-field">
               <label class="form-label" id="attachments-label">${tr('Pièces jointes', 'Attachments')}</label>
-              ${accountService.isCloud() ? `
-                <div class="pending-files" id="field-files"></div>
-                <label class="btn-primary btn-ghost" style="align-self:flex-start;cursor:pointer;">+ ${tr('Ajouter un fichier', 'Add a file')}<input type="file" id="field-files-input" multiple hidden></label>
-                <span class="field-hint">${tr('Chiffrés sur cet appareil, puis envoyés à votre serveur.', 'Encrypted on this device, then uploaded to your server.')}</span>`
-                : `<span class="field-hint">${tr('Les pièces jointes demandent un compte synchronisé.', 'Attachments need a synced account.')}</span>`}
+              <div class="pending-files" id="field-files"></div>
+              <label class="btn-primary btn-ghost" style="align-self:flex-start;cursor:pointer;">+ ${tr('Ajouter un fichier', 'Add a file')}<input type="file" id="field-files-input" multiple hidden></label>
+              <span class="field-hint">${accountService.isCloud()
+                ? tr('Chiffrés sur cet appareil, puis envoyés à votre serveur.', 'Encrypted on this device, then uploaded to your server.')
+                : tr(`Chiffrés et gardés dans le coffre, sur cet appareil. ${formatLimit(MAX_LOCAL_ATTACHMENT_BYTES, 'fr')} par fichier ; la synchronisation lève cette limite.`,
+                     `Encrypted and kept inside the vault, on this device. ${formatLimit(MAX_LOCAL_ATTACHMENT_BYTES, 'en')} per file; syncing lifts that limit.`)}</span>
             </div>
           </section>
 
@@ -2639,8 +2641,9 @@ class AppController {
     box.querySelector<HTMLInputElement>('#field-files-input')?.addEventListener('change', event => {
       const input = event.target as HTMLInputElement;
       for (const file of [...(input.files ?? [])]) {
-        if (file.size > limits.maxAttachmentBytes) {
-          this.showToast(tr(`${file.name} dépasse ${Math.round(limits.maxAttachmentBytes / 1048576)} Mo`, `${file.name} is larger than ${Math.round(limits.maxAttachmentBytes / 1048576)} MB`), 'error');
+        const maxBytes = this.attachmentSizeLimit(existing?.vaultId ?? vaultStore.getData().activeVaultId);
+        if (file.size > maxBytes) {
+          this.showToast(this.attachmentTooLargeMessage(file.name, maxBytes), 'error', 5000);
           continue;
         }
         pendingFiles.push(file);
@@ -2658,12 +2661,9 @@ class AppController {
     /** Envoi des fichiers en attente, une fois l'identifiant enregistré */
     const uploadPendingFiles = async (credentialId: string, vaultId: string) => {
       if (!pendingFiles.length) return;
-      const sharedId = sharedVaults.isShared(vaultId) ? vaultId : undefined;
       for (const file of pendingFiles) {
         try {
-          const { payload, key } = await encryptFile(new Uint8Array(await file.arrayBuffer()));
-          const uploaded = await accountService.withCloud(client => client.uploadAttachment(payload, sharedId));
-          const meta: AttachmentMeta = { id: uploaded.id, name: file.name, size: file.size, type: file.type, key, createdAt: Date.now() };
+          const meta = await this.storeAttachment(file, vaultId);
           const current = vaultStore.getData().credentials.find(c => c.id === credentialId);
           vaultStore.updateCredential(credentialId, { attachments: [...(current?.attachments ?? []), meta] });
         } catch (err) {
@@ -4180,7 +4180,7 @@ class AppController {
     const tr = (fr: string, en: string) => this.tr(fr, en);
     const files = cred.attachments ?? [];
     const formatSize = formatFileSize;
-    const available = accountService.isCloud();
+    const localFiles = this.storesAttachmentsLocally(cred.vaultId);
     return `
       <div class="field-group">
         <div class="section-divider" style="margin-bottom:8px;">${tr('Pièces jointes', 'Attachments')} (${files.length})</div>
@@ -4194,15 +4194,16 @@ class AppController {
               <button class="icon-btn" type="button" data-attachment-action="delete" title="${tr('Supprimer', 'Delete')}" aria-label="${tr('Supprimer', 'Delete')}">${ACTION_ICONS.trash}</button>
             </div>`).join('')}
         </div>
-        ${available
-          ? `<label class="btn-primary btn-ghost" style="align-self:flex-start;cursor:pointer;">+ ${tr('Ajouter un fichier', 'Add a file')}<input type="file" data-attachment-input multiple hidden></label>`
-          : `<div class="field-hint">${tr('Les pièces jointes demandent un compte synchronisé : elles sont chiffrées puis stockées sur votre serveur.', 'Attachments need a synced account: they are encrypted and stored on your server.')}</div>`}
+        <label class="btn-primary btn-ghost" style="align-self:flex-start;cursor:pointer;">+ ${tr('Ajouter un fichier', 'Add a file')}<input type="file" data-attachment-input multiple hidden></label>
+        <div class="field-hint">${localFiles
+          ? tr(`Chiffrés et gardés dans le coffre, sur cet appareil. ${formatLimit(MAX_LOCAL_ATTACHMENT_BYTES, 'fr')} par fichier.`,
+               `Encrypted and kept inside the vault, on this device. ${formatLimit(MAX_LOCAL_ATTACHMENT_BYTES, 'en')} per file.`)
+          : tr('Chiffrés sur cet appareil, puis stockés sur votre serveur.', 'Encrypted on this device, then stored on your server.')}</div>
       </div>`;
   }
 
   private bindAttachments(container: HTMLElement, cred: CredentialItem): void {
     const tr = (fr: string, en: string) => this.tr(fr, en);
-    const sharedId = sharedVaults.isShared(cred.vaultId) ? cred.vaultId : undefined;
     const current = () => vaultStore.getData().credentials.find(c => c.id === cred.id);
 
     container.querySelector<HTMLInputElement>('[data-attachment-input]')?.addEventListener('change', async e => {
@@ -4210,16 +4211,14 @@ class AppController {
       const files = [...(input.files ?? [])];
       input.value = '';
       if (!files.length || !this.canEdit(cred.vaultId, 'attachments')) return;
-      const limits = accountService.getLimits();
+      const maxBytes = this.attachmentSizeLimit(cred.vaultId);
       for (const file of files) {
-        if (file.size > limits.maxAttachmentBytes) {
-          this.showToast(tr(`${file.name} dépasse ${Math.round(limits.maxAttachmentBytes / 1048576)} Mo`, `${file.name} is larger than ${Math.round(limits.maxAttachmentBytes / 1048576)} MB`), 'error');
+        if (file.size > maxBytes) {
+          this.showToast(this.attachmentTooLargeMessage(file.name, maxBytes), 'error', 5000);
           continue;
         }
         try {
-          const { payload, key } = await encryptFile(new Uint8Array(await file.arrayBuffer()));
-          const uploaded = await accountService.withCloud(client => client.uploadAttachment(payload, sharedId));
-          const meta: AttachmentMeta = { id: uploaded.id, name: file.name, size: file.size, type: file.type, key, createdAt: Date.now() };
+          const meta = await this.storeAttachment(file, cred.vaultId);
           vaultStore.updateCredential(cred.id, { attachments: [...(current()?.attachments ?? []), meta] });
           this.showToast(tr(`${file.name} ajouté`, `${file.name} added`), 'success');
         } catch (err) {
@@ -4236,8 +4235,7 @@ class AppController {
         if (button.dataset.attachmentAction === 'preview') {
           button.disabled = true;
           try {
-            const payload = await accountService.withCloud(client => client.downloadAttachment(meta.id));
-            this.openAttachmentPreview(meta, await decryptFile(payload, meta.key));
+            this.openAttachmentPreview(meta, await this.loadAttachment(meta));
           } catch (err) {
             this.showToast(accountErrorMessage(err), 'error');
           } finally {
@@ -4248,8 +4246,7 @@ class AppController {
         if (button.dataset.attachmentAction === 'download') {
           button.disabled = true;
           try {
-            const payload = await accountService.withCloud(client => client.downloadAttachment(meta.id));
-            downloadExportFile(await decryptFile(payload, meta.key), meta.name, meta.type || 'application/octet-stream');
+            downloadExportFile(await this.loadAttachment(meta), meta.name, meta.type || 'application/octet-stream');
           } catch (err) {
             this.showToast(accountErrorMessage(err), 'error');
           } finally {
@@ -4260,20 +4257,78 @@ class AppController {
         if (!this.canEdit(cred.vaultId, 'attachments')) return;
         const confirmed = await this.confirmDialog({
           title: tr('Supprimer la pièce jointe ?', 'Delete attachment?'),
-          message: tr(`${meta.name} sera supprimé du serveur.`, `${meta.name} will be deleted from the server.`),
+          message: meta.data
+            ? tr(`${meta.name} sera supprimé du coffre.`, `${meta.name} will be deleted from the vault.`)
+            : tr(`${meta.name} sera supprimé du serveur.`, `${meta.name} will be deleted from the server.`),
           confirmLabel: tr('Supprimer', 'Delete'),
           danger: true
         });
         if (!confirmed) return;
         try {
-          await accountService.withCloud(client => client.deleteAttachment(meta.id)).catch(err => {
-            if (!(err instanceof Error && 'status' in err && (err as { status: number }).status === 404)) throw err;
-          });
+          await this.removeAttachment(meta);
           vaultStore.updateCredential(cred.id, { attachments: (current()?.attachments ?? []).filter(a => a.id !== meta.id) });
         } catch (err) {
           this.showToast(accountErrorMessage(err), 'error');
         }
       });
+    });
+  }
+
+  /**
+   * Un fichier va sur le serveur quand le compte est synchronisé, et dans le coffre lui-même
+   * sinon. Les trois méthodes suivantes cachent cette différence au reste de l'interface.
+   */
+  private storesAttachmentsLocally(vaultId: string): boolean {
+    return !accountService.isCloud() && !sharedVaults.isShared(vaultId);
+  }
+
+  /** Taille maximale d'un fichier pour ce coffre */
+  private attachmentSizeLimit(vaultId: string): number {
+    return this.storesAttachmentsLocally(vaultId)
+      ? MAX_LOCAL_ATTACHMENT_BYTES
+      : accountService.getLimits().maxAttachmentBytes;
+  }
+
+  /** Explique la limite, qui n'est pas la même selon l'endroit où le fichier irait */
+  private attachmentTooLargeMessage(name: string, maxBytes: number): string {
+    const taille = formatLimit(maxBytes, 'fr');
+    const size = formatLimit(maxBytes, 'en');
+    return maxBytes === MAX_LOCAL_ATTACHMENT_BYTES
+      ? this.tr(
+          `${name} dépasse ${taille}. Les fichiers sont gardés dans le coffre tant qu'il n'est pas synchronisé ; activez la synchronisation pour des fichiers plus gros.`,
+          `${name} is larger than ${size}. Files are kept inside the vault until it is synced; turn on sync for larger files.`)
+      : this.tr(`${name} dépasse ${taille}`, `${name} is larger than ${size}`);
+  }
+
+  private async storeAttachment(file: File, vaultId: string): Promise<AttachmentMeta> {
+    const { payload, key } = await encryptFile(new Uint8Array(await file.arrayBuffer()));
+    const base = { name: file.name, size: file.size, type: file.type, key, createdAt: Date.now() };
+
+    if (this.storesAttachmentsLocally(vaultId)) {
+      const data = toBase64(payload);
+      // Les fichiers partagent la place du coffre : on garde de la marge pour le reste
+      const budget = Math.floor(accountService.getLimits().maxVaultBytes / 2);
+      const used = vaultStore.getData().credentials.reduce((total, c) => total + localAttachmentBytes(c.attachments), 0);
+      if (used + data.length > budget) {
+        throw new Error(`Les fichiers gardés dans ce coffre dépassent ${Math.round(budget / 1048576)} Mo`);
+      }
+      return { ...base, id: randomId('att'), data };
+    }
+    const sharedId = sharedVaults.isShared(vaultId) ? vaultId : undefined;
+    const uploaded = await accountService.withCloud(client => client.uploadAttachment(payload, sharedId));
+    return { ...base, id: uploaded.id };
+  }
+
+  private async loadAttachment(meta: AttachmentMeta): Promise<Uint8Array> {
+    const payload = meta.data ? fromBase64(meta.data) : await accountService.withCloud(client => client.downloadAttachment(meta.id));
+    return decryptFile(payload, meta.key);
+  }
+
+  /** Retire le fichier du serveur ; celui qui est dans le coffre disparaît avec son élément */
+  private async removeAttachment(meta: AttachmentMeta): Promise<void> {
+    if (meta.data) return;
+    await accountService.withCloud(client => client.deleteAttachment(meta.id)).catch(err => {
+      if (!(err instanceof Error && 'status' in err && (err as { status: number }).status === 404)) throw err;
     });
   }
 

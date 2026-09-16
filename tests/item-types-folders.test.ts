@@ -226,3 +226,48 @@ describe('Export vers les autres gestionnaires', () => {
     expect(csv).not.toContain('Numéro:');
   });
 });
+
+describe('Pièces jointes gardées dans le coffre', () => {
+  it('chiffre, relit et refuse une clé fausse', async () => {
+    const { encryptFile, decryptFile } = await import('../src/account/attachmentCrypto');
+    const { toBase64, fromBase64 } = await import('../src/account/accountCrypto');
+
+    const clair = new TextEncoder().encode('Contenu confidentiel');
+    const { payload, key } = await encryptFile(clair);
+
+    // Le contenu voyage en base64 dans le coffre : l'aller-retour ne doit rien changer
+    const range = toBase64(payload);
+    const relu = await decryptFile(fromBase64(range), key);
+    expect(new TextDecoder().decode(relu)).toBe('Contenu confidentiel');
+
+    const autre = (await encryptFile(clair)).key;
+    await expect(decryptFile(fromBase64(range), autre)).rejects.toThrow('Pièce jointe altérée ou clé incorrecte');
+  });
+
+  it('garde le contenu au passage par normalizeAttachments et refuse ce qui n’est pas du base64', async () => {
+    const { normalizeAttachments } = await import('../src/account/attachmentCrypto');
+
+    const gardé = normalizeAttachments([
+      { id: 'att-0123456789', name: 'contrat.txt', size: 32, type: 'text/plain', key: 'k', data: 'AAEC', createdAt: 1 }
+    ]);
+    expect(gardé?.[0].data).toBe('AAEC');
+
+    const nettoyé = normalizeAttachments([
+      { id: 'att-0123456789', name: 'contrat.txt', size: 32, type: 'text/plain', key: 'k', data: '<script>', createdAt: 1 }
+    ]);
+    expect(nettoyé?.[0].data).toBeUndefined();
+  });
+
+  it('compte la place prise dans le coffre', async () => {
+    const { localAttachmentBytes, formatLimit, MAX_LOCAL_ATTACHMENT_BYTES } = await import('../src/account/attachmentCrypto');
+
+    expect(localAttachmentBytes(undefined)).toBe(0);
+    expect(localAttachmentBytes([
+      { id: 'a', name: 'x', size: 3, type: '', key: 'k', data: 'AAEC', createdAt: 1 },
+      { id: 'b', name: 'y', size: 3, type: '', key: 'k', createdAt: 1 }
+    ])).toBe(4);
+
+    expect(formatLimit(MAX_LOCAL_ATTACHMENT_BYTES, 'fr')).toBe('1 Mo');
+    expect(formatLimit(512 * 1024, 'en')).toBe('512 KB');
+  });
+});
