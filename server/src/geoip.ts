@@ -14,6 +14,8 @@ export interface GeoResult {
 
 export interface GeoLookup {
   lookup(ip: string): GeoResult | null;
+  /** Base réellement chargée (une localisation remplaçable peut être vide pour l'instant) */
+  available?(): boolean;
 }
 
 const MARKER = Buffer.concat([Buffer.from([0xab, 0xcd, 0xef]), Buffer.from('MaxMind.com')]);

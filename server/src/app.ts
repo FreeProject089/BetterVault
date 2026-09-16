@@ -129,6 +129,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
   }
 
   const limitsFor = createLimitsResolver(db, () => settings, now);
+  const geoAvailable = () => (options.geo ? options.geo.available?.() ?? true : false);
 
   // Le coffre est transmis en base64 dans du JSON : marge de 40 % et quelques Ko pour l'enveloppe
   const maxBody = () => Math.ceil(settings.limits.maxVaultBytes * 1.4) + 64 * 1024;
@@ -701,7 +702,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     backupsEnabled: settings.backup.enabled && !!settings.backup.s3,
     emailEnabled: !!settings.smtp,
     billingEnabled: settings.billing.enabled,
-    geoEnabled: !!options.geo,
+    geoEnabled: geoAvailable(),
     sessionDays: Math.round(sessionTtl / 86_400_000)
   });
   const legalDir = options.legalDir ?? fileURLToPath(new URL('../legal', import.meta.url));
@@ -730,7 +731,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
           system: options.metrics?.snapshot() ?? null,
           backups: { enabled: settings.backup.enabled, runs: backup?.history().slice(0, 5) ?? [] },
           security: {
-            geoEnabled: !!options.geo,
+            geoEnabled: geoAvailable(),
             emailEnabled: !!settings.smtp,
             registrationOpen: settings.registrationOpen,
             legalConfigured: legalConfigured(settings.legal),
