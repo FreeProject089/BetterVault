@@ -18,7 +18,8 @@ Les dossiers rangent les éléments **en arborescence à l'intérieur d'un coffr
 - **Ouvrir** : cliquez sur son nom. La liste ne montre alors que son contenu, **sous-dossiers compris**, et un fil d'Ariane apparaît en haut pour remonter à chaque niveau.
 - **Déplier** : le chevron à gauche du nom. Les dossiers ouverts restent ouverts d'une session à l'autre.
 - **Renommer ou déplacer** : icône crayon au survol du dossier.
-- **Ranger un élément** : champ **Dossier**, à l'étape *Détails* de son formulaire.
+- **Ranger un élément** : glissez-le depuis la liste sur un dossier de la barre latérale, ou utilisez le champ **Dossier** à l'étape *Détails* de son formulaire. Un message propose d'annuler juste après le déplacement.
+- **Sortir un élément d'un dossier** : glissez-le sur **Tout le coffre**, dans le fil d'Ariane.
 
 Le compteur d'un dossier inclut le contenu de ses sous-dossiers.
 

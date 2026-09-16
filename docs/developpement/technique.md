@@ -58,6 +58,14 @@ Deux décisions de conception :
 - **Un élément sans type enregistré est un identifiant.** Les coffres d'avant les types se lisent tels quels : il n'y a aucune migration à jouer, donc aucun risque d'en rater une sur un appareil resté hors ligne.
 - **Les champs d'un type vivent dans leur propre clé** (`card`, `identity`, `sshKey`), et `payloadForType` ne garde que ceux du type courant. Changer le type d'un élément ne laisse donc pas traîner les données de l'ancien, et un import ne peut pas glisser un champ inconnu dans le coffre.
 
+## Pièces jointes : deux rangements, une seule interface
+
+Un fichier est toujours chiffré sur l'appareil avec sa propre clé, rangée dans le coffre. Seul l'endroit où atterrit le contenu chiffré change : le serveur pour un compte synchronisé, le coffre lui-même (`AttachmentMeta.data`, en base64) sinon.
+
+Trois méthodes — `storeAttachment`, `loadAttachment`, `removeAttachment` — cachent cette différence au reste de l'interface, qui ne sait pas laquelle des deux voies est utilisée. C'est ce qui a permis d'ouvrir les pièces jointes aux coffres locaux sans toucher aux écrans.
+
+Le rangement dans le coffre a une limite bien plus basse (1 Mo par fichier, la moitié de la taille du coffre au total) : le contenu est déchiffré en mémoire avec tout le coffre à chaque ouverture, et le base64 l'alourdit d'un tiers.
+
 ## Une seule interface, quatre surfaces
 
 Le même `index.html` et le même bundle servent partout. Ce qui change est détecté à l'exécution :

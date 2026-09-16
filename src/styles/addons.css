@@ -3638,3 +3638,19 @@ button.shortcut-key:hover { border-color: var(--accent); }
 .auth-card .stepper-footer { margin-top: 4px; }
 .auth-card .stepper-actions { flex: 1 1 auto; }
 .auth-card .stepper-actions .btn-primary { flex: 1 1 auto; justify-content: center; }
+
+/* Glisser une ligne de liste sur un dossier */
+.record-row[draggable="true"] { cursor: grab; }
+.record-row[draggable="true"]:active { cursor: grabbing; }
+
+/* Pendant le glissement, les dossiers se signalent comme cibles */
+body.dragging-item .folder-item { outline: 1px dashed var(--border-subtle); outline-offset: -2px; }
+
+.folder-item.folder-drop {
+  background-color: color-mix(in srgb, var(--accent) 20%, transparent);
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+}
+
+body.dragging-item .folder-breadcrumb button { outline: 1px dashed var(--border-subtle); }
+.folder-breadcrumb button.folder-drop { background-color: color-mix(in srgb, var(--accent) 20%, transparent); outline: 1px solid var(--accent); color: var(--text-primary); }

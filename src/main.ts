@@ -368,8 +368,8 @@ class AppController {
   }
 
   /* ── Notifications ─────────────────────────────────────────────────────── */
-  public showToast(message: string, type: 'success' | 'info' | 'error' | 'warning' = 'info', durationMs?: number): void {
-    pushToast(message, { kind: type, duration: durationMs, closeLabel: this.tr('Fermer', 'Close') });
+  public showToast(message: string, type: 'success' | 'info' | 'error' | 'warning' = 'info', durationMs?: number, action?: { label: string; run: () => void }): void {
+    pushToast(message, { kind: type, duration: durationMs, closeLabel: this.tr('Fermer', 'Close'), action });
   }
 
   private dateLocale(): string {
@@ -959,7 +959,8 @@ class AppController {
     const addBreadcrumb = () => {
       if (!this.activeFolderId) return;
       container.insertAdjacentHTML('afterbegin', this.renderFolderBreadcrumb());
-      container.querySelector('.folder-breadcrumb')?.addEventListener('click', event => {
+      const breadcrumb = container.querySelector('.folder-breadcrumb');
+      breadcrumb?.addEventListener('click', event => {
         const crumb = (event.target as HTMLElement).closest<HTMLElement>('[data-folder-crumb]');
         if (!crumb) return;
         this.activeFolderId = crumb.dataset.folderCrumb || null;
@@ -967,6 +968,26 @@ class AppController {
         this.renderSidebar();
         this.renderList();
         this.renderDetail(null);
+      });
+
+      // Le fil d'Ariane accepte aussi le dépôt : c'est ce qui permet de ressortir un élément
+      breadcrumb?.querySelectorAll<HTMLElement>('[data-folder-crumb]').forEach(crumb => {
+        crumb.addEventListener('dragover', event => {
+          const drag = event as DragEvent;
+          if (!drag.dataTransfer?.types.includes('text/bettervault-item')) return;
+          drag.preventDefault();
+          drag.dataTransfer.dropEffect = 'move';
+          crumb.classList.add('folder-drop');
+        });
+        crumb.addEventListener('dragleave', () => crumb.classList.remove('folder-drop'));
+        crumb.addEventListener('drop', event => {
+          const drag = event as DragEvent;
+          const id = drag.dataTransfer?.getData('text/bettervault-item');
+          crumb.classList.remove('folder-drop');
+          if (!id) return;
+          drag.preventDefault();
+          this.moveItemToFolder(id, crumb.dataset.folderCrumb || null);
+        });
       });
     };
 
@@ -1008,6 +1029,17 @@ class AppController {
       const row = document.createElement('div');
       row.className = `record-row ${this.selectedItemId === cred.id ? 'selected' : ''}`;
       row.tabIndex = 0;
+      // Glisser une ligne sur un dossier de la barre latérale l'y range
+      row.draggable = true;
+      row.addEventListener('dragstart', event => {
+        event.dataTransfer?.setData('text/bettervault-item', cred.id);
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+        document.body.classList.add('dragging-item');
+      });
+      row.addEventListener('dragend', () => {
+        document.body.classList.remove('dragging-item');
+        document.querySelectorAll('.folder-drop').forEach(el => el.classList.remove('folder-drop'));
+      });
       const expiry = renderExpiryBadge(expiryInfo(cred.expiresAt, tr, locale, now), { hideOk: true });
 
       row.innerHTML = `
@@ -6090,12 +6122,56 @@ class AppController {
           if ((event as KeyboardEvent).key === 'Enter') open();
         });
 
+        li.addEventListener('dragover', event => {
+          if (!event.dataTransfer?.types.includes('text/bettervault-item')) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
+          li.classList.add('folder-drop');
+        });
+        li.addEventListener('dragleave', () => li.classList.remove('folder-drop'));
+        li.addEventListener('drop', event => {
+          const id = event.dataTransfer?.getData('text/bettervault-item');
+          li.classList.remove('folder-drop');
+          if (!id) return;
+          event.preventDefault();
+          this.moveItemToFolder(id, folder.id);
+        });
+
         list.appendChild(li);
         if (expanded) addLevel(folder.id, depth + 1);
       }
     };
 
     addLevel('', 0);
+  }
+
+  /** Range un élément dans un dossier et propose de revenir en arrière */
+  private moveItemToFolder(credentialId: string, folderId: string | null): void {
+    const item = vaultStore.getData().credentials.find(c => c.id === credentialId);
+    const folder = folderId ? vaultStore.getFolder(folderId) : undefined;
+    if (!item || (folderId && !folder)) return;
+    if ((item.folderId ?? null) === folderId) return;
+    if (!this.canEdit(item.vaultId, 'write')) return;
+
+    const previous = item.folderId ?? null;
+    try {
+      vaultStore.moveToFolder(credentialId, folderId);
+    } catch (err) {
+      this.showToast(accountErrorMessage(err), 'error');
+      return;
+    }
+    this.renderSidebar();
+    this.renderList();
+
+    const where = folder ? folder.name : this.tr('la racine du coffre', 'the vault root');
+    this.showToast(this.tr(`${item.title} rangé dans ${where}`, `${item.title} moved to ${where}`), 'success', 5000, {
+      label: this.tr('Annuler', 'Undo'),
+      run: () => {
+        vaultStore.moveToFolder(credentialId, previous);
+        this.renderSidebar();
+        this.renderList();
+      }
+    });
   }
 
   /** Création ou renommage d'un dossier */

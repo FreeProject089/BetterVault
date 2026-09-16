@@ -21,8 +21,7 @@ Les champs sensibles — numéro de carte, cryptogramme, code, numéro de pièce
 !!! note "Changer le type d'un élément"
     Modifier un élément permet de changer son type. Les champs de l'ancien type ne sont pas conservés : une carte transformée en note perd son numéro.
 
-!!! warning "Fichier et dossier de fichiers"
-    Ces deux types reposent sur les pièces jointes, qui demandent un **compte synchronisé**. Sur un coffre gardé sur cet appareil, l'élément se crée mais reste vide.
+Les types **Fichier** et **Dossier de fichiers** rangent leur contenu en [pièces jointes](pieces-jointes.md), qui fonctionnent aussi bien sur un coffre synchronisé que sur un coffre gardé sur l'appareil — seule la taille permise change.
 
 Le numéro d'une carte est vérifié par le contrôle de Luhn : une faute de frappe est signalée avant l'enregistrement.
 
