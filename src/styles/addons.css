@@ -3320,3 +3320,52 @@ body.ext-panel .mobile-tabbar {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ── Raccourcis clavier modifiables ─────────────────────────────────────── */
+.shortcut-list { display: flex; flex-direction: column; gap: 6px; }
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 8px 7px 12px;
+  font-size: 13px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.shortcut-row.fixed { margin-top: 6px; opacity: 0.75; }
+.shortcut-row.custom { border-color: color-mix(in srgb, var(--accent) 45%, var(--border-subtle)); }
+
+.shortcut-actions { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+
+.shortcut-key {
+  min-width: 64px;
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+}
+
+button.shortcut-key { cursor: pointer; }
+button.shortcut-key:hover { border-color: var(--accent); }
+
+.shortcut-key.recording {
+  color: var(--accent);
+  border-color: var(--accent);
+  animation: shortcut-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes shortcut-pulse { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .shortcut-key.recording { animation: none; }
+}

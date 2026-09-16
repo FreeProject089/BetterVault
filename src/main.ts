@@ -51,6 +51,7 @@ import { EXPIRY_SOON_DAYS, expiryInfo, renderExpiryBadge } from './ui/expiry';
 import { printRecoveryKey, recoveryKeyFile } from './ui/recoveryKey';
 import { MANAGER_EXPORTS } from './import_export/managerExports';
 import { secretGridHtml } from './ui/secretDisplay';
+import { bindingFromEvent, checkBinding, DEFAULT_SHORTCUTS, formatBinding, isPlainKey, loadShortcuts, saveShortcuts, SHORTCUT_ORDER, type ShortcutAction, type ShortcutBindings } from './ui/shortcuts';
 import { CREDENTIAL_FILTERS, countByFilter, queryCredentials, reusedPasswords, type CredentialFilter, type CredentialSort } from './store/credentialFilters';
 import { checkCredential, remainingCapacity } from './account/limits';
 import { renderSVG } from 'uqr';
@@ -113,6 +114,9 @@ let sharedVaults: SharedVaultManager;
    ════════════════════════════════════════════════════════════════════════════ */
 class AppController {
   private activeView: ActiveView = 'all-credentials';
+  private shortcuts: ShortcutBindings = loadShortcuts();
+  /** Vrai pendant qu'une combinaison est en cours d'enregistrement : les raccourcis sont suspendus */
+  private recordingShortcut = false;
   private selectedItemId: string | null = null;
   private searchQuery = '';
   private taskViewMode: TaskViewMode = 'list';
@@ -429,58 +433,28 @@ class AppController {
     }
 
     window.addEventListener('keydown', (e) => {
-      if (!accountService.isUnlocked()) return;
-      const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName);
-
-      // Cmd/Ctrl + K : Recherche globale
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        searchInput?.focus();
-        searchInput?.select();
-        return;
-      }
-
-      // Cmd/Ctrl + N : Nouvel élément (Identifiant ou Tâche selon vue active)
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n' && !isInput) {
-        e.preventDefault();
-        if (this.activeView === 'tasks') {
-          this.openCreateTaskModal();
-        } else {
-          this.openCreateCredentialModal();
-        }
-        return;
-      }
-
-      // Cmd/Ctrl + L : Verrouiller le coffre actif immédiatement
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'l' && !isInput) {
-        e.preventDefault();
-        this.lockApp();
-        return;
-      }
-
-      // Cmd/Ctrl + G : Ouvrir le générateur de mot de passe
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g' && !isInput) {
-        e.preventDefault();
-        this.openGeneratorModal();
-        return;
-      }
-
-      // Touche '?' : Afficher la palette d'aide des raccourcis
-      if (e.key === '?' && !isInput && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault();
-        this.openShortcutsModal();
-        return;
-      }
-
-      // Touche 'Escape' : Fermer la modale ouverte
+      // Échap : fermer la fenêtre ouverte (toujours actif, non modifiable)
       if (e.key === 'Escape') {
         const overlay = document.getElementById('modal-overlay');
         if (overlay && this.modalDismissible) {
           e.preventDefault();
           this.closeModal();
-          return;
         }
+        return;
       }
+      if (!accountService.isUnlocked() || this.recordingShortcut) return;
+      const target = e.target as HTMLElement | null;
+      const isInput = !!target && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable);
+      const combo = bindingFromEvent(e);
+      if (!combo) return;
+      const action = SHORTCUT_ORDER.find(a => this.shortcuts[a] === combo);
+      if (!action) return;
+      // Une touche seule (« ? ») ne se déclenche pas pendant la saisie ; seule la recherche reste accessible dans un champ
+      if (isInput && (isPlainKey(combo) || action !== 'search')) return;
+      // Une fenêtre ouverte garde la main, sauf pour l'aide et le verrouillage
+      if (document.getElementById('modal-overlay') && action !== 'lock' && action !== 'help') return;
+      e.preventDefault();
+      this.runShortcut(action, searchInput);
     });
 
     const btnAdd = document.getElementById('btn-add-item');
@@ -5630,50 +5604,183 @@ class AppController {
     render();
   }
 
+  private runShortcut(action: ShortcutAction, searchInput: HTMLInputElement | null): void {
+    const showView = (view: ActiveView) => (document.querySelector(`[data-view="${view}"]`) as HTMLElement | null)?.click();
+    switch (action) {
+      case 'search':
+        searchInput?.focus();
+        searchInput?.select();
+        break;
+      case 'newItem':
+        if (this.activeView === 'tasks') this.openCreateTaskModal();
+        else this.openCreateCredentialModal();
+        break;
+      case 'generator':
+        this.openGeneratorModal();
+        break;
+      case 'lock':
+        this.lockApp();
+        break;
+      case 'sync':
+        if (accountService.isCloud()) void accountService.syncNow();
+        else this.showToast(this.tr('La synchronisation n’est pas activée sur ce compte', 'Sync is not enabled on this account'), 'info');
+        break;
+      case 'viewCredentials':
+        showView('all-credentials');
+        break;
+      case 'view2fa':
+        showView('2fa-tokens');
+        break;
+      case 'viewTasks':
+        showView('tasks');
+        break;
+      case 'importExport':
+        document.getElementById('btn-open-import')?.click();
+        break;
+      case 'account':
+        this.openAccountModal();
+        break;
+      case 'help':
+        if (document.getElementById('modal-overlay')) this.closeModal();
+        this.openShortcutsModal();
+        break;
+    }
+  }
+
   /* ── Raccourcis Clavier (Palette Cheat Sheet) ─────────────────────────── */
   private openShortcutsModal(): void {
-    const isFr = i18n.getLocale() === 'fr';
-    const shortcuts = [
-      { key: 'Cmd / Ctrl + K', label: isFr ? 'Recherche globale & filtre instantané' : 'Global search & instant filter' },
-      { key: 'Cmd / Ctrl + N', label: isFr ? 'Créer un élément (Identifiant ou Tâche)' : 'Create new item (Credential or Task)' },
-      { key: 'Cmd / Ctrl + G', label: isFr ? 'Générateur de mots de passe & passphrases' : 'Password & passphrase generator' },
-      { key: 'Cmd / Ctrl + L', label: isFr ? 'Verrouiller immédiatement le coffre actif' : 'Immediately lock the active vault' },
-      { key: '?', label: isFr ? 'Afficher cette liste de raccourcis' : 'Show keyboard shortcuts cheat sheet' },
-      { key: 'Esc', label: isFr ? 'Fermer la fenêtre modale active' : 'Close active modal window' }
-    ];
+    const tr = (fr: string, en: string) => this.tr(fr, en);
+    const labels: Record<ShortcutAction, string> = {
+      search: tr('Rechercher', 'Search'),
+      newItem: tr('Nouvel identifiant ou nouvelle tâche', 'New credential or task'),
+      generator: tr('Générateur de mots de passe', 'Password generator'),
+      lock: tr('Verrouiller le coffre', 'Lock the vault'),
+      sync: tr('Synchroniser maintenant', 'Sync now'),
+      viewCredentials: tr('Afficher les identifiants', 'Show credentials'),
+      view2fa: tr('Afficher les codes 2FA', 'Show 2FA codes'),
+      viewTasks: tr('Afficher les tâches', 'Show tasks'),
+      importExport: tr('Importer / exporter', 'Import / export'),
+      account: tr('Compte et réglages', 'Account and settings'),
+      help: tr('Afficher les raccourcis', 'Show shortcuts')
+    };
+    let recording: ShortcutAction | null = null;
 
     const box = this.openModal(`
       <div class="modal-header">
-        <div class="modal-title" style="display:flex;align-items:center;gap:8px;">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect>
-            <path d="M6 8h.001M10 8h.001M14 8h.001M18 8h.001M6 12h.001M10 12h.001M14 12h.001M18 12h.001M8 16h8"></path>
-          </svg>
-          ${isFr ? 'Raccourcis Clavier' : 'Keyboard Shortcuts'}
-        </div>
-        <button class="modal-close" id="modal-close-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
+        <div class="modal-title">${tr('Raccourcis clavier', 'Keyboard shortcuts')}</div>
+        <button class="modal-close">${GEN_ICONS.close}</button>
       </div>
       <div class="modal-body">
-        <div style="display:flex;flex-direction:column;gap:8px;">
-          ${shortcuts.map(s => `
-            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg-tertiary);border:1px solid var(--border-subtle);border-radius:var(--radius-md);">
-              <span style="font-size:13px;color:var(--text-primary);">${s.label}</span>
-              <kbd style="font-family:var(--font-mono);font-size:11px;font-weight:600;padding:3px 8px;background:var(--bg-primary);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);color:var(--accent-blue);box-shadow:0 1px 2px rgba(0,0,0,0.2);">${s.key}</kbd>
-            </div>
-          `).join('')}
+        <p class="modal-text">${tr('Cliquez sur une combinaison puis appuyez sur les touches voulues. Échap annule, Retour arrière retire le raccourci.', 'Click a combination, then press the keys you want. Esc cancels, Backspace removes the shortcut.')}</p>
+        <div class="shortcut-list" data-shortcut-list></div>
+        <div class="shortcut-row fixed">
+          <span>${tr('Fermer la fenêtre ouverte', 'Close the open window')}</span>
+          <kbd class="shortcut-key">Esc</kbd>
         </div>
+        <div class="form-error" data-shortcut-error role="alert" hidden></div>
       </div>
       <div class="modal-footer">
-        <button class="btn-primary" id="modal-cancel">${i18n.t.common.close}</button>
+        <button class="btn-primary btn-ghost" data-shortcut-reset-all>${tr('Tout rétablir', 'Reset all')}</button>
+        <button class="btn-primary" data-close>${tr('Fermer', 'Close')}</button>
       </div>
     `);
 
-    box.querySelector('#modal-close-btn')?.addEventListener('click', () => this.closeModal());
-    box.querySelector('#modal-cancel')?.addEventListener('click', () => this.closeModal());
+    const list = box.querySelector('[data-shortcut-list]') as HTMLElement;
+    const errorEl = box.querySelector('[data-shortcut-error]') as HTMLElement;
+    const showError = (text: string) => {
+      errorEl.textContent = text;
+      errorEl.hidden = !text;
+    };
+
+    const render = () => {
+      list.innerHTML = SHORTCUT_ORDER.map(action => {
+        const binding = this.shortcuts[action];
+        const custom = binding !== DEFAULT_SHORTCUTS[action];
+        return `
+          <div class="shortcut-row ${custom ? 'custom' : ''}">
+            <span>${labels[action]}</span>
+            <span class="shortcut-actions">
+              ${custom ? `<button type="button" class="icon-btn" data-shortcut-reset="${action}" title="${tr('Rétablir', 'Reset')} (${formatBinding(DEFAULT_SHORTCUTS[action])})" aria-label="${tr('Rétablir', 'Reset')}">${GEN_ICONS.refresh}</button>` : ''}
+              <button type="button" class="shortcut-key ${recording === action ? 'recording' : ''}" data-shortcut="${action}" aria-label="${labels[action]} : ${formatBinding(binding)}">${recording === action ? tr('Appuyez…', 'Press keys…') : formatBinding(binding)}</button>
+            </span>
+          </div>`;
+      }).join('');
+    };
+
+    const onKey = (e: KeyboardEvent) => {
+      if (!recording) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'Escape') return stopRecording();
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        this.shortcuts = { ...this.shortcuts, [recording]: '' };
+        saveShortcuts(this.shortcuts);
+        return stopRecording();
+      }
+      const combo = bindingFromEvent(e);
+      if (!combo) return;
+      const problem = checkBinding(this.shortcuts, recording, combo);
+      if (problem?.kind === 'reserved') return showError(tr(`${formatBinding(combo)} est réservé par le navigateur ou le système`, `${formatBinding(combo)} is reserved by the browser or system`));
+      if (problem?.kind === 'needsModifier') return showError(tr('Ajoutez Ctrl, Cmd ou Alt : une lettre seule gênerait la saisie', 'Add Ctrl, Cmd or Alt: a single letter would get in the way of typing'));
+      const next = { ...this.shortcuts, [recording]: combo };
+      // Combinaison déjà prise : elle est retirée de l'autre action, qui est signalée
+      if (problem?.kind === 'conflict') {
+        next[problem.action] = '';
+        showError(tr(`${formatBinding(combo)} a été retiré de « ${labels[problem.action]} »`, `${formatBinding(combo)} was removed from "${labels[problem.action]}"`));
+      } else {
+        showError('');
+      }
+      this.shortcuts = next;
+      saveShortcuts(next);
+      stopRecording();
+    };
+
+    // Appelée depuis onKey : déclarée après, mais seulement exécutée une fois les deux définies
+    const stopRecording = (): void => {
+      recording = null;
+      this.recordingShortcut = false;
+      document.removeEventListener('keydown', onKey, true);
+      render();
+    };
+
+    list.addEventListener('click', e => {
+      const target = e.target as HTMLElement;
+      const reset = target.closest<HTMLElement>('[data-shortcut-reset]')?.dataset.shortcutReset as ShortcutAction | undefined;
+      if (reset) {
+        const problem = checkBinding(this.shortcuts, reset, DEFAULT_SHORTCUTS[reset]);
+        const next = { ...this.shortcuts, [reset]: DEFAULT_SHORTCUTS[reset] };
+        if (problem?.kind === 'conflict') next[problem.action] = '';
+        this.shortcuts = next;
+        saveShortcuts(next);
+        showError('');
+        render();
+        return;
+      }
+      const action = target.closest<HTMLElement>('[data-shortcut]')?.dataset.shortcut as ShortcutAction | undefined;
+      if (!action) return;
+      if (recording === action) return stopRecording();
+      if (!recording) document.addEventListener('keydown', onKey, true);
+      recording = action;
+      this.recordingShortcut = true;
+      showError('');
+      render();
+    });
+
+    box.querySelector('[data-shortcut-reset-all]')?.addEventListener('click', () => {
+      this.shortcuts = { ...DEFAULT_SHORTCUTS };
+      saveShortcuts(this.shortcuts);
+      showError('');
+      render();
+    });
+
+    // Fermeture pendant l'enregistrement : le clavier est relâché
+    new MutationObserver((_records, observer) => {
+      if (box.isConnected) return;
+      if (recording) stopRecording();
+      observer.disconnect();
+    }).observe(document.body, { childList: true, subtree: true });
+
+    render();
   }
 }
 
