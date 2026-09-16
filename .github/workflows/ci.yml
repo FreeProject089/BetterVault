@@ -105,6 +105,5 @@ jobs:
         run: mkdir -p dist && echo '<!doctype html>' > dist/index.html
       - run: cargo check --locked
         working-directory: src-tauri
-      - run: cargo clippy --locked -- -D warnings
+      - run: cargo clippy --locked --all-targets -- -D warnings
         working-directory: src-tauri
-        continue-on-error: true
