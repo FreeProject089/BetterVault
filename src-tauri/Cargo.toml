@@ -30,6 +30,13 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 [target.'cfg(target_os = "ios")'.dependencies]
 tauri-plugin-biometric = "2"
 
+# Touch ID sur macOS (LocalAuthentication), le secret reste dans le trousseau
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError"] }
+objc2-local-authentication = { version = "0.3", default-features = false, features = ["std", "LAContext", "LAError", "block2"] }
+block2 = "0.6"
+
 # Windows Hello (visage, empreinte ou code PIN) pour le déverrouillage de l'application de bureau
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = ["Security_Credentials_UI", "Foundation"] }

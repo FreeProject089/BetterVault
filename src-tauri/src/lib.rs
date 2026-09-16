@@ -227,10 +227,57 @@ async fn native_call(app: tauri::AppHandle, method: String, payload: serde_json:
     }
 }
 
-/* ── Windows Hello ───────────────────────────────────────────────────────── */
+/* ── Windows Hello et Touch ID ───────────────────────────────────────────── */
+
+/// Touch ID (macOS) : LocalAuthentication, sans repli sur le mot de passe de session
+#[cfg(target_os = "macos")]
+mod touch_id {
+    use block2::RcBlock;
+    use objc2::runtime::Bool;
+    use objc2_foundation::{NSError, NSString};
+    use objc2_local_authentication::{LAContext, LAPolicy};
+    use std::sync::mpsc;
+
+    pub fn available() -> bool {
+        unsafe {
+            let context = LAContext::new();
+            context.canEvaluatePolicy_error(LAPolicy::DeviceOwnerAuthenticationWithBiometrics).is_ok()
+        }
+    }
+
+    /// Bloque jusqu'à la réponse de l'utilisateur : à appeler hors du fil principal
+    pub fn verify(reason: &str) -> Result<bool, String> {
+        let (tx, rx) = mpsc::channel::<Result<bool, String>>();
+        unsafe {
+            let context = LAContext::new();
+            let reply = RcBlock::new(move |success: Bool, error: *mut NSError| {
+                let outcome = if success.as_bool() {
+                    Ok(true)
+                } else if error.is_null() {
+                    Ok(false)
+                } else {
+                    // Annulation par l'utilisateur ou le système (-2, -4, -9) : pas une erreur à afficher
+                    let code = (*error).code();
+                    if matches!(code, -2 | -4 | -9) { Ok(false) } else { Err((*error).localizedDescription().to_string()) }
+                };
+                let _ = tx.send(outcome);
+            });
+            context.evaluatePolicy_localizedReason_reply(
+                LAPolicy::DeviceOwnerAuthenticationWithBiometrics,
+                &NSString::from_str(reason),
+                &reply,
+            );
+        }
+        rx.recv().map_err(|e| e.to_string())?
+    }
+}
 
 #[command]
 async fn desktop_biometric_status() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        return tauri::async_runtime::spawn_blocking(touch_id::available).await.unwrap_or(false);
+    }
     #[cfg(windows)]
     {
         use windows::Security::Credentials::UI::{UserConsentVerifier, UserConsentVerifierAvailability};
@@ -243,13 +290,19 @@ async fn desktop_biometric_status() -> bool {
         .await
         .unwrap_or(false);
     }
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     false
 }
 
-/// Demande une vérification Windows Hello (visage, empreinte ou code PIN de l'appareil)
+/// Demande une vérification Windows Hello (visage, empreinte ou code PIN) ou Touch ID
 #[command]
 async fn desktop_biometric_verify(reason: String) -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        return tauri::async_runtime::spawn_blocking(move || touch_id::verify(&reason))
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     #[cfg(windows)]
     {
         use windows::core::HSTRING;
@@ -263,10 +316,10 @@ async fn desktop_biometric_verify(reason: String) -> Result<bool, String> {
         .await
         .map_err(|e| e.to_string())?;
     }
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = reason;
-        Err("Windows Hello n'est disponible que sous Windows".into())
+        Err("Déverrouillage biométrique indisponible sur ce système".into())
     }
 }
 

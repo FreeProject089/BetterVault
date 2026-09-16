@@ -6,7 +6,8 @@ import { isTauri, osKeychain, tauriInvoke } from './tauriBridge';
  * - Android : Keystore, clé RSA déchiffrable seulement après empreinte ou visage (BetterVaultPlugin.kt).
  * - iOS : invite Face ID / Touch ID puis trousseau.
  * - Windows : Windows Hello (visage, empreinte ou code PIN) puis Gestionnaire d'identification.
- * Ailleurs (navigateur, extension, macOS, Linux) : non disponible.
+ * - macOS : Touch ID (LocalAuthentication) puis trousseau.
+ * Ailleurs (navigateur, extension, Linux) : non disponible.
  */
 
 export interface DeviceSecretStore {
@@ -29,6 +30,7 @@ const userAgent = () => globalThis.navigator?.userAgent ?? '';
 export const isAndroidApp = () => isTauri() && /Android/i.test(userAgent());
 export const isIosApp = () => isTauri() && /iPhone|iPad|iPod/i.test(userAgent());
 export const isWindowsApp = () => isTauri() && /Windows/i.test(userAgent());
+export const isMacApp = () => isTauri() && /Macintosh|Mac OS X/i.test(userAgent()) && !/iPhone|iPad|iPod/i.test(userAgent());
 
 export function nativeCall<T>(method: string, payload: Record<string, unknown> = {}): Promise<T> {
   return tauriInvoke<T>('native_call', { method, payload });
@@ -87,9 +89,10 @@ export function biometricStore(): DeviceSecretStore | null {
     };
   }
 
-  if (isWindowsApp()) {
+  if (isWindowsApp() || isMacApp()) {
+    const mac = isMacApp();
     return {
-      label: 'Windows Hello',
+      label: mac ? 'Touch ID' : 'Windows Hello',
       available: async () => {
         try {
           return await tauriInvoke<boolean>('desktop_biometric_status') && await osKeychain.isAvailable();
@@ -101,7 +104,7 @@ export function biometricStore(): DeviceSecretStore | null {
       read: async (name, reason) => {
         if (!(await tauriInvoke<boolean>('desktop_biometric_verify', { reason }))) throw new BiometricCancelledError();
         const secret = await osKeychain.get(name);
-        if (!secret) throw new Error('Secret introuvable dans le Gestionnaire d’identification');
+        if (!secret) throw new Error(mac ? 'Secret introuvable dans le trousseau' : 'Secret introuvable dans le Gestionnaire d’identification');
         return secret;
       },
       remove: name => osKeychain.remove(name)

@@ -9,7 +9,8 @@
 | Android | Empreinte ou visage (biométrie forte) | Android Keystore : clé RSA utilisable seulement après authentification, invalidée si une empreinte est ajoutée |
 | Windows | Windows Hello (visage, empreinte ou code PIN) | Gestionnaire d'identification Windows |
 | iOS | Face ID ou Touch ID | Trousseau iOS (code écrit, à tester sur Mac) |
-| macOS, Linux, navigateur, extension | Non disponible | |
+| macOS | Touch ID (sans repli sur le mot de passe de session) | Trousseau macOS (compilé, à tester sur Mac) |
+| Linux, navigateur, extension | Non disponible | |
 
 Fonctionnement : un secret aléatoire, gardé par l'appareil, chiffre la clé du coffre. Le mot de passe principal reste toujours utilisable. Changer le mot de passe principal désactive le déverrouillage biométrique : réactivez-le ensuite.
 
