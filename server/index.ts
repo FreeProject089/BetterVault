@@ -7,6 +7,7 @@ import { createApp } from './src/app.ts';
 import { settingsFromEnv, type ServerSettings } from './src/config.ts';
 import { createBackupService } from './src/backup.ts';
 import { openGeoDatabase, type GeoLookup } from './src/geoip.ts';
+import { startGeoUpdates, swappableGeo } from './src/geoipUpdater.ts';
 import { createMetrics } from './src/metrics.ts';
 
 const secret = process.env.BETTERVAULT_SECRET ?? '';
@@ -41,14 +42,17 @@ mkdirSync(filesDir, { recursive: true });
 
 // Base de localisation facultative (scripts/download-geoip.mjs) : lieu approximatif des sessions, calculé sur le serveur
 const geoPath = resolve(process.env.GEOIP_DB ?? join(dirname(dbPath), 'geoip.mmdb'));
-let geo: GeoLookup | null = null;
+let initialGeo: GeoLookup | null = null;
 if (existsSync(geoPath)) {
   try {
-    geo = openGeoDatabase(geoPath);
+    initialGeo = openGeoDatabase(geoPath);
   } catch (err) {
     console.warn(`Base de localisation ignorée : ${err instanceof Error ? err.message : err}`);
   }
 }
+const geo = swappableGeo(initialGeo);
+// GEOIP_AUTO_UPDATE=true : le serveur télécharge la base puis la renouvelle chaque mois
+const geoUpdates = process.env.GEOIP_AUTO_UPDATE === 'true' ? startGeoUpdates({ path: geoPath, geo }) : null;
 const metrics = createMetrics();
 
 const backupKey = process.env.BACKUP_ENCRYPTION_KEY || null;
@@ -173,6 +177,7 @@ server.listen(port, host, () => {
 // Arrêt propre (docker stop, Ctrl+C) : fin des requêtes en cours puis fermeture de la base
 function shutdown(): void {
   api.close();
+  geoUpdates?.stop();
   server.close(() => {
     db.close();
     process.exit(0);

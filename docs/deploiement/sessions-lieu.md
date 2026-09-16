@@ -17,6 +17,16 @@ L'adresse IP complète n'est jamais enregistrée, et rien n'est envoyé à un se
 
 Sans base, tout fonctionne : la colonne « lieu » reste vide.
 
+### Automatiquement (recommandé)
+
+```bash
+GEOIP_AUTO_UPDATE=true
+```
+
+Activé par défaut avec Docker. Au démarrage, le serveur télécharge la base DB-IP City Lite si elle manque ou date de plus d'un mois, puis vérifie chaque jour. La nouvelle base est utilisée sans redémarrage. Seul le serveur contacte `download.db-ip.com` : aucune adresse d'utilisateur n'est transmise.
+
+### À la main
+
 ```bash
 node scripts/download-geoip.mjs
 ```
