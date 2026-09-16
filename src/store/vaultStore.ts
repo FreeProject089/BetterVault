@@ -632,6 +632,9 @@ export class VaultStore {
     const newCredentials: CredentialItem[] = credentials.map(c => ({
       id: randomId('cred'),
       vaultId,
+      // Un export BetterVault rapporte le type et ses champs ; un import d'ailleurs donne un identifiant
+      type: itemTypeOf(c.type),
+      ...payloadForType(itemTypeOf(c.type), c),
       title: c.title || 'Sans titre',
       username: c.username || '',
       password: c.password || '',

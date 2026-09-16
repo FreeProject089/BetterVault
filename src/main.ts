@@ -54,6 +54,11 @@ import { secretGridHtml } from './ui/secretDisplay';
 import { resizeAvatar } from './ui/avatarImage';
 import { translateError } from './i18n/errorMessages';
 import { tabIcon } from './ui/tabIcons';
+import { mountStepper, type StepDef } from './ui/stepper';
+import {
+  cardBrand, formatCardNumber, isLuhnValid, isFileType, itemTypeOf, looksLikePrivateKey,
+  ITEM_TYPES, ITEM_TYPE_INFO, type ItemType
+} from './types/itemTypes';
 import { bindingFromEvent, checkBinding, DEFAULT_SHORTCUTS, formatBinding, isPlainKey, loadShortcuts, saveShortcuts, SHORTCUT_ORDER, type ShortcutAction, type ShortcutBindings } from './ui/shortcuts';
 import { CREDENTIAL_FILTERS, countByFilter, queryCredentials, reusedPasswords, type CredentialFilter, type CredentialSort } from './store/credentialFilters';
 import { checkCredential, remainingCapacity } from './account/limits';
@@ -130,6 +135,8 @@ class AppController {
   private readonly AUTO_LOCK_DELAY_MS = 5 * 60 * 1000; // 5 minutes d'inactivité
   private clipboardClearTimer: number | null = null;
   private activeTag: string | null = null;
+  /** Dossier ouvert dans la barre latérale ; null = tout le coffre */
+  private activeFolderId: string | null = null;
   private authScreen: { show(): void } | null = null;
   private credentialFilters = new Set<CredentialFilter>();
   private credentialSort: CredentialSort = 'name';
@@ -944,9 +951,10 @@ class AppController {
         <div class="record-icon">${this.credentialIcon(cred)}</div>
         <div class="record-info">
           <div class="record-title">${cred.isFavorite ? `<span class="record-fav" title="${this.tr('Favori', 'Favorite')}">★</span>` : ''}${this.escapeHtml(cred.title)}</div>
-          <div class="record-sub">${this.escapeHtml(cred.username || cred.domain || this.tr('Sans identifiant', 'No username'))}</div>
+          <div class="record-sub">${this.escapeHtml(this.itemSubtitle(cred))}</div>
         </div>
         <div class="record-badges">
+          ${itemTypeOf(cred.type) === 'login' ? '' : this.typeBadge(itemTypeOf(cred.type))}
           ${expiry}
           ${cred.totpSecret ? '<span class="badge badge-accent">2FA</span>' : ''}
           ${cred.passkeys && cred.passkeys.length > 0 ? '<span class="badge">Passkey</span>' : ''}
@@ -1337,6 +1345,7 @@ class AppController {
     const cred = data.credentials.find(c => c.id === id);
     if (!cred) return;
 
+    const detailType = itemTypeOf(cred.type);
     const entropy = calculatePasswordEntropy(cred.password);
     const linkedTasks = data.tasks.filter(t => t.linkedCredentialId === cred.id);
 
@@ -1456,7 +1465,9 @@ class AppController {
           <div class="detail-main-icon">${this.credentialIcon(cred, 24)}</div>
           <div>
             <div class="detail-title">${this.escapeHtml(cred.title)}</div>
-            <div class="detail-meta">${this.escapeHtml(cred.domain || cred.website || this.tr('Aucun site', 'No website'))}</div>
+            <div class="detail-meta">${detailType === 'login'
+              ? this.escapeHtml(cred.domain || cred.website || this.tr('Aucun site', 'No website'))
+              : this.typeBadge(detailType)}</div>
             ${this.renderTagChips(cred.tags)}
           </div>
         </div>
@@ -1478,6 +1489,8 @@ class AppController {
 
       <div class="detail-content">
         ${expiryAlertHTML}
+        ${this.renderTypeDetail(cred)}
+        ${detailType !== 'login' ? '' : `
         ${totpHTML}
 
         <div class="field-group">
@@ -1522,6 +1535,7 @@ class AppController {
 
         ${websiteHTML}
         ${passkeysHTML}
+        `}
 
         ${cred.passwordHistory && cred.passwordHistory.length > 0 ? `
           <div class="field-group">
@@ -1701,6 +1715,29 @@ class AppController {
 
     document.getElementById('btn-edit-cred')?.addEventListener('click', () => {
       this.openCreateCredentialModal(cred.id);
+    });
+
+    // Champs des types carte, identité et clé : affichage et copie
+    document.getElementById('detail-container')?.addEventListener('click', async event => {
+      const target = event.target as HTMLElement;
+      const box = target.closest('.field-box');
+      const value = box?.querySelector<HTMLElement>('[data-secret-view]');
+      if (!value) return;
+      const secret = value.dataset.secretValue ?? '';
+
+      if (target.closest('[data-secret-toggle]')) {
+        const button = target.closest('[data-secret-toggle]') as HTMLButtonElement;
+        const shown = value.dataset.secretShown === 'true';
+        value.dataset.secretShown = String(!shown);
+        value.textContent = shown ? '•'.repeat(Math.min(secret.length, 20)) : secret;
+        button.title = shown ? this.tr('Afficher', 'Show') : this.tr('Masquer', 'Hide');
+        return;
+      }
+
+      if (target.closest('[data-secret-copy]')) {
+        const sensitive = (target.closest('[data-secret-copy]') as HTMLElement).dataset.sensitive === 'true';
+        await this.copyToClipboardWithAutoClear(secret, this.tr('Copié', 'Copied'), sensitive);
+      }
     });
 
     document.getElementById('btn-renew-cred')?.addEventListener('click', () => {
@@ -2061,7 +2098,14 @@ class AppController {
         <button class="modal-close" type="button">${GEN_ICONS.close}</button>
       </div>
       <div class="modal-body">
+        <div id="cred-steps"></div>
         <div class="cred-form">
+          <section data-step="type" hidden>
+            <p class="modal-text">${tr('Que voulez-vous ranger dans le coffre ?', 'What do you want to keep in the vault?')}</p>
+            <div class="type-grid" id="cred-type-grid" role="group"></div>
+          </section>
+
+          <section data-step="essentiel" hidden>
           <div class="cred-identity">
             <button type="button" class="cred-icon-button" id="cred-icon-btn" aria-expanded="false" aria-controls="cred-icon-panel" title="${tr('Choisir une icône', 'Choose an icon')}" aria-label="${tr('Choisir une icône', 'Choose an icon')}">
               <span id="cred-icon-preview" style="display:flex;"></span>
@@ -2074,7 +2118,7 @@ class AppController {
           </div>
           <div id="cred-icon-panel" hidden></div>
 
-          <section class="form-section">
+          <section class="form-section" id="section-login">
             <div class="form-section-title">${SECTION.login}${tr('Connexion', 'Sign-in')}</div>
             <div class="form-row">
               <div class="form-field">
@@ -2103,6 +2147,116 @@ class AppController {
             </div>
           </section>
 
+          <section class="form-section" id="section-card" hidden>
+            <div class="form-section-title">${SECTION.login}${tr('Carte', 'Card')}</div>
+            <div class="form-field">
+              <label class="form-label" for="field-card-number">${tr('Numéro', 'Number')}</label>
+              <div class="input-with-actions">
+                <input class="form-input mono-field" id="field-card-number" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="4111 1111 1111 1111" value="${attr(existing?.card?.number)}">
+                <button type="button" class="icon-btn" id="btn-toggle-card-number" aria-pressed="false" title="${tr('Afficher', 'Show')}">${GEN_ICONS.eye}</button>
+              </div>
+              <span class="field-hint" id="card-brand-hint"></span>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="field-card-holder">${tr('Titulaire', 'Cardholder')}</label>
+              <input class="form-input" id="field-card-holder" type="text" maxlength="100" autocomplete="off" value="${attr(existing?.card?.holder)}">
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label class="form-label" for="field-card-exp-month">${tr('Expiration', 'Expiry')}</label>
+                <div class="form-row">
+                  <input class="form-input" id="field-card-exp-month" type="text" inputmode="numeric" maxlength="2" placeholder="MM" autocomplete="off" value="${attr(existing?.card?.expMonth)}">
+                  <input class="form-input" id="field-card-exp-year" type="text" inputmode="numeric" maxlength="4" placeholder="${tr('AAAA', 'YYYY')}" autocomplete="off" value="${attr(existing?.card?.expYear)}">
+                </div>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="field-card-cvv">${tr('Cryptogramme', 'Security code')}</label>
+                <input class="form-input mono-field" id="field-card-cvv" type="password" inputmode="numeric" maxlength="4" autocomplete="off" value="${attr(existing?.card?.cvv)}">
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="field-card-pin">${tr('Code', 'PIN')}</label>
+                <input class="form-input mono-field" id="field-card-pin" type="password" inputmode="numeric" maxlength="12" autocomplete="off" value="${attr(existing?.card?.pin)}">
+              </div>
+            </div>
+          </section>
+
+          <section class="form-section" id="section-identity" hidden>
+            <div class="form-section-title">${SECTION.login}${tr('Identité', 'Identity')}</div>
+            <div class="form-row">
+              <div class="form-field">
+                <label class="form-label" for="field-id-first">${tr('Prénom', 'First name')}</label>
+                <input class="form-input" id="field-id-first" type="text" maxlength="100" autocomplete="off" value="${attr(existing?.identity?.firstName)}">
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="field-id-last">${tr('Nom de famille', 'Last name')}</label>
+                <input class="form-input" id="field-id-last" type="text" maxlength="100" autocomplete="off" value="${attr(existing?.identity?.lastName)}">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label class="form-label" for="field-id-birth">${tr('Date de naissance', 'Date of birth')}</label>
+                <input class="form-input" id="field-id-birth" type="date" autocomplete="off" value="${attr(existing?.identity?.birthDate)}">
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="field-id-doc">${tr('Numéro de pièce', 'Document number')}</label>
+                <input class="form-input mono-field" id="field-id-doc" type="password" maxlength="60" autocomplete="off" value="${attr(existing?.identity?.docNumber)}">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label class="form-label" for="field-id-email">Email</label>
+                <input class="form-input" id="field-id-email" type="email" maxlength="200" autocomplete="off" spellcheck="false" value="${attr(existing?.identity?.email)}">
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="field-id-phone">${tr('Téléphone', 'Phone')}</label>
+                <input class="form-input" id="field-id-phone" type="tel" maxlength="40" autocomplete="off" value="${attr(existing?.identity?.phone)}">
+              </div>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="field-id-address">${tr('Adresse', 'Address')}</label>
+              <input class="form-input" id="field-id-address" type="text" maxlength="200" autocomplete="off" value="${attr(existing?.identity?.address)}">
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label class="form-label" for="field-id-postal">${tr('Code postal', 'Postal code')}</label>
+                <input class="form-input" id="field-id-postal" type="text" maxlength="20" autocomplete="off" value="${attr(existing?.identity?.postalCode)}">
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="field-id-city">${tr('Ville', 'City')}</label>
+                <input class="form-input" id="field-id-city" type="text" maxlength="100" autocomplete="off" value="${attr(existing?.identity?.city)}">
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="field-id-country">${tr('Pays', 'Country')}</label>
+                <input class="form-input" id="field-id-country" type="text" maxlength="100" autocomplete="off" value="${attr(existing?.identity?.country)}">
+              </div>
+            </div>
+          </section>
+
+          <section class="form-section" id="section-ssh" hidden>
+            <div class="form-section-title">${SECTION.shield}${tr('Clé', 'Key')}</div>
+            <div class="form-field">
+              <label class="form-label" for="field-ssh-private">${tr('Clé privée', 'Private key')}</label>
+              <textarea class="key-editor" id="field-ssh-private" spellcheck="false" autocomplete="off" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----">${attr(existing?.sshKey?.privateKey)}</textarea>
+              <span class="field-hint" id="ssh-key-hint"></span>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="field-ssh-passphrase">${tr('Phrase de passe de la clé', 'Key passphrase')}</label>
+              <input class="form-input" id="field-ssh-passphrase" type="password" autocomplete="off" spellcheck="false" value="${attr(existing?.sshKey?.passphrase)}">
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="field-ssh-public">${tr('Clé publique', 'Public key')}</label>
+              <textarea class="key-editor" id="field-ssh-public" spellcheck="false" autocomplete="off" placeholder="ssh-ed25519 AAAA…">${attr(existing?.sshKey?.publicKey)}</textarea>
+            </div>
+          </section>
+
+          <section class="form-section" id="section-files" hidden>
+            <div class="form-section-title">${SECTION.folder}${tr('Contenu', 'Contents')}</div>
+            <div id="files-host"></div>
+          </section>
+
+          </section>
+
+          <section data-step="securite" hidden>
           <section class="form-section">
             <div class="form-section-head">
               <div class="form-section-title">${SECTION.shield}${tr('Double authentification', 'Two-factor authentication')}</div>
@@ -2124,7 +2278,9 @@ class AppController {
               </div>
             </div>
           </section>
+          </section>
 
+          <section data-step="details" hidden>
           <section class="form-section">
             <div class="form-section-title">${SECTION.folder}${tr('Organisation', 'Organization')}</div>
             <div class="form-row">
@@ -2141,8 +2297,8 @@ class AppController {
               <span>${tr('Favori', 'Favorite')}<small>${tr('Affiché en haut de la liste', 'Shown at the top of the list')}</small></span>
               <input type="checkbox" class="switch" id="field-favorite" ${existing?.isFavorite ? 'checked' : ''}>
             </label>
-            <div class="form-field">
-              <label class="form-label">${tr('Pièces jointes', 'Attachments')}</label>
+            <div class="form-field" id="attachments-field">
+              <label class="form-label" id="attachments-label">${tr('Pièces jointes', 'Attachments')}</label>
               ${accountService.isCloud() ? `
                 <div class="pending-files" id="field-files"></div>
                 <label class="btn-primary btn-ghost" style="align-self:flex-start;cursor:pointer;">+ ${tr('Ajouter un fichier', 'Add a file')}<input type="file" id="field-files-input" multiple hidden></label>
@@ -2151,23 +2307,38 @@ class AppController {
             </div>
           </section>
 
-          <section class="form-section">
+          <section class="form-section" id="section-notes">
             <div class="form-section-title">${SECTION.note}Notes</div>
             <textarea class="note-editor" id="field-notes" placeholder="${tr('Codes de récupération, questions de sécurité…', 'Recovery codes, security questions…')}">${attr(existing?.notes)}</textarea>
             <span class="char-counter" id="notes-counter"></span>
+          </section>
           </section>
 
           <div class="form-error" id="cred-form-error" role="alert" hidden></div>
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn-primary" type="button" data-close>${tr('Annuler', 'Cancel')}</button>
-        <button class="btn-primary" type="button" id="modal-confirm">${isEdit ? tr('Enregistrer', 'Save') : tr('Ajouter', 'Add')}</button>
-      </div>
+      <div class="modal-footer stepper-footer" id="cred-footer"></div>
     `);
     box.classList.add('modal-lg');
 
     const $ = <T extends HTMLElement>(selector: string) => box.querySelector(selector) as T;
+
+    /* ── Type de l'élément : il décide des champs affichés et des étapes ── */
+    let itemType: ItemType = itemTypeOf(existing?.type);
+
+    const typeGrid = $<HTMLElement>('#cred-type-grid');
+    const renderTypeGrid = () => {
+      typeGrid.innerHTML = ITEM_TYPES.map(type => {
+        const info = ITEM_TYPE_INFO[type];
+        return `<button type="button" class="type-card" data-type="${type}" aria-pressed="${type === itemType}">
+          ${tabIcon(info.icon, 18)}
+          <span class="type-card-text">
+            <span class="type-card-name">${this.escapeHtml(tr(info.fr, info.en))}</span>
+            <span class="type-card-hint">${this.escapeHtml(tr(info.hintFr, info.hintEn))}</span>
+          </span>
+        </button>`;
+      }).join('');
+    };
     const titleInput = $<HTMLInputElement>('#field-title');
     const websiteInput = $<HTMLInputElement>('#field-website');
     const usernameInput = $<HTMLInputElement>('#field-username');
@@ -2423,30 +2594,225 @@ class AppController {
       if (this.selectedItemId === credentialId) this.renderDetail(credentialId);
     };
 
-    $<HTMLButtonElement>('#modal-confirm').addEventListener('click', () => {
-      errorEl.hidden = true;
-      const title = titleInput.value.trim();
-      if (!title) return fail(tr('Donnez un nom à cet identifiant', 'Give this credential a name'), titleInput);
+    /* ── Champs propres au type ──────────────────────────────────────── */
+    const cardNumber = $<HTMLInputElement>('#field-card-number');
+    const cardBrandHint = $<HTMLElement>('#card-brand-hint');
+    const sshPrivate = $<HTMLTextAreaElement>('#field-ssh-private');
+    const sshKeyHint = $<HTMLElement>('#ssh-key-hint');
+    const notesSection = $<HTMLElement>('#section-notes');
+    const attachmentsField = $<HTMLElement>('#attachments-field');
+    const filesHost = $<HTMLElement>('#files-host');
+    const detailsPanel = box.querySelector<HTMLElement>('[data-step="details"]') as HTMLElement;
+    const organisationSection = detailsPanel.querySelector('.form-section') as HTMLElement;
 
-      const website = websiteInput.value.trim();
+    /**
+     * Le numéro enregistré vit dans `cardDigits` ; le champ n'en montre qu'une version
+     * mise en forme. Tant qu'il est masqué il est en lecture seule : sans cela, taper
+     * dans un texte à puces reviendrait à modifier des chiffres qu'on ne voit pas.
+     */
+    let cardDigits = (existing?.card?.number ?? '').replace(/\D/g, '');
+    let cardNumberVisible = !cardDigits;
+
+    const maskCardNumber = (value: string) => value.replace(/\d(?=.*\d{4})/g, '•');
+    const paintCardNumber = () => {
+      const formatted = formatCardNumber(cardDigits);
+      cardNumber.value = cardNumberVisible ? formatted : maskCardNumber(formatted);
+      cardNumber.readOnly = !cardNumberVisible;
+    };
+
+    const updateCardHints = () => {
+      const invalid = cardDigits.length >= 12 && !isLuhnValid(cardDigits);
+      cardBrandHint.textContent = !cardDigits ? ''
+        : invalid ? tr('Ce numéro ne passe pas le contrôle : vérifiez la saisie', 'This number fails the checksum: check your typing')
+        : cardBrand(cardDigits) ?? '';
+      cardBrandHint.classList.toggle('field-hint-warn', invalid);
+    };
+
+    cardNumber.addEventListener('input', () => {
+      if (!cardNumberVisible) return;
+      // Le curseur est replacé en fin de saisie : la mise en forme insère des espaces
+      cardDigits = cardNumber.value.replace(/\D/g, '').slice(0, 19);
+      paintCardNumber();
+      cardNumber.setSelectionRange(cardNumber.value.length, cardNumber.value.length);
+      updateCardHints();
+    });
+
+    $<HTMLButtonElement>('#btn-toggle-card-number').addEventListener('click', event => {
+      cardNumberVisible = !cardNumberVisible;
+      const button = event.currentTarget as HTMLButtonElement;
+      button.setAttribute('aria-pressed', String(cardNumberVisible));
+      button.title = cardNumberVisible ? tr('Masquer', 'Hide') : tr('Afficher', 'Show');
+      paintCardNumber();
+      if (cardNumberVisible) cardNumber.focus();
+    });
+
+    sshPrivate.addEventListener('input', () => {
+      const value = sshPrivate.value.trim();
+      sshKeyHint.textContent = !value || looksLikePrivateKey(value) ? ''
+        : tr('Ce texte ne ressemble pas à une clé privée', 'This does not look like a private key');
+    });
+
+    /** Montre les sections du type choisi et déplace ce qui change de place */
+    const applyType = () => {
+      $<HTMLElement>('#section-login').hidden = itemType !== 'login';
+      $<HTMLElement>('#section-card').hidden = itemType !== 'card';
+      $<HTMLElement>('#section-identity').hidden = itemType !== 'identity';
+      $<HTMLElement>('#section-ssh').hidden = itemType !== 'sshKey';
+      $<HTMLElement>('#section-files').hidden = !isFileType(itemType);
+
+      // Une note et un fichier ont leur contenu comme sujet principal : il remonte à la première étape
+      const essentiel = box.querySelector<HTMLElement>('[data-step="essentiel"]') as HTMLElement;
+      if (itemType === 'note') essentiel.append(notesSection);
+      else detailsPanel.append(notesSection);
+
+      if (isFileType(itemType)) filesHost.append(attachmentsField);
+      else organisationSection.append(attachmentsField);
+
+      $<HTMLElement>('#attachments-label').textContent = isFileType(itemType)
+        ? (itemType === 'folder' ? tr('Fichiers du dossier', 'Files in the folder') : tr('Fichier', 'File'))
+        : tr('Pièces jointes', 'Attachments');
+
+      titleInput.placeholder = itemType === 'card' ? tr('Carte bleue, carte de fidélité…', 'Debit card, loyalty card…')
+        : itemType === 'identity' ? tr('Passeport, carte d’identité…', 'Passport, ID card…')
+        : itemType === 'sshKey' ? tr('Serveur de production, dépôt Git…', 'Production server, Git repo…')
+        : itemType === 'note' ? tr('Codes de secours, procédure…', 'Backup codes, procedure…')
+        : isFileType(itemType) ? tr('Contrat, scan de document…', 'Contract, scanned document…')
+        : 'GitHub, Netflix, Banque…';
+
+      if (itemType === 'card') { paintCardNumber(); updateCardHints(); }
+      updateIconPreview();
+    };
+
+    typeGrid.addEventListener('click', event => {
+      const choice = (event.target as HTMLElement).closest<HTMLElement>('[data-type]')?.dataset.type;
+      if (!choice) return;
+      itemType = itemTypeOf(choice);
+      renderTypeGrid();
+      applyType();
+      stepper.setSteps(stepsForType());
+      stepper.next();
+    });
+
+    /* ── Validation et enregistrement ────────────────────────────────── */
+    const requireTitle = (): string | undefined => {
+      const title = titleInput.value.trim();
+      if (title) return undefined;
+      titleInput.focus();
+      return itemType === 'login'
+        ? tr('Donnez un nom à cet identifiant', 'Give this credential a name')
+        : tr('Donnez un nom à cet élément', 'Give this item a name');
+    };
+
+    const checkEssentiel = (): string | undefined => {
+      const missingTitle = requireTitle();
+      if (missingTitle) return missingTitle;
+
+      if (itemType === 'card') {
+        if (cardDigits && !isLuhnValid(cardDigits)) {
+          cardNumber.focus();
+          return tr('Ce numéro de carte ne passe pas le contrôle', 'This card number fails the checksum');
+        }
+        const month = Number($<HTMLInputElement>('#field-card-exp-month').value);
+        if (month && (month < 1 || month > 12)) {
+          $<HTMLInputElement>('#field-card-exp-month').focus();
+          return tr('Le mois d’expiration doit être compris entre 01 et 12', 'The expiry month must be between 01 and 12');
+        }
+      }
+      return undefined;
+    };
+
+    const checkSecurite = (): string | undefined => {
       const totpRaw = totpInput.value.trim();
-      const totpSecret = totpRaw ? normalizeTotpInput(totpRaw) : null;
-      if (totpRaw && !totpSecret) return fail(tr('La clé 2FA n’est pas valide', 'The 2FA key is not valid'), totpInput);
+      if (totpRaw && !normalizeTotpInput(totpRaw)) {
+        totpInput.focus();
+        return tr('La clé 2FA n’est pas valide', 'The 2FA key is not valid');
+      }
+      return undefined;
+    };
+
+    const stepsForType = (): StepDef[] => {
+      const steps: StepDef[] = [];
+      if (!isEdit) steps.push({ id: 'type', label: tr('Type', 'Type') });
+      steps.push({ id: 'essentiel', label: tr('L’essentiel', 'Essentials'), validate: checkEssentiel });
+      if (itemType === 'login') steps.push({ id: 'securite', label: tr('2FA', '2FA'), validate: checkSecurite });
+      steps.push({ id: 'details', label: tr('Détails', 'Details') });
+      return steps;
+    };
+
+    const payloadForItemType = () => {
+      if (itemType === 'card') {
+        const brand = cardBrand(cardDigits);
+        const month = $<HTMLInputElement>('#field-card-exp-month').value.trim();
+        return {
+          card: {
+            number: cardDigits,
+            holder: $<HTMLInputElement>('#field-card-holder').value.trim(),
+            expMonth: month ? month.padStart(2, '0').slice(0, 2) : '',
+            expYear: $<HTMLInputElement>('#field-card-exp-year').value.trim(),
+            cvv: $<HTMLInputElement>('#field-card-cvv').value.trim(),
+            pin: $<HTMLInputElement>('#field-card-pin').value.trim(),
+            ...(brand ? { brand } : {})
+          }
+        };
+      }
+      if (itemType === 'identity') {
+        return {
+          identity: {
+            firstName: $<HTMLInputElement>('#field-id-first').value.trim(),
+            lastName: $<HTMLInputElement>('#field-id-last').value.trim(),
+            birthDate: $<HTMLInputElement>('#field-id-birth').value,
+            email: $<HTMLInputElement>('#field-id-email').value.trim(),
+            phone: $<HTMLInputElement>('#field-id-phone').value.trim(),
+            address: $<HTMLInputElement>('#field-id-address').value.trim(),
+            postalCode: $<HTMLInputElement>('#field-id-postal').value.trim(),
+            city: $<HTMLInputElement>('#field-id-city').value.trim(),
+            country: $<HTMLInputElement>('#field-id-country').value.trim(),
+            docNumber: $<HTMLInputElement>('#field-id-doc').value.trim()
+          }
+        };
+      }
+      if (itemType === 'sshKey') {
+        return {
+          sshKey: {
+            privateKey: sshPrivate.value,
+            publicKey: $<HTMLTextAreaElement>('#field-ssh-public').value.trim(),
+            passphrase: $<HTMLInputElement>('#field-ssh-passphrase').value
+          }
+        };
+      }
+      return {};
+    };
+
+    const submit = () => {
+      errorEl.hidden = true;
+      const blocking = checkEssentiel() ?? (itemType === 'login' ? checkSecurite() : undefined);
+      if (blocking) return fail(blocking);
+
+      const title = titleInput.value.trim();
+      const isLogin = itemType === 'login';
+      const website = isLogin ? websiteInput.value.trim() : '';
+      const totpSecret = isLogin ? normalizeTotpInput(totpInput.value.trim()) : null;
 
       const expiresDate = expiresField.getValue();
       const [y, m, d] = expiresDate ? expiresDate.split('-').map(Number) : [];
       const item = {
+        type: itemType,
         title,
         website,
-        username: usernameInput.value.trim(),
-        password: pwdField.value,
+        username: isLogin ? usernameInput.value.trim() : '',
+        password: isLogin ? pwdField.value : '',
         domain: extractDomain(website),
         totpSecret: totpSecret || undefined,
         notes: notesInput.value,
         tags: tagInput.getTags(),
         isFavorite: $<HTMLInputElement>('#field-favorite').checked,
         expiresAt: expiresDate ? new Date(y, m - 1, d, 12).getTime() : undefined,
-        icon: chosenIcon
+        icon: chosenIcon,
+        // Les champs de l'ancien type sont effacés quand le type change
+        card: undefined,
+        identity: undefined,
+        sshKey: undefined,
+        ...payloadForItemType()
       };
 
       const problem = checkCredential({ ...item, fields: existing?.fields }, limits, tr);
@@ -2460,7 +2826,8 @@ class AppController {
         void uploadPendingFiles(existing.id, existing.vaultId);
       } else {
         const vaultId = vaultStore.getData().activeVaultId;
-        const id = vaultStore.addCredential({ ...item, vaultId });
+        const folderId = this.activeFolderId ?? undefined;
+        const id = vaultStore.addCredential({ ...item, vaultId, ...(folderId ? { folderId } : {}) });
         this.closeModal();
         this.selectedItemId = id;
         this.renderList();
@@ -2468,6 +2835,22 @@ class AppController {
         this.showToast(tr(`${title} ajouté`, `${title} added`), 'success');
         void uploadPendingFiles(id, vaultId);
       }
+    };
+
+    renderTypeGrid();
+    applyType();
+
+    const stepper = mountStepper({
+      body: $<HTMLElement>('.cred-form'),
+      header: $<HTMLElement>('#cred-steps'),
+      footer: $<HTMLElement>('#cred-footer'),
+      steps: stepsForType(),
+      tr,
+      finishLabel: isEdit ? tr('Enregistrer', 'Save') : tr('Ajouter', 'Add'),
+      onFinish: submit,
+      onError: message => fail(message),
+      onStepChange: () => { errorEl.hidden = true; },
+      onCancel: () => { stopScanner(); this.closeModal(); }
     });
   }
 
@@ -5522,6 +5905,122 @@ class AppController {
       });
       list.appendChild(li);
     });
+  }
+
+  /** Pastille rappelant le type de l'élément */
+  private typeBadge(type: ItemType): string {
+    const info = ITEM_TYPE_INFO[type];
+    return `<span class="item-type-badge">${tabIcon(info.icon, 13)}${this.escapeHtml(this.tr(info.fr, info.en))}</span>`;
+  }
+
+  /**
+   * Une ligne de valeur recopiable. Une valeur sensible reste masquée jusqu'à
+   * ce qu'on demande à la voir, et la copie passe par l'effacement automatique
+   * du presse-papiers comme pour un mot de passe.
+   */
+  private detailField(label: string, value: string, options: { secret?: boolean; mono?: boolean; multiline?: boolean } = {}): string {
+    if (!value) return '';
+    const shown = options.secret ? '•'.repeat(Math.min(value.length, 20)) : this.escapeHtml(value);
+    const style = options.mono ? 'font-family:var(--font-mono);letter-spacing:0.04em;' : '';
+    return `
+      <div class="field-group">
+        <div class="field-label">${this.escapeHtml(label)}</div>
+        <div class="field-box">
+          <span class="field-val${options.multiline ? ' field-val-multiline' : ''}" style="${style}"
+            data-secret-view data-secret-shown="${options.secret ? 'false' : 'true'}"
+            data-secret-value="${this.escapeHtml(value)}">${shown}</span>
+          <div class="field-actions">
+            ${options.secret ? `<button class="icon-btn" data-secret-toggle title="${this.tr('Afficher', 'Show')}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>` : ''}
+            <button class="icon-btn" data-secret-copy data-sensitive="${!!options.secret}" title="${this.tr('Copier', 'Copy')}">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  /** Champs affichés pour une carte, une identité ou une clé */
+  private renderTypeDetail(cred: CredentialItem): string {
+    const type = itemTypeOf(cred.type);
+    const tr = (fr: string, en: string) => this.tr(fr, en);
+
+    if (type === 'card' && cred.card) {
+      const c = cred.card;
+      const expiry = c.expMonth && c.expYear ? `${c.expMonth}/${c.expYear}` : '';
+      return [
+        this.detailField(tr('Numéro', 'Number'), formatCardNumber(c.number), { secret: true, mono: true }),
+        this.detailField(tr('Titulaire', 'Cardholder'), c.holder),
+        this.detailField(tr('Expiration', 'Expiry'), expiry, { mono: true }),
+        this.detailField(tr('Cryptogramme', 'Security code'), c.cvv, { secret: true, mono: true }),
+        this.detailField(tr('Code', 'PIN'), c.pin, { secret: true, mono: true })
+      ].join('');
+    }
+
+    if (type === 'identity' && cred.identity) {
+      const id = cred.identity;
+      const fullName = [id.firstName, id.lastName].filter(Boolean).join(' ');
+      const place = [id.postalCode, id.city].filter(Boolean).join(' ');
+      return [
+        this.detailField(tr('Nom complet', 'Full name'), fullName),
+        this.detailField(tr('Date de naissance', 'Date of birth'), id.birthDate),
+        this.detailField(tr('Numéro de pièce', 'Document number'), id.docNumber, { secret: true, mono: true }),
+        this.detailField('Email', id.email),
+        this.detailField(tr('Téléphone', 'Phone'), id.phone),
+        this.detailField(tr('Adresse', 'Address'), [id.address, place, id.country].filter(Boolean).join(', '))
+      ].join('');
+    }
+
+    if (type === 'sshKey' && cred.sshKey) {
+      const key = cred.sshKey;
+      return [
+        this.detailField(tr('Clé privée', 'Private key'), key.privateKey, { secret: true, mono: true, multiline: true }),
+        this.detailField(tr('Phrase de passe de la clé', 'Key passphrase'), key.passphrase, { secret: true }),
+        this.detailField(tr('Clé publique', 'Public key'), key.publicKey, { mono: true, multiline: true })
+      ].join('');
+    }
+
+    return '';
+  }
+
+  /** Ce qui distingue l'élément dans la liste, selon son type */
+  private itemSubtitle(cred: CredentialItem): string {
+    const type = itemTypeOf(cred.type);
+    const info = ITEM_TYPE_INFO[type];
+    const fallback = this.tr(info.fr, info.en);
+
+    switch (type) {
+      case 'login':
+        return cred.username || cred.domain || this.tr('Sans identifiant', 'No username');
+      case 'card': {
+        const last4 = (cred.card?.number ?? '').replace(/\D/g, '').slice(-4);
+        const label = [cred.card?.brand, last4 ? '•••• ' + last4 : ''].filter(Boolean).join(' ');
+        return label || fallback;
+      }
+      case 'identity': {
+        const name = [cred.identity?.firstName, cred.identity?.lastName].filter(Boolean).join(' ');
+        return name || cred.identity?.email || fallback;
+      }
+      case 'note': {
+        // La première ligne de la note en dit plus que le nom du type
+        const first = (cred.notes ?? '').split(/\r?\n/).map(l => l.trim()).find(Boolean);
+        return first ? first.slice(0, 80) : fallback;
+      }
+      case 'sshKey':
+        return cred.sshKey?.publicKey?.split(' ')[0] || fallback;
+      case 'file':
+      case 'folder': {
+        const count = cred.attachments?.length ?? 0;
+        if (!count) return fallback;
+        return count === 1
+          ? (cred.attachments?.[0]?.name ?? fallback)
+          : this.tr(`${count} fichiers`, `${count} files`);
+      }
+      default:
+        return fallback;
+    }
   }
 
   private renderTagChips(tags: string[]): string {
