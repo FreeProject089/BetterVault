@@ -2642,6 +2642,11 @@ input[type="datetime-local"].form-input {
   gap: 8px;
 }
 
+.ie-export-list.ie-export-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
 .ie-export {
   display: flex;
   align-items: center;
