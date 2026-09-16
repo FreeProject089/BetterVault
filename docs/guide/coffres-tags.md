@@ -21,6 +21,9 @@ Les dossiers rangent les éléments **en arborescence à l'intérieur d'un coffr
 - **Ranger un élément** : glissez-le depuis la liste sur un dossier de la barre latérale, ou utilisez le champ **Dossier** à l'étape *Détails* de son formulaire. Un message propose d'annuler juste après le déplacement.
 - **Sortir un élément d'un dossier** : glissez-le sur **Tout le coffre**, dans le fil d'Ariane.
 
+!!! tip "Sur téléphone"
+    Le bouton **+** de la barre du bas demande d'abord s'il s'agit d'un élément du coffre ou d'une tâche. Le menu latéral s'ouvre aussi en glissant le doigt depuis le bord gauche, et se referme en glissant vers la gauche.
+
 Le compteur d'un dossier inclut le contenu de ses sous-dossiers.
 
 Les dossiers peuvent s'imbriquer jusqu'à **cinq niveaux**, pour que la barre latérale reste lisible.

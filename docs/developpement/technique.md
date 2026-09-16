@@ -66,6 +66,40 @@ Trois méthodes — `storeAttachment`, `loadAttachment`, `removeAttachment` — 
 
 Le rangement dans le coffre a une limite bien plus basse (1 Mo par fichier, la moitié de la taille du coffre au total) : le contenu est déchiffré en mémoire avec tout le coffre à chaque ouverture, et le base64 l'alourdit d'un tiers.
 
+## Pourquoi pas Kotlin Multiplatform (ni React Native, ni Flutter)
+
+La question revient naturellement : puisque l'application vise Windows, macOS, Linux, Android, iOS, le web **et** une extension de navigateur, pourquoi ne pas prendre un cadre multiplateforme prévu pour ça ?
+
+Parce qu'aucun d'eux ne couvre la cible qui compte le plus ici.
+
+| Cadre | Bureau | Mobile | Web | **Extension de navigateur** |
+| --- | --- | --- | --- | --- |
+| Kotlin Multiplatform + Compose | oui | oui | expérimental (Wasm) | **non** |
+| Flutter | oui | oui | oui, mais en canvas | **non** |
+| React Native | via RN Desktop | oui | via RN Web | **non** |
+| Web + Tauri (choix retenu) | oui | oui | oui | **oui** |
+
+Une extension de navigateur **est** une page web : son popup, son panneau latéral et sa page d'options sont du HTML rendu par le navigateur, et le remplissage de formulaire est du script injecté dans la page visitée. Un gestionnaire de mots de passe sans extension perd sa fonction la plus utilisée au quotidien. En partant du web, l'extension est gratuite ; en partant de Compose ou de Flutter, il faudrait écrire une deuxième application, en TypeScript, rien que pour elle — c'est-à-dire exactement ce qu'on cherchait à éviter.
+
+Les autres raisons, dans l'ordre d'importance :
+
+- **Le chiffrement est déjà portable.** Argon2id, AES-GCM, HKDF et X25519 viennent de `@noble/*` et de la WebCrypto du navigateur, présentes partout. Il n'y a pas de code cryptographique à porter par plateforme, donc pas grand-chose à gagner à changer de langage.
+- **KMP ne partage pas l'interface par défaut.** Kotlin Multiplatform partage la logique ; l'interface se partage avec Compose Multiplatform, dont la cible web reste expérimentale et rend dans un canvas — au prix de l'accessibilité, de la sélection de texte et du poids.
+- **Tauri donne déjà le natif là où il compte.** Trousseau du système, Windows Hello, Touch ID, Face ID, Argon2id natif, remplissage automatique Android et iOS : tout cela existe dans `src-tauri/`, en Rust, appelé depuis l'interface. Le natif sert là où il apporte quelque chose, pas partout.
+- **Réécrire coûterait tout le reste.** Import/export de six formats, fusion des versions, moteur de tâches, audit, générateur : tout serait à refaire et à re-tester.
+
+### Ce que ce choix coûte
+
+Il faut être honnête sur l'autre côté :
+
+- **Les performances d'une webview** restent en dessous d'une interface native sur les très longues listes. Le rendu direct sans framework compense en partie.
+- **iOS impose WKWebView**, dont on ne choisit pas la version.
+- **L'extension AutoFill iOS s'écrit en Swift** de toute façon (`src-tauri/ios-extension/`), comme le service d'autofill Android s'écrit en Kotlin (`BetterVaultPlugin.kt`). Le natif n'est pas entièrement évité, il est cantonné.
+
+### Où serait KMP le bon choix
+
+Si l'extension de navigateur disparaissait du périmètre et que les applications mobiles devenaient l'essentiel, KMP + Compose deviendrait un choix défendable : une seule base Kotlin, une interface vraiment native sur Android, et l'interopérabilité Swift sur iOS. Ce n'est pas le périmètre de BetterVault.
+
 ## Une seule interface, quatre surfaces
 
 Le même `index.html` et le même bundle servent partout. Ce qui change est détecté à l'exécution :
