@@ -97,6 +97,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libdbus-1-dev libssl-dev
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-ios' || '' }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
@@ -106,4 +108,10 @@ jobs:
       - run: cargo check --locked
         working-directory: src-tauri
       - run: cargo clippy --locked --all-targets -- -D warnings
+        working-directory: src-tauri
+      # L'application iOS s'assemble dans Xcode sur un Mac (voir la documentation) ;
+      # on vérifie au moins que la partie Rust compile pour iOS.
+      - name: Compilation Rust pour iOS
+        if: runner.os == 'macOS'
+        run: cargo check --locked --target aarch64-apple-ios
         working-directory: src-tauri
