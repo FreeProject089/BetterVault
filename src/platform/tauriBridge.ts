@@ -20,6 +20,19 @@ export async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>
   return invoke<T>(cmd, args);
 }
 
+/**
+ * Ouvre une adresse hors de l'application : navigateur du système dans les applications
+ * de bureau et mobiles (où target="_blank" ne fait rien), nouvel onglet ailleurs.
+ */
+export async function openExternal(url: string): Promise<void> {
+  if (!/^https?:\/\//i.test(url)) throw new Error('Adresse non prise en charge');
+  if (isTauri()) {
+    await tauriInvoke<void>('plugin:opener|open_url', { url });
+    return;
+  }
+  window.open(url, '_blank', 'noopener');
+}
+
 /** Argon2id natif (Rust) — retourne null hors Tauri pour basculer sur l'implémentation JS */
 export async function nativeArgon2id(
   password: string,
