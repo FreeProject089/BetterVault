@@ -1,4 +1,4 @@
-import type { CredentialItem, SharedVaultInfo, TagDef, Task, UnlockedVaultData, VaultMetadata } from '../types/vault';
+import type { CredentialItem, FolderDef, SharedVaultInfo, TagDef, Task, UnlockedVaultData, VaultMetadata } from '../types/vault';
 import type { AccountService } from './accountService';
 import { decryptVaultData, encryptVaultJson, fromBase64, importVaultKey } from './accountCrypto';
 import { CloudError, type SharedMembers, type SharedPermission, type SharedRole, type SharedVaultSummary } from './cloudClient';
@@ -17,6 +17,7 @@ export interface SharedVaultContent {
   credentials: CredentialItem[];
   tasks: Task[];
   tagDefs: TagDef[];
+  folders?: FolderDef[];
   deleted: Record<string, number>;
 }
 
@@ -40,12 +41,12 @@ export class SharedReadOnlyError extends Error {
 }
 
 function asVaultData(content: SharedVaultContent): UnlockedVaultData {
-  return { vaults: [], activeVaultId: '', credentials: content.credentials, tasks: content.tasks, tagDefs: content.tagDefs, deleted: content.deleted };
+  return { vaults: [], activeVaultId: '', credentials: content.credentials, tasks: content.tasks, tagDefs: content.tagDefs, folders: content.folders ?? [], deleted: content.deleted };
 }
 
 function emptyContent(name: string, type: VaultMetadata['type'], icon?: VaultMetadata['icon']): SharedVaultContent {
   const now = Date.now();
-  return { vault: { name, type, icon, createdAt: now, updatedAt: now }, credentials: [], tasks: [], tagDefs: [], deleted: {} };
+  return { vault: { name, type, icon, createdAt: now, updatedAt: now }, credentials: [], tasks: [], tagDefs: [], folders: [], deleted: {} };
 }
 
 export class SharedVaultManager {
@@ -146,7 +147,8 @@ export class SharedVaultManager {
       vaults: [...personal.vaults],
       credentials: [...personal.credentials],
       tasks: [...personal.tasks],
-      tagDefs: [...personal.tagDefs]
+      tagDefs: [...personal.tagDefs],
+      folders: [...(personal.folders ?? [])]
     };
     const knownTags = new Set(merged.tagDefs.map(t => t.name.toLowerCase()));
 
@@ -157,6 +159,7 @@ export class SharedVaultManager {
       merged.vaults.push({ id: state.summary.id, name: vault.name, type: vault.type, icon: vault.icon, createdAt: vault.createdAt, updatedAt: vault.updatedAt, shared });
       merged.credentials.push(...state.content.credentials.map(c => ({ ...c, vaultId: state.summary.id })));
       merged.tasks.push(...state.content.tasks.map(t => ({ ...t, vaultId: state.summary.id })));
+      merged.folders.push(...(state.content.folders ?? []).map(f => ({ ...f, vaultId: state.summary.id })));
       for (const tag of state.content.tagDefs) {
         if (!knownTags.has(tag.name.toLowerCase())) {
           knownTags.add(tag.name.toLowerCase());
@@ -182,6 +185,7 @@ export class SharedVaultManager {
       credentials: data.credentials.filter(c => !sharedIds.has(c.vaultId)),
       tasks: data.tasks.filter(t => !sharedIds.has(t.vaultId)),
       tagDefs: data.tagDefs,
+      folders: (data.folders ?? []).filter(f => !sharedIds.has(f.vaultId)),
       deleted: data.deleted
     };
 
@@ -201,6 +205,7 @@ export class SharedVaultManager {
           credentials,
           tasks,
           tagDefs: data.tagDefs.filter(t => usedTags.has(t.name.toLowerCase())),
+          folders: (data.folders ?? []).filter(f => f.vaultId === id),
           deleted
         };
         const json = JSON.stringify(content);
@@ -254,7 +259,7 @@ export class SharedVaultManager {
         if (!conflict?.blob) throw err;
         const remote = await decryptVaultData<SharedVaultContent>(key, conflict.blob);
         const merged = mergeVaultData(asVaultData(current), asVaultData(remote));
-        current = { vault: current.vault.updatedAt >= remote.vault.updatedAt ? current.vault : remote.vault, credentials: merged.credentials, tasks: merged.tasks, tagDefs: merged.tagDefs, deleted: merged.deleted };
+        current = { vault: current.vault.updatedAt >= remote.vault.updatedAt ? current.vault : remote.vault, credentials: merged.credentials, tasks: merged.tasks, tagDefs: merged.tagDefs, folders: merged.folders, deleted: merged.deleted };
         state.revision = conflict.revision;
         this.emit();
       }
@@ -291,7 +296,8 @@ export class SharedVaultManager {
     const usedTags = new Set([...credentials, ...tasks].flatMap(item => item.tags.map(t => t.toLowerCase())));
     const content: SharedVaultContent = {
       vault: { name: vault.name, type: vault.type, icon: vault.icon, createdAt: vault.createdAt, updatedAt: Date.now() },
-      credentials, tasks, tagDefs: data.tagDefs.filter(t => usedTags.has(t.name.toLowerCase())), deleted: {}
+      credentials, tasks, tagDefs: data.tagDefs.filter(t => usedTags.has(t.name.toLowerCase())),
+      folders: (data.folders ?? []).filter(f => f.vaultId === vaultId), deleted: {}
     };
     const blob = await encryptVaultJson(await importVaultKey(raw), JSON.stringify(content));
     const created = await this.account.withCloud(async client => client.createSharedVault(blob, await sealForRecipient(raw, publicKey)));

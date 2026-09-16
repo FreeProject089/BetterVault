@@ -40,6 +40,7 @@ export function mergeVaultData(local: UnlockedVaultData, remote: UnlockedVaultDa
     credentials: mergeCollection(local.credentials, remote.credentials, deleted),
     tasks: mergeCollection(local.tasks, remote.tasks, deleted),
     tagDefs: mergeCollection(local.tagDefs ?? [], remote.tagDefs ?? [], deleted),
+    folders: mergeCollection(local.folders ?? [], remote.folders ?? [], deleted),
     deleted
   };
 }
