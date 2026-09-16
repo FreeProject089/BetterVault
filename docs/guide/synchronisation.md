@@ -29,6 +29,17 @@ Pour un compte créé en mode **Cet appareil** :
 
 Le coffre existant est envoyé chiffré. Les autres appareils peuvent ensuite se connecter.
 
+## Photo de profil
+
+Onglet **Général** de **Compte et synchronisation**, à côté de l'adresse email. Selon ce que le serveur autorise, vous pouvez :
+
+- **envoyer une image** depuis l'appareil (PNG, JPEG, WebP, GIF ou AVIF) — elle est recadrée en carré à 256 px et réencodée avant l'envoi, ce qui retire au passage les métadonnées de la photo d'origine (position GPS, appareil) ;
+- **donner un lien** vers une image déjà hébergée ailleurs, en `https`.
+
+L'image est réservée à votre compte : elle n'est servie à personne d'autre, y compris dans un coffre partagé. **Retirer** la supprime du serveur.
+
+Un serveur peut refuser l'une ou l'autre possibilité, ou les deux ; voir [`AVATAR_UPLOADS` et `AVATAR_URLS`](../deploiement/configuration.md#photo-de-profil). Sur un compte **Cet appareil**, la photo reste sur l'appareil.
+
 ## Changer le mot de passe principal
 
 1. Section **Changer le mot de passe principal** : mot de passe actuel, nouveau mot de passe, confirmation.
