@@ -64,10 +64,15 @@ nav:
       - Sans Docker: deploiement/sans-docker.md
       - Configuration et sauvegardes: deploiement/configuration.md
       - Sauvegardes S3 et RGPD: deploiement/sauvegardes.md
+      - Sessions et lieu: deploiement/sessions-lieu.md
+      - Supervision: deploiement/supervision.md
+      - Documents légaux: deploiement/documents-legaux.md
+      - Espace payant (Stripe): deploiement/offres-stripe.md
   - Applications:
       - Bureau et mobile: applications/bureau-mobile.md
       - Biométrie et remplissage automatique: applications/biometrie-autofill.md
   - Sécurité: securite.md
+  - Zero-knowledge et conformité: conformite.md
   - Développement:
       - Architecture: developpement/architecture.md
       - API du serveur: developpement/api.md
