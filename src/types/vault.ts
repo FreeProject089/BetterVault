@@ -104,6 +104,7 @@ export interface TagDef {
   id: string;
   name: string;
   color: string;
+  icon?: ItemIcon;
   createdAt: number;
   updatedAt: number;
 }

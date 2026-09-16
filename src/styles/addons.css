@@ -2814,6 +2814,43 @@ input[type="datetime-local"].form-input {
   grid-column: 1 / -1;
 }
 
+.tag-icon-button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.tag-icon-button:hover { border-color: var(--accent); }
+.tag-icon-button[aria-expanded="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+
+.tag-icon-panel { grid-column: 1 / -1; }
+
+.tag-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.tag-chip-icon {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 3px;
+  color: var(--tag-color);
+}
+
+.icon-picker-mono {
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
 .tag-create {
   display: flex;
   flex-direction: column;

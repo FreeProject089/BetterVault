@@ -1,5 +1,5 @@
 import type { CredentialItem, Task, TagDef, UnlockedVaultData, VaultMetadata } from '../types/vault';
-import { normalizeItemIcon } from '../icons/iconLibrary';
+import { normalizeItemIcon, type ItemIcon } from '../icons/iconLibrary';
 import { normalizeAttachments } from '../account/attachmentCrypto';
 
 export const DEFAULT_VAULT_NAME = 'Personnel';
@@ -53,7 +53,10 @@ export function normalizeVaultData(input: Partial<UnlockedVaultData> | null | un
       return { ...rest, ...(clean ? { icon: clean } : {}), ...(files ? { attachments: files } : {}), tags: Array.isArray(c.tags) ? c.tags : [] };
     }),
     tasks: (Array.isArray(source.tasks) ? source.tasks : []).map(t => ({ ...t, tags: Array.isArray(t.tags) ? t.tags : [] })),
-    tagDefs: Array.isArray(source.tagDefs) ? [...source.tagDefs] : [],
+    tagDefs: (Array.isArray(source.tagDefs) ? source.tagDefs : []).map(({ icon, ...tag }) => {
+      const clean = normalizeItemIcon(icon);
+      return { ...tag, ...(clean ? { icon: clean } : {}) };
+    }),
     deleted: source.deleted && typeof source.deleted === 'object' ? { ...source.deleted } : {}
   };
 
@@ -291,7 +294,7 @@ export class VaultStore {
     return tag;
   }
 
-  updateTag(tagId: string, updates: { name?: string; color?: string }): void {
+  updateTag(tagId: string, updates: { name?: string; color?: string; icon?: ItemIcon | null }): void {
     const tag = this.data.tagDefs.find(t => t.id === tagId);
     if (!tag) return;
     const now = Date.now();
@@ -312,6 +315,10 @@ export class VaultStore {
       tag.name = name;
     }
     if (updates.color !== undefined) tag.color = updates.color;
+    if (updates.icon !== undefined) {
+      if (updates.icon) tag.icon = updates.icon;
+      else delete tag.icon;
+    }
     tag.updatedAt = now;
     this.commit();
   }
