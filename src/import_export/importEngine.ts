@@ -8,6 +8,14 @@ export interface ImportResult {
   count: number;
 }
 
+/** Fichier reconnu mais inutilisable tel quel : le message explique quoi faire */
+export class ImportFormatError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ImportFormatError';
+  }
+}
+
 /**
  * Détecte et parse les formats de coffres (Bitwarden, 1Password, KeePass, CSV générique)
  */
@@ -69,7 +77,33 @@ export function parseImportFile(fileContent: string, fileName = ''): ImportResul
         };
       }
 
-      // B. Format BetterVault
+      // B. Passky (passky.org) : export JSON non chiffré
+      if (Array.isArray(parsed.passwords) && parsed.passwords.every((p: any) => p && typeof p === 'object' && 'website' in p && 'password' in p)) {
+        if (parsed.encrypted === true) {
+          throw new ImportFormatError('Export Passky chiffré : dans Passky, exportez en JSON non chiffré (Paramètres › Exporter)');
+        }
+        const credentials: Partial<CredentialItem>[] = parsed.passwords.map((item: any) => {
+          const site = String(item.website ?? '').trim();
+          const website = site && !/^[a-z][a-z0-9+.-]*:\/\//i.test(site) && site.includes('.') ? `https://${site}` : site;
+          let title = site;
+          try {
+            title = website ? new URL(website).hostname.replace(/^www\./, '') : '';
+          } catch {
+            title = site;
+          }
+          return {
+            title: title || 'Identifiant Passky',
+            username: String(item.username ?? ''),
+            password: String(item.password ?? ''),
+            website,
+            notes: String(item.message ?? ''),
+            tags: ['Import Passky']
+          };
+        });
+        return { credentials, tasks: [], sourceFormat: 'Passky JSON', count: credentials.length };
+      }
+
+      // C. Format BetterVault
       if (parsed.credentials && Array.isArray(parsed.credentials)) {
         return {
           credentials: parsed.credentials,
@@ -97,6 +131,7 @@ export function parseImportFile(fileContent: string, fileName = ''): ImportResul
         };
       }
     } catch (e) {
+      if (e instanceof ImportFormatError) throw e;
       console.warn('Échec parsing JSON, tentative en CSV...', e);
     }
   }

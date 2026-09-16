@@ -30,89 +30,172 @@
     </section>
 
     <div id="dashboard" hidden>
-      <section class="stats" id="stats"></section>
+      <nav class="tabs" role="tablist">
+        <button type="button" class="tab active" data-tab="overview" data-i18n="tabOverview">Tableau de bord</button>
+        <button type="button" class="tab" data-tab="settings" data-i18n="tabSettings">Réglages</button>
+        <button type="button" class="tab" data-tab="billing" data-i18n="tabBilling">Offres</button>
+        <button type="button" class="tab" data-tab="legal" data-i18n="tabLegal">Documents légaux</button>
+        <button type="button" class="tab" data-tab="audit" data-i18n="tabAudit">Journal</button>
+      </nav>
 
-      <form id="settings-form" class="grid">
-        <section class="card">
-          <h2 data-i18n="general">Général</h2>
-          <label for="publicUrl" data-i18n="publicUrl">Adresse publique</label>
-          <input id="publicUrl" type="url" placeholder="https://vault.exemple.fr">
-          <p class="hint" data-i18n="publicUrlHint">Affichée dans les emails envoyés aux utilisateurs.</p>
-          <label class="check"><input id="registrationOpen" type="checkbox"> <span data-i18n="registrationOpen">Inscriptions ouvertes</span></label>
-        </section>
+      <section data-panel="overview">
+        <div class="panel-head">
+          <p class="hint" data-i18n="overviewHint">Totaux anonymes : aucune adresse email, adresse IP ni contenu de coffre n’est affiché ici.</p>
+          <button class="btn" type="button" id="refresh-overview" data-i18n="refresh">Actualiser</button>
+        </div>
+        <div class="stats" id="stats"></div>
+        <div class="grid">
+          <section class="card">
+            <h2 data-i18n="activity">Activité</h2>
+            <div id="activity"></div>
+          </section>
+          <section class="card">
+            <h2 data-i18n="storageTitle">Stockage</h2>
+            <div id="storage"></div>
+          </section>
+          <section class="card wide">
+            <h2 data-i18n="performance">Performances</h2>
+            <div id="performance"></div>
+          </section>
+          <section class="card">
+            <h2 data-i18n="securityChecks">Contrôles de sécurité</h2>
+            <ul class="checks" id="checks"></ul>
+          </section>
+          <section class="card">
+            <h2 data-i18n="downloadTitle">Copie chiffrée de la base</h2>
+            <p class="hint" data-i18n="downloadHint">Base complète compressée puis chiffrée (AES-256-GCM, clé dérivée par scrypt). Les coffres restent illisibles sans les mots de passe des utilisateurs. Restauration : node server/tools/decrypt-backup.ts.</p>
+            <label for="download-passphrase" data-i18n="passphrase">Phrase de chiffrement (12 caractères minimum)</label>
+            <input id="download-passphrase" type="password" autocomplete="new-password" minlength="12">
+            <div class="row test"><button class="btn" type="button" id="download-backup" data-i18n="download">Télécharger</button></div>
+            <p class="status" id="download-status" role="status"></p>
+          </section>
+        </div>
+      </section>
 
-        <section class="card">
-          <h2 data-i18n="limits">Limites</h2>
-          <p class="hint" data-i18n="limitsHint">Les coffres sont chiffrés : les applications appliquent ces limites avant l’envoi, le serveur vérifie la taille.</p>
-          <div class="limits" id="limits"></div>
-        </section>
+      <form id="settings-form">
+        <div class="grid" data-panel="settings" hidden>
+          <section class="card">
+            <h2 data-i18n="general">Général</h2>
+            <label for="publicUrl" data-i18n="publicUrl">Adresse publique</label>
+            <input id="publicUrl" type="url" placeholder="https://vault.exemple.fr">
+            <p class="hint" data-i18n="publicUrlHint">Affichée dans les emails envoyés aux utilisateurs.</p>
+            <label class="check"><input id="registrationOpen" type="checkbox"> <span data-i18n="registrationOpen">Inscriptions ouvertes</span></label>
+          </section>
 
-        <section class="card wide">
-          <h2>SMTP</h2>
-          <p class="hint" data-i18n="smtpHint">Sert aux codes de réinitialisation et aux alertes de sécurité. Laissez l’hôte vide pour désactiver les emails.</p>
-          <div class="row">
-            <div><label for="smtpHost" data-i18n="host">Hôte</label><input id="smtpHost" placeholder="smtp.exemple.fr"></div>
-            <div class="small"><label for="smtpPort">Port</label><input id="smtpPort" type="number" min="1" max="65535"></div>
-            <div class="small">
-              <label for="smtpSecurity" data-i18n="security">Sécurité</label>
-              <select id="smtpSecurity">
-                <option value="starttls">STARTTLS</option>
-                <option value="tls">TLS</option>
-                <option value="none" data-i18n="none">Aucune</option>
-              </select>
+          <section class="card">
+            <h2 data-i18n="limits">Limites</h2>
+            <p class="hint" data-i18n="limitsHint">Les coffres sont chiffrés : les applications appliquent ces limites avant l’envoi, le serveur vérifie la taille.</p>
+            <div class="limits" id="limits"></div>
+          </section>
+
+          <section class="card wide">
+            <h2>SMTP</h2>
+            <p class="hint" data-i18n="smtpHint">Sert aux codes de réinitialisation et aux alertes de sécurité. Laissez l’hôte vide pour désactiver les emails.</p>
+            <div class="row">
+              <div><label for="smtpHost" data-i18n="host">Hôte</label><input id="smtpHost" placeholder="smtp.exemple.fr"></div>
+              <div class="small"><label for="smtpPort">Port</label><input id="smtpPort" type="number" min="1" max="65535"></div>
+              <div class="small">
+                <label for="smtpSecurity" data-i18n="security">Sécurité</label>
+                <select id="smtpSecurity">
+                  <option value="starttls">STARTTLS</option>
+                  <option value="tls">TLS</option>
+                  <option value="none" data-i18n="none">Aucune</option>
+                </select>
+              </div>
             </div>
-          </div>
-          <div class="row">
-            <div><label for="smtpUser" data-i18n="user">Utilisateur</label><input id="smtpUser" autocomplete="off"></div>
-            <div><label for="smtpPassword" data-i18n="password">Mot de passe</label><input id="smtpPassword" type="password" autocomplete="new-password"></div>
-          </div>
-          <label for="smtpFrom" data-i18n="from">Expéditeur</label>
-          <input id="smtpFrom" placeholder="BetterVault &lt;no-reply@exemple.fr&gt;">
-          <label class="check"><input id="smtpAllowInvalid" type="checkbox"> <span data-i18n="allowInvalid">Accepter un certificat non valide (serveur interne)</span></label>
-          <div class="row test">
-            <div><label for="testTo" data-i18n="testTo">Envoyer un email de test à</label><input id="testTo" type="email"></div>
-            <button class="btn" type="button" id="smtp-test" data-i18n="sendTest">Envoyer</button>
-          </div>
-          <p class="status" id="smtp-status" role="status"></p>
-        </section>
+            <div class="row">
+              <div><label for="smtpUser" data-i18n="user">Utilisateur</label><input id="smtpUser" autocomplete="off"></div>
+              <div><label for="smtpPassword" data-i18n="password">Mot de passe</label><input id="smtpPassword" type="password" autocomplete="new-password"></div>
+            </div>
+            <label for="smtpFrom" data-i18n="from">Expéditeur</label>
+            <input id="smtpFrom" placeholder="BetterVault &lt;no-reply@exemple.fr&gt;">
+            <label class="check"><input id="smtpAllowInvalid" type="checkbox"> <span data-i18n="allowInvalid">Accepter un certificat non valide (serveur interne)</span></label>
+            <div class="row test">
+              <div><label for="testTo" data-i18n="testTo">Envoyer un email de test à</label><input id="testTo" type="email"></div>
+              <button class="btn" type="button" id="smtp-test" data-i18n="sendTest">Envoyer</button>
+            </div>
+            <p class="status" id="smtp-status" role="status"></p>
+          </section>
 
-        <section class="card wide">
-          <h2 data-i18n="backups">Sauvegardes</h2>
-          <p class="hint" data-i18n="backupHint">Copie de la base et des pièces jointes vers un stockage S3 (MinIO fourni avec Docker, ou AWS, Backblaze, Scaleway…). Les anciennes copies sont supprimées après la durée de conservation.</p>
-          <p class="status" id="backup-encryption"></p>
-          <div class="row">
-            <label class="check"><input id="backupEnabled" type="checkbox"> <span data-i18n="backupEnabled">Sauvegardes automatiques</span></label>
-          </div>
-          <div class="row">
-            <div class="small"><label for="backupInterval" data-i18n="backupInterval">Toutes les (heures)</label><input id="backupInterval" type="number" min="1"></div>
-            <div class="small"><label for="backupRetention" data-i18n="backupRetention">Conservation (jours)</label><input id="backupRetention" type="number" min="1"></div>
-          </div>
-          <div class="row">
-            <div><label for="s3Endpoint" data-i18n="s3Endpoint">Adresse S3</label><input id="s3Endpoint" placeholder="http://minio:9000"></div>
-            <div class="small"><label for="s3Region" data-i18n="s3Region">Région</label><input id="s3Region" placeholder="us-east-1"></div>
-          </div>
-          <div class="row">
-            <div><label for="s3Bucket" data-i18n="s3Bucket">Bucket</label><input id="s3Bucket" placeholder="bettervault-backups"></div>
-            <div><label for="s3Prefix" data-i18n="s3Prefix">Préfixe</label><input id="s3Prefix" placeholder="bettervault"></div>
-          </div>
-          <div class="row">
-            <div><label for="s3Access" data-i18n="s3Access">Clé d’accès</label><input id="s3Access" autocomplete="off"></div>
-            <div><label for="s3Secret" data-i18n="s3Secret">Clé secrète</label><input id="s3Secret" type="password" autocomplete="new-password"></div>
-          </div>
-          <label class="check"><input id="s3PathStyle" type="checkbox"> <span data-i18n="s3PathStyle">Adresse par chemin (MinIO, Garage)</span></label>
-          <div class="row test">
-            <button class="btn" type="button" id="backup-test" data-i18n="backupTest">Tester le stockage</button>
-            <button class="btn" type="button" id="backup-run" data-i18n="backupRun">Sauvegarder maintenant</button>
-          </div>
-          <p class="status" id="backup-status" role="status"></p>
-          <div class="runs" id="backup-runs"></div>
-        </section>
+          <section class="card wide">
+            <h2 data-i18n="backups">Sauvegardes</h2>
+            <p class="hint" data-i18n="backupHint">Copie de la base et des pièces jointes vers un stockage S3 (MinIO fourni avec Docker, ou AWS, Backblaze, Scaleway…). Les anciennes copies sont supprimées après la durée de conservation.</p>
+            <p class="status" id="backup-encryption"></p>
+            <div class="row">
+              <label class="check"><input id="backupEnabled" type="checkbox"> <span data-i18n="backupEnabled">Sauvegardes automatiques</span></label>
+            </div>
+            <div class="row">
+              <div class="small"><label for="backupInterval" data-i18n="backupInterval">Toutes les (heures)</label><input id="backupInterval" type="number" min="1"></div>
+              <div class="small"><label for="backupRetention" data-i18n="backupRetention">Conservation (jours)</label><input id="backupRetention" type="number" min="1"></div>
+            </div>
+            <div class="row">
+              <div><label for="s3Endpoint" data-i18n="s3Endpoint">Adresse S3</label><input id="s3Endpoint" placeholder="http://minio:9000"></div>
+              <div class="small"><label for="s3Region" data-i18n="s3Region">Région</label><input id="s3Region" placeholder="us-east-1"></div>
+            </div>
+            <div class="row">
+              <div><label for="s3Bucket" data-i18n="s3Bucket">Bucket</label><input id="s3Bucket" placeholder="bettervault-backups"></div>
+              <div><label for="s3Prefix" data-i18n="s3Prefix">Préfixe</label><input id="s3Prefix" placeholder="bettervault"></div>
+            </div>
+            <div class="row">
+              <div><label for="s3Access" data-i18n="s3Access">Clé d’accès</label><input id="s3Access" autocomplete="off"></div>
+              <div><label for="s3Secret" data-i18n="s3Secret">Clé secrète</label><input id="s3Secret" type="password" autocomplete="new-password"></div>
+            </div>
+            <label class="check"><input id="s3PathStyle" type="checkbox"> <span data-i18n="s3PathStyle">Adresse par chemin (MinIO, Garage)</span></label>
+            <div class="row test">
+              <button class="btn" type="button" id="backup-test" data-i18n="backupTest">Tester le stockage</button>
+              <button class="btn" type="button" id="backup-run" data-i18n="backupRun">Sauvegarder maintenant</button>
+            </div>
+            <p class="status" id="backup-status" role="status"></p>
+            <div class="runs" id="backup-runs"></div>
+          </section>
+        </div>
 
-        <div class="actions wide">
+        <div class="grid" data-panel="billing" hidden>
+          <section class="card wide">
+            <h2 data-i18n="billingTitle">Espace supplémentaire payant</h2>
+            <p class="hint" data-i18n="billingHint">Facultatif. Paiement sur Stripe Checkout : le serveur ne voit ni carte ni adresse, et n’envoie pas l’email du compte à Stripe. Webhook à créer dans Stripe : </p>
+            <code class="code" id="webhook-url"></code>
+            <label class="check"><input id="billingEnabled" type="checkbox"> <span data-i18n="billingEnabled">Proposer les offres dans les applications</span></label>
+            <div class="row">
+              <div><label for="stripeSecret" data-i18n="stripeSecret">Clé secrète Stripe (sk_… ou rk_…)</label><input id="stripeSecret" type="password" autocomplete="off"></div>
+              <div><label for="stripeWebhook" data-i18n="stripeWebhook">Secret du webhook (whsec_…)</label><input id="stripeWebhook" type="password" autocomplete="off"></div>
+            </div>
+            <p class="hint" data-i18n="webhookEvents">Événements : checkout.session.completed, customer.subscription.updated, customer.subscription.deleted, invoice.payment_failed.</p>
+          </section>
+          <section class="card wide">
+            <div class="panel-head">
+              <h2 data-i18n="plans">Offres</h2>
+              <button class="btn" type="button" id="add-plan" data-i18n="addPlan">Ajouter une offre</button>
+            </div>
+            <div id="plans" class="plans"></div>
+          </section>
+        </div>
+
+        <div class="grid" data-panel="legal" hidden>
+          <section class="card wide">
+            <h2 data-i18n="legalTitle">Identité de l’hébergeur</h2>
+            <p class="hint" data-i18n="legalHint">Ces informations complètent les modèles publiés sur /legal (conditions, confidentialité, DPA, mesures de sécurité, sous-traitants). Relisez-les : vous restez responsable de leur contenu.</p>
+            <div class="limits" id="legal-fields"></div>
+            <div class="legal-preview" id="legal-preview"></div>
+          </section>
+        </div>
+
+        <div class="actions" id="save-bar" hidden>
           <p class="status" id="save-status" role="status"></p>
           <button class="btn primary" type="submit" data-i18n="save">Enregistrer</button>
         </div>
       </form>
+
+      <section data-panel="audit" hidden>
+        <section class="card">
+          <div class="panel-head">
+            <h2 data-i18n="auditTitle">Journal de sécurité</h2>
+            <button class="btn" type="button" id="refresh-audit" data-i18n="refresh">Actualiser</button>
+          </div>
+          <p class="hint" data-i18n="auditHint">Conservé 90 jours. Les comptes sont désignés par un pseudonyme (HMAC) : on peut relier des événements sans connaître l’adresse email.</p>
+          <div class="table-wrap"><table class="audit"><thead><tr><th data-i18n="when">Date</th><th data-i18n="event">Événement</th><th data-i18n="subject">Compte</th><th data-i18n="detail">Détails</th></tr></thead><tbody id="audit-rows"></tbody></table></div>
+        </section>
+      </section>
     </div>
   </main>
   <script type="module" src="/admin/admin.js"></script>

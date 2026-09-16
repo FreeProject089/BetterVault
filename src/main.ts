@@ -3139,6 +3139,7 @@ class AppController {
       { id: 'lastpass', name: 'LastPass', logo: brand('lastpass'), formats: 'CSV', accept: '.csv', steps: [tr('Options avancées, puis Exporter', 'Advanced options, then Export')] },
       { id: 'dashlane', name: 'Dashlane', logo: brand('dashlane'), formats: 'CSV', accept: '.csv', steps: [tr('Paramètres, Exporter les données, format CSV', 'Settings, Export data, CSV format')] },
       { id: 'apple', name: tr('Mots de passe Apple', 'Apple Passwords'), logo: brand('apple'), formats: 'CSV', accept: '.csv', steps: [tr('App Mots de passe : Fichier, puis Exporter', 'Passwords app: File, then Export')] },
+      { id: 'passky', name: 'Passky', logo: GENERIC_FILE_ICON, formats: 'JSON', accept: '.json', steps: [tr('Passky : Paramètres, puis Exporter', 'Passky: Settings, then Export'), tr('Choisissez l’export non chiffré (JSON)', 'Choose the unencrypted export (JSON)')] },
       { id: 'cxf', name: 'FIDO CXF', logo: brand('fidoalliance'), formats: 'JSON', accept: '.json', steps: [tr('Fichier Credential Exchange Format, passkeys comprises', 'Credential Exchange Format file, passkeys included')] },
       { id: 'other', name: tr('Autre fichier', 'Other file'), logo: GENERIC_FILE_ICON, formats: 'KDBX · 1PUX · JSON · CSV · XML', accept: '.json,.csv,.xml,.kdbx,.1pux', steps: [tr('Le format est reconnu automatiquement', 'The format is detected automatically')] }
     ];
