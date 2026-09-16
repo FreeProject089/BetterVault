@@ -19,6 +19,7 @@ Les identifiants, codes 2FA, notes, tâches, coffres partagés et pièces jointe
 | Adresse email | Identification du compte, emails de sécurité | Exécution du contrat | Durée du compte |
 | Preuves d’authentification (dérivées, protégées par scrypt) | Connexion | Exécution du contrat | Durée du compte |
 | Coffres et pièces jointes chiffrés | Synchronisation et partage | Exécution du contrat | Durée du compte |
+| Photo de profil (si ajoutée) | Affichage au titulaire du compte uniquement | Consentement | Jusqu’à son retrait |
 | Clé publique de partage | Partage de coffres | Exécution du contrat | Durée du compte |
 | Sessions : appareil, adresse IP tronquée{{#si geo}}, pays et ville approximatifs{{/si}}, dates | Sécurité du compte, gestion des sessions | Intérêt légitime (sécurité) | {{sessionDays}} jours maximum |
 | Secret de double authentification | Vérification du code | Exécution du contrat | Jusqu’à sa désactivation |

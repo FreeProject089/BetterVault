@@ -10,6 +10,7 @@ import { printRecoveryKey, recoveryKeyFile } from './recoveryKey';
 import { BiometricCancelledError, type DeviceSecretStore } from '../platform/biometric';
 import { renderSVG } from 'uqr';
 import { secretGridHtml } from './secretDisplay';
+import { translateError } from '../i18n/errorMessages';
 
 const isTauriRuntime = typeof (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined';
 
@@ -46,11 +47,11 @@ async function copyToClipboard(button: HTMLButtonElement, value: string): Promis
 const EYE_OFF = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
 
 export function accountErrorMessage(err: unknown): string {
-  if (err instanceof WrongPasswordError || err instanceof InvalidRecoveryKeyError) return err.message;
   if (err instanceof CloudError && err.code === 'network') {
     return tr('Serveur injoignable. Vérifiez l’adresse et que le serveur est démarré.', 'Server unreachable. Check the address and that the server is running.');
   }
-  return err instanceof Error ? err.message : String(err);
+  const message = err instanceof WrongPasswordError || err instanceof InvalidRecoveryKeyError || err instanceof Error ? err.message : String(err);
+  return translateError(message, i18n.getLocale());
 }
 
 export function mountAuthScreen(
@@ -494,7 +495,7 @@ export function mountAuthScreen(
     });
     card.querySelector<HTMLButtonElement>('[data-action="download-key"]')?.addEventListener('click', () => {
       if (!pending) return;
-      downloadExportFile(recoveryKeyFile(account()?.email ?? '', pending.key, tr, i18n.getLocale() === 'fr' ? 'fr-FR' : 'en-US'), 'bettervault-cle-de-secours.txt', 'text/plain;charset=utf-8');
+      downloadExportFile(recoveryKeyFile(account()?.email ?? '', pending.key, tr, i18n.intlLocale()), 'bettervault-cle-de-secours.txt', 'text/plain;charset=utf-8');
     });
     const continueButton = card.querySelector<HTMLButtonElement>('[data-action="continue"]');
     card.querySelector<HTMLInputElement>('[data-confirm-key]')?.addEventListener('change', e => {
@@ -517,7 +518,7 @@ export function mountAuthScreen(
         termsRow.hidden = !cloud;
         const base = (serverInput?.value ?? '').trim().replace(/\/+$/, '');
         termsRow.querySelectorAll<HTMLAnchorElement>('[data-legal]').forEach(link => {
-          if (/^https?:\/\//.test(base)) link.href = `${base}/legal/${link.dataset.legal}`;
+          if (/^https?:\/\//.test(base)) link.href = `${base}/legal/${link.dataset.legal}?lang=${i18n.getLocale()}`;
           else link.removeAttribute('href');
         });
       };

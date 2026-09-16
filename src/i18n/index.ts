@@ -12,6 +12,37 @@ class I18nManager {
       const browserLang = navigator.language?.toLowerCase() || '';
       this.currentLocale = browserLang.startsWith('fr') ? 'fr' : 'en';
     }
+    if (typeof document !== 'undefined') document.documentElement.lang = this.currentLocale;
+  }
+
+  /**
+   * Locale de formatage (dates, nombres) : la variante régionale du système quand elle correspond
+   * à la langue choisie (fr-CA, fr-BE, en-GB…), sinon fr-FR ou en-US.
+   */
+  public intlLocale(): string {
+    const candidates = [...(globalThis.navigator?.languages ?? []), globalThis.navigator?.language ?? ''];
+    const match = candidates.find(tag => tag && tag.toLowerCase().split('-')[0] === this.currentLocale);
+    if (match) {
+      try {
+        return Intl.getCanonicalLocales(match)[0];
+      } catch {
+        // Étiquette invalide : valeur par défaut
+      }
+    }
+    return this.currentLocale === 'fr' ? 'fr-FR' : 'en-US';
+  }
+
+  /** Taille de fichier : 1,5 Mo / 1.5 MB */
+  public formatBytes(bytes: number): string {
+    const units = this.currentLocale === 'fr' ? ['o', 'Ko', 'Mo', 'Go', 'To'] : ['B', 'KB', 'MB', 'GB', 'TB'];
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit++;
+    }
+    const digits = unit === 0 || value >= 100 ? 0 : 1;
+    return `${new Intl.NumberFormat(this.intlLocale(), { maximumFractionDigits: digits }).format(value)} ${units[unit]}`;
   }
 
   public getLocale(): SupportedLocale {
@@ -41,7 +72,7 @@ class I18nManager {
     try {
       const d = typeof dateString === 'string' ? new Date(dateString) : dateString;
       if (isNaN(d.getTime())) return String(dateString);
-      return new Intl.DateTimeFormat(this.currentLocale === 'fr' ? 'fr-FR' : 'en-US', {
+      return new Intl.DateTimeFormat(this.intlLocale(), {
         year: 'numeric',
         month: 'short',
         day: 'numeric'
@@ -59,7 +90,7 @@ class I18nManager {
   }
 
   public formatNumber(num: number): string {
-    return new Intl.NumberFormat(this.currentLocale === 'fr' ? 'fr-FR' : 'en-US').format(num);
+    return new Intl.NumberFormat(this.intlLocale()).format(num);
   }
 
   public subscribe(listener: () => void): () => void {
