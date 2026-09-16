@@ -69,6 +69,21 @@ function tagColor(color?: string): string {
   return color && /^#[0-9a-f]{6}$/i.test(color) ? color : '#8b949e';
 }
 
+const formatFileSize = (bytes: number) => bytes < 1024 ? `${bytes} o` : bytes < 1048576 ? `${Math.round(bytes / 1024)} Ko` : `${(bytes / 1048576).toFixed(1)} Mo`;
+
+/** Types affichables directement dans la fenêtre d'aperçu (le fichier reste déchiffré en mémoire) */
+function previewKind(type: string, name: string): 'image' | 'pdf' | 'text' | 'audio' | 'video' | null {
+  const extension = name.toLowerCase().split('.').pop() ?? '';
+  if (type.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg', 'bmp'].includes(extension)) return 'image';
+  if (type === 'application/pdf' || extension === 'pdf') return 'pdf';
+  if (type.startsWith('audio/')) return 'audio';
+  if (type.startsWith('video/')) return 'video';
+  if (type.startsWith('text/') || type === 'application/json' || ['txt', 'md', 'csv', 'json', 'log', 'xml', 'yml', 'yaml'].includes(extension)) return 'text';
+  return null;
+}
+
+const isPreviewable = (type: string, name: string) => previewKind(type, name) !== null;
+
 const GEN_ICONS = {
   bolt: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>',
   close: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>',
@@ -2144,6 +2159,14 @@ class AppController {
               <span>${tr('Favori', 'Favorite')}<small>${tr('Affiché en haut de la liste', 'Shown at the top of the list')}</small></span>
               <input type="checkbox" class="switch" id="field-favorite" ${existing?.isFavorite ? 'checked' : ''}>
             </label>
+            <div class="form-field">
+              <label class="form-label">${tr('Pièces jointes', 'Attachments')}</label>
+              ${accountService.isCloud() ? `
+                <div class="pending-files" id="field-files"></div>
+                <label class="btn-primary btn-ghost" style="align-self:flex-start;cursor:pointer;">+ ${tr('Ajouter un fichier', 'Add a file')}<input type="file" id="field-files-input" multiple hidden></label>
+                <span class="field-hint">${tr('Chiffrés sur cet appareil, puis envoyés à votre serveur.', 'Encrypted on this device, then uploaded to your server.')}</span>`
+                : `<span class="field-hint">${tr('Les pièces jointes demandent un compte synchronisé.', 'Attachments need a synced account.')}</span>`}
+            </div>
           </section>
 
           <section class="form-section">
@@ -2368,6 +2391,55 @@ class AppController {
       if ((e.target as HTMLElement).closest('.modal-close, [data-close]')) stopScanner();
     });
 
+    // Fichiers choisis avant l'enregistrement : chiffrés et envoyés une fois l'identifiant créé
+    const pendingFiles: File[] = [];
+    const filesList = box.querySelector('#field-files') as HTMLElement | null;
+    const renderPendingFiles = () => {
+      if (!filesList) return;
+      filesList.innerHTML = pendingFiles.map((file, index) => `
+        <div class="pending-file">
+          <span class="attachment-name">${this.escapeHtml(file.name)}</span>
+          <span class="field-hint">${formatFileSize(file.size)}</span>
+          <button type="button" class="icon-btn" data-remove-file="${index}" aria-label="${tr('Retirer', 'Remove')} ${this.escapeHtml(file.name)}">${GEN_ICONS.close}</button>
+        </div>`).join('');
+    };
+    box.querySelector<HTMLInputElement>('#field-files-input')?.addEventListener('change', event => {
+      const input = event.target as HTMLInputElement;
+      for (const file of [...(input.files ?? [])]) {
+        if (file.size > limits.maxAttachmentBytes) {
+          this.showToast(tr(`${file.name} dépasse ${Math.round(limits.maxAttachmentBytes / 1048576)} Mo`, `${file.name} is larger than ${Math.round(limits.maxAttachmentBytes / 1048576)} MB`), 'error');
+          continue;
+        }
+        pendingFiles.push(file);
+      }
+      input.value = '';
+      renderPendingFiles();
+    });
+    filesList?.addEventListener('click', event => {
+      const index = (event.target as HTMLElement).closest<HTMLElement>('[data-remove-file]')?.dataset.removeFile;
+      if (index === undefined) return;
+      pendingFiles.splice(Number(index), 1);
+      renderPendingFiles();
+    });
+
+    /** Envoi des fichiers en attente, une fois l'identifiant enregistré */
+    const uploadPendingFiles = async (credentialId: string, vaultId: string) => {
+      if (!pendingFiles.length) return;
+      const sharedId = sharedVaults.isShared(vaultId) ? vaultId : undefined;
+      for (const file of pendingFiles) {
+        try {
+          const { payload, key } = await encryptFile(new Uint8Array(await file.arrayBuffer()));
+          const uploaded = await accountService.withCloud(client => client.uploadAttachment(payload, sharedId));
+          const meta: AttachmentMeta = { id: uploaded.id, name: file.name, size: file.size, type: file.type, key, createdAt: Date.now() };
+          const current = vaultStore.getData().credentials.find(c => c.id === credentialId);
+          vaultStore.updateCredential(credentialId, { attachments: [...(current?.attachments ?? []), meta] });
+        } catch (err) {
+          this.showToast(`${file.name} : ${accountErrorMessage(err)}`, 'error');
+        }
+      }
+      if (this.selectedItemId === credentialId) this.renderDetail(credentialId);
+    };
+
     $<HTMLButtonElement>('#modal-confirm').addEventListener('click', () => {
       errorEl.hidden = true;
       const title = titleInput.value.trim();
@@ -2402,13 +2474,16 @@ class AppController {
         vaultStore.updateCredential(existing.id, item);
         this.closeModal();
         this.showToast(tr('Modifications enregistrées', 'Changes saved'), 'success');
+        void uploadPendingFiles(existing.id, existing.vaultId);
       } else {
-        const id = vaultStore.addCredential({ ...item, vaultId: vaultStore.getData().activeVaultId });
+        const vaultId = vaultStore.getData().activeVaultId;
+        const id = vaultStore.addCredential({ ...item, vaultId });
         this.closeModal();
         this.selectedItemId = id;
         this.renderList();
         this.renderDetail(id);
         this.showToast(tr(`${title} ajouté`, `${title} added`), 'success');
+        void uploadPendingFiles(id, vaultId);
       }
     });
   }
@@ -3634,7 +3709,7 @@ class AppController {
   private renderAttachments(cred: CredentialItem): string {
     const tr = (fr: string, en: string) => this.tr(fr, en);
     const files = cred.attachments ?? [];
-    const formatSize = (bytes: number) => bytes < 1024 ? `${bytes} o` : bytes < 1048576 ? `${Math.round(bytes / 1024)} Ko` : `${(bytes / 1048576).toFixed(1)} Mo`;
+    const formatSize = formatFileSize;
     const available = accountService.isCloud();
     return `
       <div class="field-group">
@@ -3644,6 +3719,7 @@ class AppController {
             <div class="attachment-row" data-attachment="${file.id}">
               <span class="attachment-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></span>
               <span class="attachment-text"><span class="attachment-name">${this.escapeHtml(file.name)}</span><span class="field-hint">${formatSize(file.size)}</span></span>
+              ${isPreviewable(file.type, file.name) ? `<button class="icon-btn" type="button" data-attachment-action="preview" title="${tr('Aperçu', 'Preview')}" aria-label="${tr('Aperçu de', 'Preview')} ${this.escapeHtml(file.name)}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>` : ''}
               <button class="icon-btn" type="button" data-attachment-action="download" title="${tr('Télécharger', 'Download')}" aria-label="${tr('Télécharger', 'Download')}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
               <button class="icon-btn" type="button" data-attachment-action="delete" title="${tr('Supprimer', 'Delete')}" aria-label="${tr('Supprimer', 'Delete')}">${ACTION_ICONS.trash}</button>
             </div>`).join('')}
@@ -3687,6 +3763,18 @@ class AppController {
         const id = button.closest<HTMLElement>('[data-attachment]')?.dataset.attachment;
         const meta = current()?.attachments?.find(a => a.id === id);
         if (!meta) return;
+        if (button.dataset.attachmentAction === 'preview') {
+          button.disabled = true;
+          try {
+            const payload = await accountService.withCloud(client => client.downloadAttachment(meta.id));
+            this.openAttachmentPreview(meta, await decryptFile(payload, meta.key));
+          } catch (err) {
+            this.showToast(accountErrorMessage(err), 'error');
+          } finally {
+            button.disabled = false;
+          }
+          return;
+        }
         if (button.dataset.attachmentAction === 'download') {
           button.disabled = true;
           try {
@@ -3717,6 +3805,46 @@ class AppController {
         }
       });
     });
+  }
+
+  /** Aperçu d'une pièce jointe déchiffrée : rien n'est écrit sur le disque, l'URL blob est libérée à la fermeture */
+  private openAttachmentPreview(meta: AttachmentMeta, data: Uint8Array): void {
+    const tr = (fr: string, en: string) => this.tr(fr, en);
+    const kind = previewKind(meta.type, meta.name);
+    // Un SVG s'affiche comme une image, mais son contenu peut exécuter du script : il est montré en texte
+    const svg = /svg/i.test(meta.type) || meta.name.toLowerCase().endsWith('.svg');
+    const type = meta.type || (kind === 'pdf' ? 'application/pdf' : 'application/octet-stream');
+    const blob = new Blob([data as unknown as BlobPart], { type: svg ? 'text/plain' : type });
+    const url = URL.createObjectURL(blob);
+
+    let body: string;
+    if (kind === 'image' && !svg) body = `<img class="attachment-preview-image" src="${url}" alt="${this.escapeHtml(meta.name)}">`;
+    else if (kind === 'pdf') body = `<iframe class="attachment-preview-frame" src="${url}" title="${this.escapeHtml(meta.name)}"></iframe>`;
+    else if (kind === 'audio') body = `<audio class="attachment-preview-media" src="${url}" controls></audio>`;
+    else if (kind === 'video') body = `<video class="attachment-preview-media" src="${url}" controls></video>`;
+    else body = `<pre class="attachment-preview-text">${this.escapeHtml(new TextDecoder().decode(data).slice(0, 200_000))}</pre>`;
+
+    const box = this.openModal(`
+      <div class="modal-header">
+        <div class="modal-title">${this.escapeHtml(meta.name)}</div>
+        <button class="modal-close">${GEN_ICONS.close}</button>
+      </div>
+      <div class="modal-body attachment-preview-body">${body}</div>
+      <div class="modal-footer">
+        <span class="field-hint">${formatFileSize(meta.size)}${svg ? ` · ${tr('SVG affiché en texte', 'SVG shown as text')}` : ''}</span>
+        <button class="btn-primary" data-preview-download>${tr('Télécharger', 'Download')}</button>
+        <button class="btn-primary" data-close>${tr('Fermer', 'Close')}</button>
+      </div>
+    `);
+    box.querySelector('[data-preview-download]')?.addEventListener('click', () => {
+      downloadExportFile(data, meta.name, type);
+    });
+    // La fenêtre est retirée du DOM à la fermeture : on libère l'URL à ce moment-là
+    new MutationObserver((_records, observer) => {
+      if (box.isConnected) return;
+      URL.revokeObjectURL(url);
+      observer.disconnect();
+    }).observe(document.body, { childList: true, subtree: true });
   }
 
   private showApp(data: UnlockedVaultData): void {
