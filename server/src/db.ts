@@ -160,6 +160,10 @@ export function openDatabase(path: string): DatabaseSync {
   addColumn(db, 'users', 'recovery_salt TEXT');
   addColumn(db, 'users', 'recovery_wrapped_key TEXT');
   addColumn(db, 'users', 'public_key TEXT');
+  addColumn(db, 'users', 'avatar BLOB');
+  addColumn(db, 'users', 'avatar_type TEXT');
+  addColumn(db, 'users', 'avatar_url TEXT');
+  addColumn(db, 'users', 'avatar_updated_at INTEGER');
   addColumn(db, 'users', 'wrapped_private_key TEXT');
   // Sessions : identifiant public (révocation), appareil, IP tronquée et lieu approximatif, dernière activité
   addColumn(db, 'sessions', 'public_id TEXT');

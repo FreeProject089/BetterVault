@@ -51,6 +51,7 @@ import { EXPIRY_SOON_DAYS, expiryInfo, renderExpiryBadge } from './ui/expiry';
 import { printRecoveryKey, recoveryKeyFile } from './ui/recoveryKey';
 import { MANAGER_EXPORTS } from './import_export/managerExports';
 import { secretGridHtml } from './ui/secretDisplay';
+import { resizeAvatar } from './ui/avatarImage';
 import { bindingFromEvent, checkBinding, DEFAULT_SHORTCUTS, formatBinding, isPlainKey, loadShortcuts, saveShortcuts, SHORTCUT_ORDER, type ShortcutAction, type ShortcutBindings } from './ui/shortcuts';
 import { CREDENTIAL_FILTERS, countByFilter, queryCredentials, reusedPasswords, type CredentialFilter, type CredentialSort } from './store/credentialFilters';
 import { checkCredential, remainingCapacity } from './account/limits';
@@ -117,6 +118,8 @@ class AppController {
   private shortcuts: ShortcutBindings = loadShortcuts();
   /** Vrai pendant qu'une combinaison est en cours d'enregistrement : les raccourcis sont suspendus */
   private recordingShortcut = false;
+  /** Photo de profil affichable (data:, blob: ou https:) */
+  private avatarSrc: string | null = null;
   private selectedItemId: string | null = null;
   private searchQuery = '';
   private taskViewMode: TaskViewMode = 'list';
@@ -3846,6 +3849,10 @@ class AppController {
     (document.getElementById('app') as HTMLElement).hidden = false;
     this.renderDetail(null);
     this.renderSyncStatus();
+    void accountService.getAvatarSource().then(src => {
+      this.avatarSrc = src;
+      this.renderSyncStatus();
+    }).catch(() => undefined);
     void accountService.syncNow();
     void this.renderSiteStrip();
   }
@@ -3919,6 +3926,7 @@ class AppController {
   private lockApp(): void {
     if (!accountService.isUnlocked()) return;
     accountService.lock();
+    this.avatarSrc = null;
     sharedVaults.clear();
     this.renderInvitations();
     vaultStore.setPersistence(null);
@@ -3992,7 +4000,10 @@ class AppController {
       offline: 'var(--accent-orange)',
       error: 'var(--accent-red)'
     };
-    el.innerHTML = `<span class="sync-dot" style="background-color:${colors[status]};"></span><span class="sync-label">${this.syncStatusLabel(status)}</span>`;
+    const avatar = this.avatarSrc
+      ? `<img class="sync-avatar" src="${this.escapeHtml(this.avatarSrc)}" alt="" referrerpolicy="no-referrer">`
+      : '';
+    el.innerHTML = `${avatar}<span class="sync-dot" style="background-color:${colors[status]};"></span><span class="sync-label">${this.syncStatusLabel(status)}</span>`;
     const button = document.getElementById('btn-sync-status');
     if (button) button.title = [account?.email, state.message].filter(Boolean).join(' — ');
   }
@@ -4022,7 +4033,7 @@ class AppController {
       </div>
       <div class="modal-body">
         <div class="account-summary">
-          <div class="account-avatar">${this.escapeHtml(account.email.charAt(0).toUpperCase())}</div>
+          <div class="account-avatar" data-account-avatar>${this.avatarSrc ? `<img src="${this.escapeHtml(this.avatarSrc)}" alt="" referrerpolicy="no-referrer">` : this.escapeHtml(account.email.charAt(0).toUpperCase())}</div>
           <div class="account-summary-text">
             <div class="account-email">${this.escapeHtml(account.email)}</div>
             <div class="account-meta">${isCloud
@@ -4073,6 +4084,15 @@ class AppController {
               <button class="btn-primary btn-accent" data-action="connect">${tr('Activer', 'Enable')}</button>
             </div>
           </section>`}
+
+        <section class="account-section" data-profile-section>
+          <h3 class="account-section-title">${tr('Photo de profil', 'Profile picture')}</h3>
+          <div class="profile-row">
+            <div class="account-avatar large" data-profile-preview>${this.escapeHtml(account.email.charAt(0).toUpperCase())}</div>
+            <div class="profile-controls" data-profile-controls><span class="skeleton skeleton-line" style="width:60%"></span></div>
+          </div>
+          <div class="form-error" data-error="avatar" role="alert" hidden></div>
+        </section>
 
         <section class="account-section" data-device-section hidden></section>
 
@@ -4421,6 +4441,92 @@ class AppController {
         }
       });
     });
+
+    // Photo de profil : envoi ou lien selon ce que le serveur autorise
+    const profileControls = $('[data-profile-controls]');
+    const renderAvatarInto = (el: HTMLElement | null, src: string | null) => {
+      if (!el) return;
+      el.classList.toggle('has-image', !!src);
+      el.innerHTML = src
+        ? `<img src="${this.escapeHtml(src)}" alt="" referrerpolicy="no-referrer">`
+        : this.escapeHtml(account.email.charAt(0).toUpperCase());
+    };
+    const refreshAvatar = async () => {
+      try {
+        this.avatarSrc = await accountService.getAvatarSource();
+      } catch {
+        this.avatarSrc = null;
+      }
+      box.querySelectorAll<HTMLElement>('[data-account-avatar], [data-profile-preview]').forEach(el => renderAvatarInto(el, this.avatarSrc));
+      this.renderSyncStatus();
+      const remove = box.querySelector<HTMLButtonElement>('[data-avatar-remove]');
+      if (remove) remove.hidden = !this.avatarSrc;
+    };
+    if (profileControls) {
+      void accountService.getAvatarPolicy().then(policy => {
+        if (!box.isConnected) return;
+        const kb = Math.round(policy.maxBytes / 1024);
+        if (!policy.uploads && !policy.remoteUrls) {
+          profileControls.innerHTML = `<p class="field-hint">${tr('Ce serveur ne permet pas d’ajouter une photo de profil.', 'This server does not allow profile pictures.')}</p>`;
+          return;
+        }
+        profileControls.innerHTML = `
+          <div class="account-actions">
+            ${policy.uploads ? `<label class="btn-primary" style="cursor:pointer;">${tr('Choisir une image', 'Choose an image')}<input type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" data-avatar-file hidden></label>` : ''}
+            <button type="button" class="btn-primary btn-ghost" data-avatar-remove hidden>${tr('Retirer', 'Remove')}</button>
+          </div>
+          ${policy.uploads ? `<span class="field-hint">${isCloud
+            ? tr(`Recadrée et réduite sur cet appareil (${kb} Ko max. sur ce serveur). Visible par vous uniquement.`, `Cropped and resized on this device (${kb} KB max on this server). Visible to you only.`)
+            : tr('Gardée sur cet appareil uniquement.', 'Kept on this device only.')}</span>` : ''}
+          ${policy.remoteUrls ? `
+            <div class="form-row" style="grid-template-columns:minmax(0,1fr) auto;">
+              <input class="form-input" type="url" data-avatar-url placeholder="https://…/photo.png" autocomplete="off" spellcheck="false">
+              <button type="button" class="btn-primary" data-avatar-link>${tr('Utiliser ce lien', 'Use this link')}</button>
+            </div>
+            <span class="field-hint">${tr('Le site qui héberge l’image voit votre adresse IP quand elle s’affiche.', 'The site hosting the image sees your IP address when it is displayed.')}</span>` : ''}`;
+
+        profileControls.querySelector<HTMLInputElement>('[data-avatar-file]')?.addEventListener('change', async event => {
+          const input = event.target as HTMLInputElement;
+          const file = input.files?.[0];
+          input.value = '';
+          if (!file) return;
+          hideError('avatar');
+          try {
+            const { bytes, dataUrl } = await resizeAvatar(file);
+            if (isCloud && bytes.length > policy.maxBytes) throw new Error(tr(`Image trop lourde après réduction (${kb} Ko max.)`, `Image too large after resizing (${kb} KB max)`));
+            await accountService.setAvatarImage(bytes, dataUrl);
+            await refreshAvatar();
+            this.showToast(tr('Photo de profil mise à jour', 'Profile picture updated'), 'success');
+          } catch (err) {
+            showError('avatar', err);
+          }
+        });
+        profileControls.querySelector<HTMLButtonElement>('[data-avatar-link]')?.addEventListener('click', event => {
+          const url = profileControls.querySelector<HTMLInputElement>('[data-avatar-url]')?.value ?? '';
+          hideError('avatar');
+          void runBusy(event.currentTarget as HTMLButtonElement, '…', async () => {
+            try {
+              await accountService.setAvatarUrl(url);
+              await refreshAvatar();
+            } catch (err) {
+              showError('avatar', err);
+            }
+          });
+        });
+        profileControls.querySelector<HTMLButtonElement>('[data-avatar-remove]')?.addEventListener('click', event => {
+          hideError('avatar');
+          void runBusy(event.currentTarget as HTMLButtonElement, '…', async () => {
+            try {
+              await accountService.removeAvatar();
+              await refreshAvatar();
+            } catch (err) {
+              showError('avatar', err);
+            }
+          });
+        });
+        void refreshAvatar();
+      });
+    }
 
     void this.bindDeviceSection(box.querySelector('[data-device-section]') as HTMLElement);
 

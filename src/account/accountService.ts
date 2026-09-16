@@ -24,7 +24,7 @@ import {
   wrapVaultKey,
   type EncryptedBlob
 } from './accountCrypto';
-import { CloudClient, CloudError, type AccountInfo, type AccountSession, type BillingInfo, type LegalInfo } from './cloudClient';
+import { CloudClient, CloudError, type AccountInfo, type AccountSession, type AvatarPolicy, type BillingInfo, type LegalInfo } from './cloudClient';
 import { sanitizeLimits, type VaultLimits } from './limits';
 import { generateSharingKeyPair, unwrapPrivateKey, wrapPrivateKey, type SharingKeyPair } from './sharingCrypto';
 import { mergeVaultData } from './merge';
@@ -47,6 +47,9 @@ const STORAGE_KEYS = {
 
 export type AccountMode = 'local' | 'cloud';
 
+/** Photo d'un compte local : gardée sur l'appareil, déjà réduite à 256 px */
+export const LOCAL_AVATAR_MAX_BYTES = 512 * 1024;
+
 export interface AccountRecord {
   version: 1;
   email: string;
@@ -61,6 +64,8 @@ export interface AccountRecord {
   limits?: VaultLimits;
   /** Déverrouillage biométrique : clé du coffre chiffrée par un secret gardé par l'appareil */
   deviceUnlock?: { name: string; blob: EncryptedBlob };
+  /** Photo de profil d'un compte local : image réduite (data:) ou lien https */
+  avatar?: { image?: string; url?: string };
   createdAt: number;
 }
 
@@ -135,6 +140,7 @@ export class AccountService {
   private vaultKey: CryptoKey | null = null;
   private sharingKeys: SharingKeyPair | null = null;
   private authHash: string | null = null;
+  private avatarCache: { src: string; updatedAt: number } | null = null;
   private cloud: CloudClient | null = null;
   private latestData: UnlockedVaultData | null = null;
   private saveChain: Promise<void> = Promise.resolve();
@@ -780,6 +786,82 @@ export class AccountService {
     const { authHash } = await this.verifyPassword(password);
     const code = totp?.replace(/\s/g, '') || undefined;
     return (await this.withSessionRetry(() => client.revokeSessions({ authHash, ...target, totp: code }))).revoked;
+  }
+
+  /* ── Photo de profil ─────────────────────────────────────────────── */
+
+  /** Ce que le serveur autorise ; un compte local garde sa photo sur l'appareil */
+  async getAvatarPolicy(): Promise<AvatarPolicy> {
+    const account = this.getAccount();
+    if (!account || account.mode !== 'cloud') return { uploads: true, remoteUrls: true, maxBytes: LOCAL_AVATAR_MAX_BYTES };
+    try {
+      const config = await this.cloudClient().config();
+      return config.avatars ?? { uploads: false, remoteUrls: false, maxBytes: 0 };
+    } catch {
+      return { uploads: false, remoteUrls: false, maxBytes: 0 };
+    }
+  }
+
+  /** Adresse affichable de la photo (data:, blob: ou https:), ou null */
+  async getAvatarSource(): Promise<string | null> {
+    const account = this.getAccount();
+    if (!account) return null;
+    if (account.mode !== 'cloud') return account.avatar?.image ?? account.avatar?.url ?? null;
+    const client = this.cloudClient();
+    const info = (await this.withSessionRetry(() => client.me())).avatar;
+    if (!info) return this.cacheAvatar(null, 0);
+    if (info.kind === 'url') return this.cacheAvatar(info.url, info.updatedAt);
+    if (this.avatarCache && this.avatarCache.updatedAt === info.updatedAt) return this.avatarCache.src;
+    const bytes = await this.withSessionRetry(() => client.downloadAvatar());
+    const src = URL.createObjectURL(new Blob([bytes as unknown as BlobPart]));
+    return this.cacheAvatar(src, info.updatedAt);
+  }
+
+  /** Image déjà réduite par l'interface (PNG, JPEG ou WebP) */
+  async setAvatarImage(image: Uint8Array, dataUrl: string): Promise<void> {
+    const account = this.getAccount();
+    if (!account) throw new Error('Aucun compte sur cet appareil');
+    if (account.mode !== 'cloud') {
+      if (image.length > LOCAL_AVATAR_MAX_BYTES) throw new Error('Image trop volumineuse');
+      this.writeJson(STORAGE_KEYS.account, { ...account, avatar: { image: dataUrl } });
+      return;
+    }
+    const client = this.cloudClient();
+    await this.withSessionRetry(() => client.uploadAvatar(image));
+    this.cacheAvatar(null, 0);
+  }
+
+  async setAvatarUrl(url: string): Promise<void> {
+    const account = this.getAccount();
+    if (!account) throw new Error('Aucun compte sur cet appareil');
+    const clean = url.trim();
+    if (!/^https:\/\/\S+$/i.test(clean) || clean.length > 500) throw new Error('Lien https vers une image attendu');
+    if (account.mode !== 'cloud') {
+      this.writeJson(STORAGE_KEYS.account, { ...account, avatar: { url: clean } });
+      return;
+    }
+    const client = this.cloudClient();
+    await this.withSessionRetry(() => client.setAvatarUrl(clean));
+    this.cacheAvatar(null, 0);
+  }
+
+  async removeAvatar(): Promise<void> {
+    const account = this.getAccount();
+    if (!account) return;
+    if (account.mode !== 'cloud') {
+      const { avatar: _removed, ...rest } = account;
+      this.writeJson(STORAGE_KEYS.account, rest);
+      return;
+    }
+    const client = this.cloudClient();
+    await this.withSessionRetry(() => client.deleteAvatar());
+    this.cacheAvatar(null, 0);
+  }
+
+  private cacheAvatar(src: string | null, updatedAt: number): string | null {
+    if (this.avatarCache?.src.startsWith('blob:') && this.avatarCache.src !== src) URL.revokeObjectURL(this.avatarCache.src);
+    this.avatarCache = src ? { src, updatedAt } : null;
+    return src;
   }
 
   getAttachmentUsage(): Promise<{ enabled: boolean; usedBytes: number; quotaBytes: number; maxFileBytes: number }> {
