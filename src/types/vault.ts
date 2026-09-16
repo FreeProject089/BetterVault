@@ -1,4 +1,5 @@
 import type { ItemIcon } from '../icons/iconLibrary';
+import type { CardData, IdentityData, ItemType, SshKeyData } from './itemTypes';
 import type { AttachmentMeta } from '../account/attachmentCrypto';
 import type { SharedRole } from '../account/cloudClient';
 
@@ -69,6 +70,10 @@ export interface PasskeyData {
 export interface CredentialItem {
   id: string;
   vaultId: string;
+  /** Absent sur les coffres d'avant les types : l'élément est alors un identifiant */
+  type?: ItemType;
+  /** Dossier de rangement, dans le coffre ; absent = à la racine */
+  folderId?: string;
   title: string;
   username: string;
   password: string;
@@ -84,6 +89,10 @@ export interface CredentialItem {
   icon?: ItemIcon;
   /** Fichiers chiffrés stockés sur le serveur ; leur clé est ici, dans le coffre chiffré */
   attachments?: AttachmentMeta[];
+  /** Champs propres au type ; une seule de ces clés est renseignée à la fois */
+  card?: CardData;
+  identity?: IdentityData;
+  sshKey?: SshKeyData;
   tags: string[];
   expiresAt?: number; // Timestamp d'expiration ou de rappel de renouvellement
   createdAt: number;
@@ -118,12 +127,25 @@ export interface VaultTypeDef {
   updatedAt: number;
 }
 
+/** Dossier de rangement à l'intérieur d'un coffre ; les dossiers peuvent s'imbriquer */
+export interface FolderDef {
+  id: string;
+  vaultId: string;
+  /** Dossier parent ; absent = à la racine du coffre */
+  parentId?: string;
+  name: string;
+  icon?: ItemIcon;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface UnlockedVaultData {
   vaults: VaultMetadata[];
   activeVaultId: string;
   credentials: CredentialItem[];
   tasks: Task[];
   tagDefs: TagDef[];
+  folders: FolderDef[];
   vaultTypes?: VaultTypeDef[];
   /** Suppressions synchronisables : id de l'élément → horodatage de suppression */
   deleted: Record<string, number>;

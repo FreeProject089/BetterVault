@@ -1,4 +1,5 @@
-import type { CredentialItem, Task, TagDef, UnlockedVaultData, VaultMetadata, VaultTypeDef } from '../types/vault';
+import type { CredentialItem, FolderDef, Task, TagDef, UnlockedVaultData, VaultMetadata, VaultTypeDef } from '../types/vault';
+import { cardBrand, EMPTY_CARD, EMPTY_IDENTITY, EMPTY_SSH_KEY, itemTypeOf, type CardData, type IdentityData, type ItemType, type SshKeyData } from '../types/itemTypes';
 import { normalizeItemIcon, type ItemIcon } from '../icons/iconLibrary';
 import { normalizeAttachments } from '../account/attachmentCrypto';
 
@@ -28,7 +29,63 @@ function createTagDef(name: string, colorIndex: number, now: number): TagDef {
 
 export function createEmptyVaultData(now = Date.now()): UnlockedVaultData {
   const vault = createVault(DEFAULT_VAULT_NAME, 'personal', now);
-  return { vaults: [vault], activeVaultId: vault.id, credentials: [], tasks: [], tagDefs: [], vaultTypes: [], deleted: {} };
+  return { vaults: [vault], activeVaultId: vault.id, credentials: [], tasks: [], tagDefs: [], folders: [], vaultTypes: [], deleted: {} };
+}
+
+export const MAX_FOLDER_NAME_LENGTH = 60;
+/** Profondeur maximale de l'arborescence, pour garder la barre latérale lisible */
+export const MAX_FOLDER_DEPTH = 5;
+
+export function normalizeFolderName(name: string): string {
+  return name.trim().replace(/\s+/g, ' ').slice(0, MAX_FOLDER_NAME_LENGTH);
+}
+
+const textOf = (value: unknown): string => (typeof value === 'string' ? value : '');
+
+/** Ne garde que les champs connus du type, en texte : le reste d'un import n'entre pas dans le coffre */
+function normalizeCard(input: unknown): CardData | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const raw = input as Partial<Record<keyof CardData, unknown>>;
+  const card: CardData = {
+    number: textOf(raw.number),
+    holder: textOf(raw.holder),
+    expMonth: textOf(raw.expMonth),
+    expYear: textOf(raw.expYear),
+    cvv: textOf(raw.cvv),
+    pin: textOf(raw.pin)
+  };
+  const brand = cardBrand(card.number);
+  if (brand) card.brand = brand;
+  return card;
+}
+
+function normalizeIdentity(input: unknown): IdentityData | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const raw = input as Record<string, unknown>;
+  const identity = { ...EMPTY_IDENTITY };
+  for (const key of Object.keys(EMPTY_IDENTITY) as (keyof IdentityData)[]) identity[key] = textOf(raw[key]);
+  return identity;
+}
+
+function normalizeSshKey(input: unknown): SshKeyData | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const raw = input as Record<string, unknown>;
+  const key: SshKeyData = {
+    privateKey: textOf(raw.privateKey),
+    publicKey: textOf(raw.publicKey),
+    passphrase: textOf(raw.passphrase)
+  };
+  const fingerprint = textOf(raw.fingerprint);
+  if (fingerprint) key.fingerprint = fingerprint;
+  return key;
+}
+
+/** Les champs d'un type ne sont gardés que pour ce type : changer de type ne traîne pas d'anciennes données */
+export function payloadForType(type: ItemType, source: Partial<CredentialItem>): Pick<CredentialItem, 'card' | 'identity' | 'sshKey'> {
+  if (type === 'card') return { card: normalizeCard(source.card) ?? { ...EMPTY_CARD } };
+  if (type === 'identity') return { identity: normalizeIdentity(source.identity) ?? { ...EMPTY_IDENTITY } };
+  if (type === 'sshKey') return { sshKey: normalizeSshKey(source.sshKey) ?? { ...EMPTY_SSH_KEY } };
+  return {};
 }
 
 /** Répare et migre des données de coffre (anciennes versions, imports, synchronisation) */
@@ -47,16 +104,37 @@ export function normalizeVaultData(input: Partial<UnlockedVaultData> | null | un
     activeVaultId: source.activeVaultId ?? '',
     // Les icônes viennent aussi d'imports et d'autres appareils : leur SVG est toujours re-nettoyé
     credentials: (Array.isArray(source.credentials) ? source.credentials : []).map(c => {
-      const { icon, attachments, ...rest } = c;
+      const { icon, attachments, card, identity, sshKey, type, ...rest } = c;
       const clean = normalizeItemIcon(icon);
       const files = normalizeAttachments(attachments);
-      return { ...rest, ...(clean ? { icon: clean } : {}), ...(files ? { attachments: files } : {}), tags: Array.isArray(c.tags) ? c.tags : [] };
+      const itemType = itemTypeOf(type);
+      return {
+        ...rest,
+        type: itemType,
+        ...payloadForType(itemType, { card, identity, sshKey }),
+        ...(clean ? { icon: clean } : {}),
+        ...(files ? { attachments: files } : {}),
+        tags: Array.isArray(c.tags) ? c.tags : []
+      };
     }),
     tasks: (Array.isArray(source.tasks) ? source.tasks : []).map(t => ({ ...t, tags: Array.isArray(t.tags) ? t.tags : [] })),
     tagDefs: (Array.isArray(source.tagDefs) ? source.tagDefs : []).map(({ icon, ...tag }) => {
       const clean = normalizeItemIcon(icon);
       return { ...tag, ...(clean ? { icon: clean } : {}) };
     }),
+    folders: (Array.isArray(source.folders) ? source.folders : [])
+      .filter(f => f && typeof f.id === 'string' && typeof f.vaultId === 'string')
+      .map(({ icon, ...folder }) => {
+        const clean = normalizeItemIcon(icon);
+        return {
+          ...folder,
+          name: normalizeFolderName(String(folder.name ?? '')) || 'Dossier',
+          ...(clean ? { icon: clean } : {}),
+          ...(typeof folder.parentId === 'string' ? { parentId: folder.parentId } : {}),
+          createdAt: folder.createdAt ?? now,
+          updatedAt: folder.updatedAt ?? now
+        };
+      }),
     vaultTypes: (Array.isArray(source.vaultTypes) ? source.vaultTypes : [])
       .filter(type => type && typeof type.id === 'string' && typeof type.name === 'string')
       .map(type => ({ id: type.id, name: String(type.name).trim().slice(0, 40), createdAt: type.createdAt ?? now, updatedAt: type.updatedAt ?? now })),
@@ -65,6 +143,26 @@ export function normalizeVaultData(input: Partial<UnlockedVaultData> | null | un
 
   if (data.vaults.length === 0) data.vaults.push(createVault(DEFAULT_VAULT_NAME, 'personal', now));
   if (!data.vaults.some(v => v.id === data.activeVaultId)) data.activeVaultId = data.vaults[0].id;
+
+  // Un dossier dont le parent a disparu (suppression sur un autre appareil) remonte à la racine,
+  // et une boucle de parents rendrait l'arborescence infinie : les deux cas sont réparés ici.
+  const folderIds = new Set(data.folders.map(f => f.id));
+  const byId = new Map(data.folders.map(f => [f.id, f]));
+  for (const folder of data.folders) {
+    if (folder.parentId && !folderIds.has(folder.parentId)) delete folder.parentId;
+  }
+  for (const folder of data.folders) {
+    const seen = new Set<string>([folder.id]);
+    let parent = folder.parentId ? byId.get(folder.parentId) : undefined;
+    while (parent) {
+      if (seen.has(parent.id)) { delete folder.parentId; break; }
+      seen.add(parent.id);
+      parent = parent.parentId ? byId.get(parent.parentId) : undefined;
+    }
+  }
+  for (const credential of data.credentials) {
+    if (credential.folderId && !folderIds.has(credential.folderId)) delete credential.folderId;
+  }
 
   const known = new Set(data.tagDefs.map(t => t.name.toLowerCase()));
   for (const raw of [...data.credentials, ...data.tasks].flatMap(item => item.tags)) {
@@ -391,6 +489,138 @@ export class VaultStore {
       if (!result.some(t => t.toLowerCase() === canonical.toLowerCase())) result.push(canonical);
     }
     return result;
+  }
+
+  /* ── Dossiers ──────────────────────────────────────────────────────── */
+
+  /** Dossiers d'un coffre, triés par nom ; sans argument, ceux du coffre actif */
+  getFolders(vaultId = this.data.activeVaultId): FolderDef[] {
+    return this.data.folders
+      .filter(f => f.vaultId === vaultId)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  getFolder(folderId: string): FolderDef | undefined {
+    return this.data.folders.find(f => f.id === folderId);
+  }
+
+  /** Chemin depuis la racine jusqu'au dossier, dossier compris */
+  folderPath(folderId: string): FolderDef[] {
+    const path: FolderDef[] = [];
+    const seen = new Set<string>();
+    let current = this.getFolder(folderId);
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id);
+      path.unshift(current);
+      current = current.parentId ? this.getFolder(current.parentId) : undefined;
+    }
+    return path;
+  }
+
+  /** Identifiants du dossier et de tous ses sous-dossiers */
+  folderSubtree(folderId: string): string[] {
+    const result = [folderId];
+    for (let i = 0; i < result.length; i++) {
+      for (const folder of this.data.folders) {
+        if (folder.parentId === result[i] && !result.includes(folder.id)) result.push(folder.id);
+      }
+    }
+    return result;
+  }
+
+  countFolderItems(folderId: string, includeSubfolders = true): number {
+    const ids = new Set(includeSubfolders ? this.folderSubtree(folderId) : [folderId]);
+    return this.data.credentials.filter(c => c.folderId && ids.has(c.folderId)).length;
+  }
+
+  createFolder(name: string, options: { parentId?: string; vaultId?: string; icon?: ItemIcon } = {}): FolderDef {
+    const normalized = normalizeFolderName(name);
+    if (!normalized) throw new Error('Le nom du dossier est vide');
+    const vaultId = options.vaultId ?? this.data.activeVaultId;
+    if (options.parentId) {
+      const parent = this.getFolder(options.parentId);
+      if (!parent || parent.vaultId !== vaultId) throw new Error('Dossier parent introuvable');
+      if (this.folderPath(options.parentId).length >= MAX_FOLDER_DEPTH) {
+        throw new Error(`Les dossiers ne peuvent pas s'imbriquer plus de ${MAX_FOLDER_DEPTH} fois`);
+      }
+    }
+    const now = Date.now();
+    const folder: FolderDef = {
+      id: randomId('folder'),
+      vaultId,
+      name: normalized,
+      ...(options.parentId ? { parentId: options.parentId } : {}),
+      ...(options.icon ? { icon: options.icon } : {}),
+      createdAt: now,
+      updatedAt: now
+    };
+    this.data.folders.push(folder);
+    this.commit();
+    return folder;
+  }
+
+  updateFolder(folderId: string, updates: { name?: string; icon?: ItemIcon | null; parentId?: string | null }): void {
+    const folder = this.getFolder(folderId);
+    if (!folder) return;
+    const now = Date.now();
+
+    if (updates.name !== undefined) {
+      const name = normalizeFolderName(updates.name);
+      if (!name) throw new Error('Le nom du dossier est vide');
+      folder.name = name;
+    }
+    if (updates.parentId !== undefined) {
+      if (updates.parentId === null) {
+        delete folder.parentId;
+      } else {
+        // Déplacer un dossier dans sa propre descendance le détacherait de l'arborescence
+        if (this.folderSubtree(folderId).includes(updates.parentId)) {
+          throw new Error('Un dossier ne peut pas être déplacé dans lui-même');
+        }
+        const parent = this.getFolder(updates.parentId);
+        if (!parent || parent.vaultId !== folder.vaultId) throw new Error('Dossier parent introuvable');
+        folder.parentId = updates.parentId;
+      }
+    }
+    if (updates.icon !== undefined) {
+      if (updates.icon) folder.icon = updates.icon;
+      else delete folder.icon;
+    }
+    folder.updatedAt = now;
+    this.commit();
+  }
+
+  /**
+   * Supprime un dossier. Son contenu n'est jamais supprimé : les éléments et les
+   * sous-dossiers remontent au parent du dossier retiré.
+   */
+  deleteFolder(folderId: string): void {
+    const folder = this.getFolder(folderId);
+    if (!folder) return;
+    const now = Date.now();
+    const parentId = folder.parentId;
+
+    this.data.folders = this.data.folders.filter(f => f.id !== folderId).map(f =>
+      f.parentId === folderId
+        ? { ...f, ...(parentId ? { parentId } : { parentId: undefined }), updatedAt: now }
+        : f);
+    this.data.credentials = this.data.credentials.map(c =>
+      c.folderId === folderId
+        ? { ...c, ...(parentId ? { folderId: parentId } : { folderId: undefined }), updatedAt: now }
+        : c);
+    this.markDeleted(folderId, now);
+    this.commit();
+  }
+
+  /** Range un élément dans un dossier, ou à la racine avec null */
+  moveToFolder(credentialId: string, folderId: string | null): void {
+    const credential = this.data.credentials.find(c => c.id === credentialId);
+    if (!credential) return;
+    if (folderId && !this.getFolder(folderId)) throw new Error('Dossier introuvable');
+    if (folderId) credential.folderId = folderId;
+    else delete credential.folderId;
+    credential.updatedAt = Date.now();
+    this.commit();
   }
 
   /* ── Import ────────────────────────────────────────────────────────── */
