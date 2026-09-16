@@ -7,11 +7,12 @@ La même interface fonctionne dans le navigateur, en application de bureau (Wind
 ## Ce que fait BetterVault
 
 - **Identifiants** : mots de passe avec historique, champs personnalisés, passkeys, dates d'expiration
+- **Autres types d'éléments** : notes sécurisées, cartes bancaires, identités, clés SSH, fichiers et dossiers de fichiers
 - **2FA** : codes TOTP, ajout par QR code
 - **Générateur** : mots de passe et phrases secrètes Diceware
 - **Audit** : mots de passe faibles, réutilisés, sans 2FA ou présents dans des fuites connues
 - **Tâches** : liste, Kanban, matrice d'Eisenhower, calendrier, dépendances, récurrences, rappels
-- **Organisation** : plusieurs coffres, tags colorés
+- **Organisation** : plusieurs coffres, dossiers en arborescence, tags colorés
 - **Import / export** : KeePass, 1Password, Bitwarden, FIDO CXF, CSV, JSON chiffré
 - **Synchronisation** : serveur auto-hébergé qui ne voit jamais les données en clair
 
@@ -23,6 +24,7 @@ La même interface fonctionne dans le navigateur, en application de bureau (Wind
 - **Héberger son serveur** — synchroniser plusieurs appareils : [Docker](deploiement/docker.md)
 - **Comprendre la sécurité** — ce qui est chiffré et comment : [Sécurité](securite.md)
 - **Contribuer** — lancer le projet en local : [Contribuer](developpement/contribuer.md)
+- **Construire les paquets** — bureau, mobile, extension, Docker : [Construire l'application](developpement/build.md)
 
 </div>
 

@@ -21,6 +21,11 @@ Pour un fichier protégé (KeePass, export chiffré), BetterVault demande le mot
 !!! note
     Les bases KeePass chiffrées avec Twofish ne sont pas prises en charge.
 
+!!! note "Les autres types d'éléments à l'export"
+    Les exports **BetterVault** (JSON et JSON chiffré) conservent tout : le type de chaque élément et ses champs reviennent intacts au ré-import.
+
+    Les autres gestionnaires ne connaissent pas ces types. Pour ne rien perdre en silence, les champs d'une carte, d'une identité ou d'une clé SSH sont alors écrits **dans les notes** de l'entrée exportée. Ces fichiers ne sont pas chiffrés : supprimez-les après usage.
+
 ## Exporter
 
 === "Formats chiffrés (recommandés)"

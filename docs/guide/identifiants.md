@@ -1,5 +1,31 @@
 # Identifiants et 2FA
 
+## Types d'éléments
+
+Le bouton **Nouveau** demande d'abord **ce que vous voulez ranger**, puis n'affiche que les champs de ce type.
+
+| Type | Pour quoi |
+| --- | --- |
+| **Identifiant** | Un site ou une application : identifiant, mot de passe, 2FA |
+| **Note sécurisée** | Du texte libre : codes de secours, procédure, combinaison |
+| **Carte bancaire** | Numéro, titulaire, date d'expiration, cryptogramme, code |
+| **Identité** | État civil, coordonnées, numéro de pièce d'identité |
+| **Clé SSH** | Clé privée, clé publique, phrase de passe |
+| **Fichier** | Un document chiffré, gardé tel quel |
+| **Dossier de fichiers** | Plusieurs fichiers réunis dans un même élément |
+
+Tous les types partagent le nom, l'icône, les notes, les tags, le dossier, les champs personnalisés et les pièces jointes. Seul l'identifiant a une étape **2FA**.
+
+Les champs sensibles — numéro de carte, cryptogramme, code, numéro de pièce, clé privée — sont **masqués** dans la fiche jusqu'à ce que vous demandiez à les voir, et leur copie s'efface du presse-papiers comme un mot de passe.
+
+!!! note "Changer le type d'un élément"
+    Modifier un élément permet de changer son type. Les champs de l'ancien type ne sont pas conservés : une carte transformée en note perd son numéro.
+
+!!! warning "Fichier et dossier de fichiers"
+    Ces deux types reposent sur les pièces jointes, qui demandent un **compte synchronisé**. Sur un coffre gardé sur cet appareil, l'élément se crée mais reste vide.
+
+Le numéro d'une carte est vérifié par le contrôle de Luhn : une faute de frappe est signalée avant l'enregistrement.
+
 ## Fiche d'un identifiant
 
 Chaque identifiant contient :

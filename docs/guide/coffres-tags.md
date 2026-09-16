@@ -1,4 +1,4 @@
-# Coffres et tags
+# Coffres, dossiers et tags
 
 ## Coffres
 
@@ -9,6 +9,23 @@ Un coffre regroupe des identifiants et des tâches : par exemple *Personnel*, *T
 - **Renommer, changer le type, supprimer** : icône crayon au survol du coffre.
 
 La suppression d'un coffre supprime tous ses identifiants et tâches. Le dernier coffre ne peut pas être supprimé.
+
+## Dossiers
+
+Les dossiers rangent les éléments **en arborescence à l'intérieur d'un coffre**. Là où un élément peut porter plusieurs tags, il n'est que dans un seul dossier — c'est un classement, pas une étiquette.
+
+- **Créer** : bouton **+** à côté de *Dossiers*. Le champ *Ranger dans* choisit le dossier parent.
+- **Ouvrir** : cliquez sur son nom. La liste ne montre alors que son contenu, **sous-dossiers compris**, et un fil d'Ariane apparaît en haut pour remonter à chaque niveau.
+- **Déplier** : le chevron à gauche du nom. Les dossiers ouverts restent ouverts d'une session à l'autre.
+- **Renommer ou déplacer** : icône crayon au survol du dossier.
+- **Ranger un élément** : champ **Dossier**, à l'étape *Détails* de son formulaire.
+
+Le compteur d'un dossier inclut le contenu de ses sous-dossiers.
+
+Les dossiers peuvent s'imbriquer jusqu'à **cinq niveaux**, pour que la barre latérale reste lisible.
+
+!!! success "Supprimer un dossier ne supprime rien"
+    Les éléments et les sous-dossiers qu'il contient **remontent d'un niveau**. La confirmation indique combien d'éléments sont concernés.
 
 ## Tags
 

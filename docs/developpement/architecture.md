@@ -69,8 +69,23 @@ interface UnlockedVaultData {
   credentials: CredentialItem[];
   tasks: Task[];
   tagDefs: TagDef[];
+  folders: FolderDef[];
+  vaultTypes?: VaultTypeDef[];
   deleted: Record<string, number>;
 }
 ```
 
-Les anciennes données sont migrées par `normalizeVaultData` au chargement.
+Chaque `CredentialItem` porte un `type` (`login`, `note`, `card`, `identity`, `sshKey`, `file`, `folder`)
+et range les champs propres à ce type dans sa propre clé (`card`, `identity`, `sshKey`). Un élément
+**sans type enregistré est un identifiant** : les coffres créés avant les types se lisent tels quels.
+
+Les `FolderDef` rangent les éléments en arborescence à l'intérieur d'un coffre : un dossier a un
+`vaultId`, un `parentId` facultatif, et un élément pointe vers son dossier par `folderId`.
+
+Les anciennes données sont migrées par `normalizeVaultData` au chargement, qui répare aussi les
+dossiers orphelins et les boucles de parents.
+
+## Dossiers du dépôt
+
+Le tableau plus haut liste les dossiers de sources. Voir [Choix techniques](technique.md) pour le
+raisonnement derrière ces découpages, et [Construire l'application](build.md) pour produire chaque paquet.

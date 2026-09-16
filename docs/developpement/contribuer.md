@@ -97,6 +97,11 @@ uv run --no-project --with-requirements docs/requirements.txt mkdocs serve
 uv run --no-project --with-requirements docs/requirements.txt mkdocs build --strict
 ```
 
+## Construire les paquets
+
+Cette page couvre le développement au quotidien. Pour produire les paquets distribuables — bureau,
+Android, iOS, extension, image Docker — voir [Construire l'application](build.md).
+
 ## Conventions
 
 - TypeScript strict, sans framework d'interface.
