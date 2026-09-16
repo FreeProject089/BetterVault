@@ -54,8 +54,23 @@ Les coffres étant chiffrés avant l'envoi, les applications appliquent ces limi
 | `LIMIT_MAX_CUSTOM_FIELDS` | Champs personnalisés par identifiant | `50` |
 | `LIMIT_MAX_TAGS_PER_ITEM` | Tags par élément | `20` |
 | `LIMIT_MAX_VAULT_MB` | Taille d'un coffre chiffré, en Mo | `20` |
+| `LIMIT_MAX_VAULT_TYPES` | Types de coffres personnalisés par compte | `20` |
+| `LIMIT_MAX_MEMBERS_PER_SHARED_VAULT` | Membres d'un coffre partagé | `50` |
+| `LIMIT_MAX_ROLES_PER_SHARED_VAULT` | Rôles d'un coffre partagé | `30` |
 
 Les valeurs modifiées sur la [page d'administration](installation.md#page-dadministration) remplacent celles du `.env`.
+
+## Photo de profil
+
+Chaque serveur choisit ce qu'il accepte. L'image n'est servie qu'au compte lui-même : elle n'est jamais publique.
+
+| Variable | Rôle | Défaut |
+| --- | --- | --- |
+| `AVATAR_UPLOADS` | `false` pour refuser l'envoi d'une image | `true` |
+| `AVATAR_URLS` | `false` pour refuser un lien vers une image hébergée ailleurs | `true` |
+| `LIMIT_MAX_AVATAR_KB` | Taille d'une image envoyée, en Ko | `512` |
+
+Un lien doit être en `https`. Le type réel de l'image envoyée est vérifié d'après ses premiers octets, pas d'après le `Content-Type` annoncé ; le serveur n'accepte que PNG, JPEG et WebP (l'application réencode l'image avant l'envoi). Si les deux options sont sur `false`, le champ disparaît de l'application.
 
 ## Limites fixes du serveur
 

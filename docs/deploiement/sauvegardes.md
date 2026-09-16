@@ -65,6 +65,7 @@ Sans `BACKUP_ENCRYPTION_KEY`, la copie de la base n'est pas chiffrée en plus : 
 | --- | --- |
 | Minimisation | Le serveur ne détient que l'email, des empreintes d'authentification et des données chiffrées côté client. Il ne peut lire ni les mots de passe ni les fichiers. |
 | Sécurité | Chiffrement de bout en bout, sauvegardes chiffrées en plus, clés jamais envoyées au serveur. |
+| Fréquence | `BACKUP_INTERVAL_HOURS` (24 heures par défaut) : délai entre deux sauvegardes automatiques. |
 | Durée de conservation | `BACKUP_RETENTION_DAYS` (30 jours par défaut) : les copies plus anciennes sont supprimées à chaque sauvegarde. |
 | Droit à l'effacement | Supprimer un compte ou un fichier l'efface immédiatement du serveur. Les copies de sauvegarde qui le contiennent disparaissent au plus tard après la durée de conservation ; les pièces jointes supprimées sont retirées du bucket au même rythme. |
 | Portabilité | Chaque utilisateur exporte ses données (JSON chiffré, KeePass, CXF, CSV). |
