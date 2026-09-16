@@ -48,7 +48,8 @@ import { mountColorPicker } from './ui/colorPicker';
 import { mountDateField } from './ui/dateField';
 import { showToast as pushToast } from './ui/toast';
 import { EXPIRY_SOON_DAYS, expiryInfo, renderExpiryBadge } from './ui/expiry';
-import { formatRecoveryKey, recoveryKeyFile } from './ui/recoveryKey';
+import { printRecoveryKey, recoveryKeyFile } from './ui/recoveryKey';
+import { secretGridHtml } from './ui/secretDisplay';
 import { CREDENTIAL_FILTERS, countByFilter, queryCredentials, reusedPasswords, type CredentialFilter, type CredentialSort } from './store/credentialFilters';
 import { checkCredential, remainingCapacity } from './account/limits';
 import { renderSVG } from 'uqr';
@@ -4378,14 +4379,20 @@ class AppController {
                   <input class="form-input otp-input" data-totp-code inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000">
                   <div class="form-error" data-error="totp" role="alert" hidden></div>
                   <button class="btn-primary btn-accent" data-totp-enable style="justify-content:center;">${tr('Activer', 'Turn on')}</button>
-                  <details>
-                    <summary class="field-hint" style="cursor:pointer;">${tr('Saisir la clé à la main', 'Enter the key manually')}</summary>
-                    <code class="secret-text" style="margin-top:6px;">${setup.secret.match(/.{1,4}/g)!.join(' ')}</code>
-                  </details>
+                  <div class="secret-card compact">
+                    <div class="secret-card-head">
+                      <span class="secret-card-label">${tr('Clé de configuration', 'Setup key')}</span>
+                      <button class="btn-primary btn-ghost btn-sm" data-totp-copy>${GEN_ICONS.copy}<span>${tr('Copier', 'Copy')}</span></button>
+                    </div>
+                    ${secretGridHtml(setup.secret, { numbered: false })}
+                  </div>
                 </div>
               </div>`;
             const codeInput = totpFlow.querySelector<HTMLInputElement>('[data-totp-code]')!;
             codeInput.focus();
+            totpFlow.querySelector('[data-totp-copy]')?.addEventListener('click', () => {
+              void this.copyToClipboardWithAutoClear(setup.secret, tr('Clé copiée', 'Key copied'), true);
+            });
             totpFlow.querySelector<HTMLButtonElement>('[data-totp-enable]')?.addEventListener('click', enableEvent => {
               hideError('totp');
               void runBusy(enableEvent.currentTarget as HTMLButtonElement, '…', async () => {
@@ -4800,10 +4807,16 @@ class AppController {
       </div>
       <div class="modal-body">
         <p class="modal-text">${intro}</p>
-        <div class="recovery-key">${formatRecoveryKey(key)}</div>
+        <div class="secret-card">
+          <div class="secret-card-head">
+            <span class="secret-card-label">${tr('52 caractères · affichée une seule fois', '52 characters · shown only once')}</span>
+            <button class="btn-primary btn-ghost btn-sm" data-action="copy">${GEN_ICONS.copy}<span>${tr('Copier', 'Copy')}</span></button>
+          </div>
+          ${secretGridHtml(key)}
+        </div>
         <div class="recovery-actions">
-          <button class="btn-primary" data-action="copy">${GEN_ICONS.copy}<span>${tr('Copier', 'Copy')}</span></button>
           <button class="btn-primary" data-action="download">${tr('Enregistrer en .txt', 'Save as .txt')}</button>
+          <button class="btn-primary" data-action="print">${tr('Imprimer', 'Print')}</button>
         </div>
         <div class="notice notice-warning">${tr('Gardez-la en dehors de BetterVault : sur papier ou dans un endroit sûr. Elle ne sera plus affichée.', 'Keep it outside BetterVault: on paper or somewhere safe. It won’t be shown again.')}</div>
         <label class="check-row"><input type="checkbox" data-confirm> ${tr('J’ai mis ma clé de secours en lieu sûr', 'I stored my recovery key somewhere safe')}</label>
@@ -4817,6 +4830,7 @@ class AppController {
     box.querySelector('[data-action="download"]')?.addEventListener('click', () => {
       downloadExportFile(recoveryKeyFile(email, key, tr, this.dateLocale()), 'bettervault-cle-de-secours.txt', 'text/plain;charset=utf-8');
     });
+    box.querySelector('[data-action="print"]')?.addEventListener('click', () => printRecoveryKey(email, key));
     const done = box.querySelector('[data-action="done"]') as HTMLButtonElement;
     box.querySelector<HTMLInputElement>('[data-confirm]')?.addEventListener('change', e => {
       done.disabled = !(e.target as HTMLInputElement).checked;

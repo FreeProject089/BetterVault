@@ -6,9 +6,10 @@ import { i18n } from '../i18n';
 import { downloadExportFile } from '../import_export/importEngine';
 import { createEmptyVaultData } from '../store/vaultStore';
 import type { UnlockedVaultData } from '../types/vault';
-import { formatRecoveryKey, recoveryKeyFile } from './recoveryKey';
+import { printRecoveryKey, recoveryKeyFile } from './recoveryKey';
 import { BiometricCancelledError, type DeviceSecretStore } from '../platform/biometric';
 import { renderSVG } from 'uqr';
+import { secretGridHtml } from './secretDisplay';
 
 const isTauriRuntime = typeof (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined';
 
@@ -25,6 +26,23 @@ const escapeHtml = (value: string) =>
   value.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch] ?? ch);
 
 const EYE = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+const COPY_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+const SAVE_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>';
+const PRINT_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7"></path><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>';
+
+/** Copie avec retour visuel sur le bouton, sans changer sa largeur */
+async function copyToClipboard(button: HTMLButtonElement, value: string): Promise<void> {
+  const label = button.querySelector('span') ?? button;
+  const original = label.textContent;
+  try {
+    await navigator.clipboard.writeText(value);
+    label.textContent = tr('Copié', 'Copied');
+  } catch {
+    label.textContent = tr('Copie impossible', 'Copy failed');
+  }
+  setTimeout(() => { if (label.isConnected) label.textContent = original; }, 2000);
+}
+
 const EYE_OFF = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
 
 export function accountErrorMessage(err: unknown): string {
@@ -244,14 +262,20 @@ export function mountAuthScreen(
         <h1 class="auth-title">${tr('Votre clé de secours', 'Your recovery key')}</h1>
         <p class="auth-sub">${escapeHtml(pending?.intro ?? '')}</p>
       </div>
-      <div class="recovery-key">${formatRecoveryKey(pending?.key ?? '')}</div>
-      <div class="recovery-actions">
-        <button type="button" class="btn-primary" data-action="copy-key">${tr('Copier', 'Copy')}</button>
-        <button type="button" class="btn-primary" data-action="download-key">${tr('Enregistrer en .txt', 'Save as .txt')}</button>
+      <div class="secret-card">
+        <div class="secret-card-head">
+          <span class="secret-card-label">${tr('52 caractères · affichée une seule fois', '52 characters · shown only once')}</span>
+          <button type="button" class="btn-primary btn-ghost btn-sm" data-action="copy-key">${COPY_ICON}<span>${tr('Copier', 'Copy')}</span></button>
+        </div>
+        ${secretGridHtml(pending?.key ?? '')}
       </div>
-      <p class="auth-warning">${tr('Gardez-la hors de BetterVault (papier, clé USB…). Elle ne sera plus affichée.', 'Keep it outside BetterVault (paper, USB drive…). It won’t be shown again.')}</p>
+      <div class="recovery-actions">
+        <button type="button" class="btn-primary" data-action="download-key">${SAVE_ICON}<span>${tr('Enregistrer en .txt', 'Save as .txt')}</span></button>
+        <button type="button" class="btn-primary" data-action="print-key">${PRINT_ICON}<span>${tr('Imprimer', 'Print')}</span></button>
+      </div>
+      <p class="auth-warning">${tr('Gardez-la hors de BetterVault (papier, gestionnaire de mots de passe d’un proche, coffre-fort). Elle ne sera plus affichée.', 'Keep it outside BetterVault (paper, a relative’s password manager, a safe). It won’t be shown again.')}</p>
       <label class="check-row"><input type="checkbox" data-confirm-key> ${tr('J’ai mis ma clé de secours en lieu sûr', 'I stored my recovery key somewhere safe')}</label>
-      <button type="button" class="btn-primary btn-accent auth-submit" data-action="continue" disabled>${tr('Continuer', 'Continue')}</button>`,
+      <button type="button" class="btn-primary btn-accent auth-submit" data-action="continue" disabled>${tr('Terminer', 'Finish')}</button>`,
 
     'totp-offer': () => `
       ${brand()}
@@ -267,10 +291,13 @@ export function mountAuthScreen(
               <li>${tr('Scannez le QR code avec Aegis, 2FAS, Google Authenticator…', 'Scan the QR code with Aegis, 2FAS, Google Authenticator…')}</li>
               <li>${tr('Saisissez le code à 6 chiffres affiché', 'Enter the 6-digit code shown')}</li>
             </ol>
-            <details>
-              <summary class="field-hint" style="cursor:pointer;">${tr('Saisir la clé à la main', 'Enter the key manually')}</summary>
-              <code class="secret-text" data-totp-secret style="margin-top:6px;"></code>
-            </details>
+            <div class="secret-card compact">
+              <div class="secret-card-head">
+                <span class="secret-card-label">${tr('Clé de configuration', 'Setup key')}</span>
+                <button type="button" class="btn-primary btn-ghost btn-sm" data-action="copy-totp">${COPY_ICON}<span>${tr('Copier', 'Copy')}</span></button>
+              </div>
+              <div data-totp-secret><span class="skeleton skeleton-line" style="width:80%"></span></div>
+            </div>
           </div>
         </div>
         ${otpField('auth-totp-new', tr('Code de l’application', 'App code'), '')}
@@ -319,8 +346,8 @@ export function mountAuthScreen(
       task = async () => {
         const { recoveryKey } = await service.createAccount({ email: value('auth-email'), password, mode, serverUrl: mode === 'cloud' ? value('auth-server') : undefined }, initial);
         if (mode === 'cloud') newAccountPassword = password;
-        pending = { data: initial, key: recoveryKey, offerTotp: mode === 'cloud', intro: tr('Si vous oubliez votre mot de passe principal, cette clé permet d’en choisir un nouveau sans perdre vos données.', 'If you forget your master password, this key lets you choose a new one without losing your data.') };
-        render('recovery-key');
+        pending = { data: initial, key: recoveryKey, intro: tr('Si vous oubliez votre mot de passe principal, cette clé permet d’en choisir un nouveau sans perdre vos données.', 'If you forget your master password, this key lets you choose a new one without losing your data.') };
+        render(mode === 'cloud' ? 'totp-offer' : 'recovery-key');
       };
     } else if (kind === 'signin') {
       task = async () => finish(await service.signIn(value('auth-server'), value('auth-email'), password, value('auth-totp') || undefined));
@@ -459,14 +486,11 @@ export function mountAuthScreen(
 
     // Écran de la clé de secours
     const account = () => service.getAccount();
-    card.querySelector<HTMLButtonElement>('[data-action="copy-key"]')?.addEventListener('click', async event => {
-      const button = event.currentTarget as HTMLButtonElement;
-      try {
-        await navigator.clipboard.writeText(pending?.key ?? '');
-        button.textContent = tr('Copiée', 'Copied');
-      } catch {
-        button.textContent = tr('Copie impossible', 'Copy failed');
-      }
+    card.querySelector<HTMLButtonElement>('[data-action="copy-key"]')?.addEventListener('click', event => {
+      void copyToClipboard(event.currentTarget as HTMLButtonElement, pending?.key ?? '');
+    });
+    card.querySelector<HTMLButtonElement>('[data-action="print-key"]')?.addEventListener('click', () => {
+      if (pending) printRecoveryKey(account()?.email ?? '', pending.key);
     });
     card.querySelector<HTMLButtonElement>('[data-action="download-key"]')?.addEventListener('click', () => {
       if (!pending) return;
@@ -478,12 +502,9 @@ export function mountAuthScreen(
     });
     continueButton?.addEventListener('click', () => {
       if (!pending) return;
-      if (pending.offerTotp && newAccountPassword) {
-        render('totp-offer');
-        return;
-      }
       const data = pending.data;
       pending = null;
+      newAccountPassword = null;
       finish(data);
     });
 
@@ -508,13 +529,16 @@ export function mountAuthScreen(
     // Proposition de double authentification juste après la création du compte
     const totpStep = card.querySelector<HTMLElement>('[data-totp-step]');
     if (totpStep && pending) {
+      // Activee ou reportee, l'etape suivante reste la cle de secours
       const done = () => {
         newAccountPassword = null;
-        const data = pending!.data;
-        pending = null;
-        finish(data);
+        render('recovery-key');
       };
       const errorEl = totpStep.querySelector<HTMLElement>('.auth-error')!;
+      let totpSecret = '';
+      totpStep.querySelector('[data-action="copy-totp"]')?.addEventListener('click', event => {
+        void copyToClipboard(event.currentTarget as HTMLButtonElement, totpSecret);
+      });
       const enableButton = totpStep.querySelector<HTMLButtonElement>('[data-action="totp-enable"]')!;
       const codeInput = totpStep.querySelector<HTMLInputElement>('#auth-totp-new')!;
       enableButton.disabled = true;
@@ -522,7 +546,8 @@ export function mountAuthScreen(
       service.beginTotpSetup(newAccountPassword ?? '').then(setup => {
         if (!totpStep.isConnected) return;
         totpStep.querySelector('[data-totp-qr]')!.innerHTML = renderSVG(setup.uri, { border: 1 });
-        totpStep.querySelector('[data-totp-secret]')!.textContent = setup.secret.match(/.{1,4}/g)!.join(' ');
+        totpSecret = setup.secret;
+        totpStep.querySelector('[data-totp-secret]')!.innerHTML = secretGridHtml(setup.secret, { numbered: false });
         enableButton.disabled = false;
         codeInput.focus();
       }).catch(err => {
