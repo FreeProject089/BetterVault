@@ -37,10 +37,51 @@ const otpUri = (c: CredentialItem) => {
   return `otpauth://totp/${label}?secret=${encodeURIComponent(secret.replace(/\s/g, ''))}&issuer=${encodeURIComponent(c.title)}`;
 };
 
-/** Notes, plus les champs personnalisés en texte pour les formats qui n'en ont pas */
+/**
+ * Champs propres au type, en texte.
+ *
+ * Les autres gestionnaires n'ont pas nos types : sans cela, exporter une carte ou une clé SSH
+ * vers eux produirait une entrée vide. On les écrit donc dans les notes, que tous ces formats
+ * possèdent, plutôt que de les perdre en silence.
+ */
+const typeFieldLines = (c: CredentialItem): string[] => {
+  if (c.card) {
+    const expiry = c.card.expMonth && c.card.expYear ? `${c.card.expMonth}/${c.card.expYear}` : '';
+    return [
+      c.card.brand ? `Type: ${c.card.brand}` : '',
+      c.card.number ? `Numéro: ${c.card.number}` : '',
+      c.card.holder ? `Titulaire: ${c.card.holder}` : '',
+      expiry ? `Expiration: ${expiry}` : '',
+      c.card.cvv ? `Cryptogramme: ${c.card.cvv}` : '',
+      c.card.pin ? `Code: ${c.card.pin}` : ''
+    ].filter(Boolean);
+  }
+
+  if (c.identity) {
+    const id = c.identity;
+    const labels: [string, string][] = [
+      ['Prénom', id.firstName], ['Nom', id.lastName], ['Naissance', id.birthDate],
+      ['Numéro de pièce', id.docNumber], ['Email', id.email], ['Téléphone', id.phone],
+      ['Adresse', id.address], ['Code postal', id.postalCode], ['Ville', id.city], ['Pays', id.country]
+    ];
+    return labels.filter(([, value]) => value).map(([label, value]) => `${label}: ${value}`);
+  }
+
+  if (c.sshKey) {
+    return [
+      c.sshKey.publicKey ? `Clé publique: ${c.sshKey.publicKey}` : '',
+      c.sshKey.passphrase ? `Phrase de passe: ${c.sshKey.passphrase}` : '',
+      c.sshKey.privateKey ? `Clé privée:\n${c.sshKey.privateKey}` : ''
+    ].filter(Boolean);
+  }
+
+  return [];
+};
+
+/** Notes, plus les champs personnalisés et ceux du type en texte pour les formats qui n'en ont pas */
 const notesWithFields = (c: CredentialItem) => {
   const fields = (c.fields ?? []).map(f => `${f.label}: ${f.value}`);
-  return [c.notes ?? '', ...fields].filter(Boolean).join('\n');
+  return [c.notes ?? '', ...typeFieldLines(c), ...fields].filter(Boolean).join('\n');
 };
 
 const iso = (ms: number | undefined) => (ms ? new Date(ms).toISOString() : new Date().toISOString());

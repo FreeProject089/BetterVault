@@ -197,3 +197,32 @@ describe('Aller-retour export / import', () => {
     expect(store.getData().credentials[0].type).toBe('login');
   });
 });
+
+describe('Export vers les autres gestionnaires', () => {
+  it('écrit les champs du type dans les notes plutôt que de les perdre', async () => {
+    const { MANAGER_EXPORTS } = await import('../src/import_export/managerExports');
+    const carte = {
+      id: 'c1', vaultId: 'v', type: 'card' as const, title: 'Carte',
+      username: '', password: '', website: '', domain: '', tags: [],
+      card: { number: '4111111111111111', holder: 'Jean Dupont', expMonth: '07', expYear: '2030', cvv: '123', pin: '4321', brand: 'Visa' },
+      createdAt: 1, updatedAt: 1
+    };
+
+    const csv = MANAGER_EXPORTS.find(e => e.id === 'lastpass')!.build([carte]);
+    expect(csv).toContain('4111111111111111');
+    expect(csv).toContain('Jean Dupont');
+    expect(csv).toContain('07/2030');
+  });
+
+  it('laisse un identifiant ordinaire inchangé', async () => {
+    const { MANAGER_EXPORTS } = await import('../src/import_export/managerExports');
+    const login = {
+      id: 'c2', vaultId: 'v', type: 'login' as const, title: 'GitHub',
+      username: 'moi', password: 'secret', website: 'github.com', domain: 'github.com',
+      notes: 'ma note', tags: [], createdAt: 1, updatedAt: 1
+    };
+    const csv = MANAGER_EXPORTS.find(e => e.id === 'lastpass')!.build([login]);
+    expect(csv).toContain('ma note');
+    expect(csv).not.toContain('Numéro:');
+  });
+});
