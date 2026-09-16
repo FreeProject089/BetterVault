@@ -1,4 +1,4 @@
-import type { CredentialItem, Task, TagDef, UnlockedVaultData, VaultMetadata } from '../types/vault';
+import type { CredentialItem, Task, TagDef, UnlockedVaultData, VaultMetadata, VaultTypeDef } from '../types/vault';
 import { normalizeItemIcon, type ItemIcon } from '../icons/iconLibrary';
 import { normalizeAttachments } from '../account/attachmentCrypto';
 
@@ -28,7 +28,7 @@ function createTagDef(name: string, colorIndex: number, now: number): TagDef {
 
 export function createEmptyVaultData(now = Date.now()): UnlockedVaultData {
   const vault = createVault(DEFAULT_VAULT_NAME, 'personal', now);
-  return { vaults: [vault], activeVaultId: vault.id, credentials: [], tasks: [], tagDefs: [], deleted: {} };
+  return { vaults: [vault], activeVaultId: vault.id, credentials: [], tasks: [], tagDefs: [], vaultTypes: [], deleted: {} };
 }
 
 /** Répare et migre des données de coffre (anciennes versions, imports, synchronisation) */
@@ -57,6 +57,9 @@ export function normalizeVaultData(input: Partial<UnlockedVaultData> | null | un
       const clean = normalizeItemIcon(icon);
       return { ...tag, ...(clean ? { icon: clean } : {}) };
     }),
+    vaultTypes: (Array.isArray(source.vaultTypes) ? source.vaultTypes : [])
+      .filter(type => type && typeof type.id === 'string' && typeof type.name === 'string')
+      .map(type => ({ id: type.id, name: String(type.name).trim().slice(0, 40), createdAt: type.createdAt ?? now, updatedAt: type.updatedAt ?? now })),
     deleted: source.deleted && typeof source.deleted === 'object' ? { ...source.deleted } : {}
   };
 
@@ -165,6 +168,42 @@ export class VaultStore {
       else delete vault.icon;
     }
     vault.updatedAt = Date.now();
+    this.commit();
+  }
+
+  /* ── Types de coffres ─────────────────────────────────────────────── */
+
+  getVaultTypes(): VaultTypeDef[] {
+    return [...(this.data.vaultTypes ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Crée un type de coffre, ou renvoie celui qui porte déjà ce nom */
+  createVaultType(name: string, max: number): VaultTypeDef {
+    const clean = name.trim().replace(/\s+/g, ' ').slice(0, 40);
+    if (!clean) throw new Error('Le nom du type est vide');
+    const types = this.data.vaultTypes ?? (this.data.vaultTypes = []);
+    const existing = types.find(t => t.name.toLowerCase() === clean.toLowerCase());
+    if (existing) return existing;
+    if (types.length >= max) throw new Error(`Limite de ${max} types de coffres atteinte`);
+    const now = Date.now();
+    const type: VaultTypeDef = { id: randomId('vtype'), name: clean, createdAt: now, updatedAt: now };
+    types.push(type);
+    this.commit();
+    return type;
+  }
+
+  /** Supprime un type ; les coffres qui l'utilisaient repassent en « Personnel » */
+  deleteVaultType(typeId: string): void {
+    const types = this.data.vaultTypes ?? [];
+    if (!types.some(t => t.id === typeId)) return;
+    const now = Date.now();
+    this.data.vaults.forEach(vault => {
+      if (vault.type !== typeId) return;
+      vault.type = 'personal';
+      vault.updatedAt = now;
+    });
+    this.data.vaultTypes = types.filter(t => t.id !== typeId);
+    this.markDeleted(typeId, now);
     this.commit();
   }
 

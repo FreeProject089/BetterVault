@@ -565,7 +565,8 @@ class AppController {
     const typeLabels: Record<string, string> = {
       personal: i18n.t.common.personal,
       work: i18n.t.common.work,
-      team: i18n.t.common.team
+      team: i18n.t.common.team,
+      ...Object.fromEntries(vaultStore.getVaultTypes().map(type => [type.id, type.name]))
     };
     const SHARED_ICON = '<svg class="nav-shared-mark" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
 
@@ -4877,7 +4878,15 @@ class AppController {
               ${typeOption('personal', i18n.t.common.personal)}
               ${typeOption('work', i18n.t.common.work)}
               ${typeOption('team', i18n.t.common.team)}
+              ${vaultStore.getVaultTypes().map(custom => `<option value="${this.escapeHtml(custom.id)}" ${existing?.type === custom.id ? 'selected' : ''}>${this.escapeHtml(custom.name)}</option>`).join('')}
+              <option value="__new__">${tr('＋ Nouveau type…', '＋ New type…')}</option>
             </select>
+            <div class="form-row" data-new-type hidden style="grid-template-columns:minmax(0,1fr) auto;margin-top:8px;">
+              <input class="form-input" id="vault-type-name" maxlength="40" placeholder="${tr('Nom du type (Famille, Association…)', 'Type name (Family, Club…)')}" autocomplete="off">
+              <button type="button" class="btn-primary btn-ghost" data-cancel-type>${tr('Annuler', 'Cancel')}</button>
+            </div>
+            ${vaultStore.getVaultTypes().length ? `<div class="type-manage" data-type-manage>${vaultStore.getVaultTypes().map(custom => `
+              <span class="type-chip">${this.escapeHtml(custom.name)}<button type="button" class="icon-btn" data-delete-type="${this.escapeHtml(custom.id)}" aria-label="${tr('Supprimer le type', 'Delete type')} ${this.escapeHtml(custom.name)}">${GEN_ICONS.close}</button></span>`).join('')}</div>` : ''}
           </div>
 
           ${!existing && cloud ? `
@@ -4983,10 +4992,60 @@ class AppController {
     });
     renderPreview();
 
+    // Types de coffres créés par l'utilisateur : « Nouveau type… » ouvre un champ, les puces en suppriment un
+    const typeSelect = $<HTMLSelectElement>('#vault-type')!;
+    const newTypeRow = box.querySelector('[data-new-type]') as HTMLElement;
+    const newTypeInput = $<HTMLInputElement>('#vault-type-name');
+    let previousType = typeSelect.value;
+    typeSelect.addEventListener('change', () => {
+      const creating = typeSelect.value === '__new__';
+      newTypeRow.hidden = !creating;
+      if (creating) newTypeInput?.focus();
+      else previousType = typeSelect.value;
+    });
+    box.querySelector('[data-cancel-type]')?.addEventListener('click', () => {
+      typeSelect.value = previousType;
+      newTypeRow.hidden = true;
+      if (newTypeInput) newTypeInput.value = '';
+    });
+    box.querySelector('[data-type-manage]')?.addEventListener('click', async e => {
+      const typeId = (e.target as HTMLElement).closest<HTMLElement>('[data-delete-type]')?.dataset.deleteType;
+      if (!typeId) return;
+      const custom = vaultStore.getVaultTypes().find(t => t.id === typeId);
+      const used = vaultStore.getData().vaults.filter(v => v.type === typeId).length;
+      const confirmed = await this.confirmDialog({
+        title: tr('Supprimer ce type ?', 'Delete this type?'),
+        message: used
+          ? tr(`${used} coffre(s) repasseront en « ${i18n.t.common.personal} ».`, `${used} vault(s) will go back to "${i18n.t.common.personal}".`)
+          : tr(`« ${custom?.name ?? ''} » sera retiré de la liste.`, `"${custom?.name ?? ''}" will be removed from the list.`),
+        confirmLabel: tr('Supprimer', 'Delete'),
+        danger: true
+      });
+      if (!confirmed) return;
+      vaultStore.deleteVaultType(typeId);
+      this.closeModal();
+      this.renderSidebar();
+      this.openVaultModal(vaultId);
+    });
+
     $<HTMLButtonElement>('#modal-confirm')?.addEventListener('click', async event => {
       const button = event.currentTarget as HTMLButtonElement;
       const name = ($<HTMLInputElement>('#vault-name')?.value ?? '').trim();
-      const type = $<HTMLSelectElement>('#vault-type')!.value as 'personal' | 'work' | 'team';
+      let type = typeSelect.value;
+      if (type === '__new__') {
+        const typeName = newTypeInput?.value.trim() ?? '';
+        if (!typeName) {
+          this.showToast(tr('Donnez un nom au nouveau type', 'Name the new type'), 'error');
+          newTypeInput?.focus();
+          return;
+        }
+        try {
+          type = vaultStore.createVaultType(typeName, limits.maxVaultTypes).id;
+        } catch (err) {
+          this.showToast(err instanceof Error ? err.message : String(err), 'error');
+          return;
+        }
+      }
       if (!name) {
         this.showToast(tr('Donnez un nom au coffre', 'Give the vault a name'), 'error');
         return;
