@@ -25,7 +25,7 @@ import { normalizeTotpInput, parseOtpAuthUri } from './crypto/otpauthUri';
 import { CameraQrScanner, decodeQrFromFile } from './crypto/qrScanner';
 import { AccountService, type SyncStatus } from './account/accountService';
 import { SharedReadOnlyError, SharedVaultManager } from './account/sharedVaults';
-import type { AccountSession, SharedMember, SharedPermission, SharedRole } from './account/cloudClient';
+import { setApiLocale, type AccountSession, type SharedMember, type SharedPermission, type SharedRole } from './account/cloudClient';
 import { decryptFile, encryptFile, type AttachmentMeta } from './account/attachmentCrypto';
 import { createDeviceStorage } from './platform/storage';
 import { isTauri, openExternal } from './platform/tauriBridge';
@@ -52,6 +52,7 @@ import { printRecoveryKey, recoveryKeyFile } from './ui/recoveryKey';
 import { MANAGER_EXPORTS } from './import_export/managerExports';
 import { secretGridHtml } from './ui/secretDisplay';
 import { resizeAvatar } from './ui/avatarImage';
+import { translateError } from './i18n/errorMessages';
 import { bindingFromEvent, checkBinding, DEFAULT_SHORTCUTS, formatBinding, isPlainKey, loadShortcuts, saveShortcuts, SHORTCUT_ORDER, type ShortcutAction, type ShortcutBindings } from './ui/shortcuts';
 import { CREDENTIAL_FILTERS, countByFilter, queryCredentials, reusedPasswords, type CredentialFilter, type CredentialSort } from './store/credentialFilters';
 import { checkCredential, remainingCapacity } from './account/limits';
@@ -73,7 +74,7 @@ function tagColor(color?: string): string {
   return color && /^#[0-9a-f]{6}$/i.test(color) ? color : '#8b949e';
 }
 
-const formatFileSize = (bytes: number) => bytes < 1024 ? `${bytes} o` : bytes < 1048576 ? `${Math.round(bytes / 1024)} Ko` : `${(bytes / 1048576).toFixed(1)} Mo`;
+const formatFileSize = (bytes: number) => i18n.formatBytes(bytes);
 
 /** Types affichables directement dans la fenêtre d'aperçu (le fichier reste déchiffré en mémoire) */
 function previewKind(type: string, name: string): 'image' | 'pdf' | 'text' | 'audio' | 'video' | null {
@@ -338,7 +339,7 @@ class AppController {
   }
 
   private dateLocale(): string {
-    return i18n.getLocale() === 'fr' ? 'fr-FR' : 'en-US';
+    return i18n.intlLocale();
   }
 
   /** Icône choisie pour l'identifiant, sinon logo détecté depuis le site */
@@ -871,7 +872,7 @@ class AppController {
           <div class="record-badges">
             ${task.status === 'blocked' ? `<span class="badge" style="color:var(--accent-red);border-color:rgba(218,54,51,0.4);" title="${this.tr('Bloquée par des dépendances', 'Blocked by dependencies')}">${this.tr('BLOQ', 'BLK')}</span>` : ''}
             ${task.recurrence ? `<span class="badge" style="color:var(--accent-purple);" title="${describeRecurrence(task.recurrence, i18n.getLocale() === 'fr' ? 'fr' : 'en')}">${this.tr('RÉC', 'REC')}</span>` : ''}
-            ${task.reminderAt && !task.reminderSent && task.status !== 'completed' ? `<span class="badge" style="color:var(--accent-orange);" title="${new Date(task.reminderAt).toLocaleString()}">${this.tr('RAP', 'REM')}</span>` : ''}
+            ${task.reminderAt && !task.reminderSent && task.status !== 'completed' ? `<span class="badge" style="color:var(--accent-orange);" title="${new Date(task.reminderAt).toLocaleString(i18n.intlLocale())}">${this.tr('RAP', 'REM')}</span>` : ''}
             <span class="badge priority-${task.priority}">${task.priority.charAt(0).toUpperCase()}</span>
           </div>
         `;
@@ -1090,7 +1091,7 @@ class AppController {
           <div class="field-group">
             <div class="field-label">${this.tr('Rappel', 'Reminder')}</div>
             <div class="field-box">
-              <span class="field-val">${new Date(task.reminderAt).toLocaleString(locale === 'fr' ? 'fr-FR' : 'en-US')}</span>
+              <span class="field-val">${new Date(task.reminderAt).toLocaleString(i18n.intlLocale())}</span>
               ${task.reminderSent ? `<span class="badge">${this.tr('ENVOYÉ', 'SENT')}</span>` : ''}
             </div>
           </div>` : ''}
@@ -1128,7 +1129,7 @@ class AppController {
             </div>
             <div>
               <div class="detail-title">${this.escapeHtml(task.title)}</div>
-              <div class="detail-meta">${this.tr('Créée le', 'Created')} ${new Date(task.createdAt).toLocaleDateString(i18n.getLocale() === 'fr' ? 'fr-FR' : 'en-US')}</div>
+              <div class="detail-meta">${this.tr('Créée le', 'Created')} ${new Date(task.createdAt).toLocaleDateString(i18n.intlLocale())}</div>
               ${this.renderTagChips(task.tags)}
             </div>
           </div>
@@ -1529,7 +1530,7 @@ class AppController {
                 <div class="history-entry">
                   <span class="history-password">&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;</span>
                   <div style="display:flex;align-items:center;gap:8px;">
-                    <span class="history-date">${new Date(h.changedAt).toLocaleDateString('fr-FR')}</span>
+                    <span class="history-date">${new Date(h.changedAt).toLocaleDateString(i18n.intlLocale())}</span>
                     <button class="icon-btn btn-copy-history" data-pwd="${h.password.replace(/"/g, '&quot;')}" title="${this.tr('Copier cet ancien mot de passe', 'Copy this previous password')}">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                     </button>
@@ -3398,7 +3399,7 @@ class AppController {
         box.querySelectorAll('[data-export]').forEach(b => b.setAttribute('aria-expanded', 'false'));
         if (!isTauri()) this.showToast(tr('Export chiffré enregistré', 'Encrypted export saved'), 'success');
       } catch (err) {
-        setExportStatus(err instanceof Error ? err.message : String(err), true);
+        setExportStatus(accountErrorMessage(err), true);
       } finally {
         exportConfirmBtn.disabled = false;
       }
@@ -3492,7 +3493,7 @@ class AppController {
           secretPwd.focus();
           return;
         }
-        setStatus(`<div class="notice notice-danger"><strong>${tr('Fichier illisible', 'Unreadable file')}</strong> · ${this.escapeHtml(err instanceof Error ? err.message : String(err))}</div>`);
+        setStatus(`<div class="notice notice-danger"><strong>${tr('Fichier illisible', 'Unreadable file')}</strong> · ${this.escapeHtml(accountErrorMessage(err))}</div>`);
       }
     };
 
@@ -4005,7 +4006,7 @@ class AppController {
       : '';
     el.innerHTML = `${avatar}<span class="sync-dot" style="background-color:${colors[status]};"></span><span class="sync-label">${this.syncStatusLabel(status)}</span>`;
     const button = document.getElementById('btn-sync-status');
-    if (button) button.title = [account?.email, state.message].filter(Boolean).join(' — ');
+    if (button) button.title = [account?.email, state.message && translateError(state.message, i18n.getLocale())].filter(Boolean).join(' — ');
   }
 
   private openAccountModal(): void {
@@ -4237,7 +4238,7 @@ class AppController {
       if (!el) return;
       const state = accountService.getSyncState();
       const when = state.lastSyncAt ? new Date(state.lastSyncAt).toLocaleString(locale) : tr('jamais', 'never');
-      el.textContent = `${this.syncStatusLabel(state.status)} · ${tr('dernière synchro', 'last sync')} ${when}${state.message ? ` · ${state.message}` : ''}`;
+      el.textContent = `${this.syncStatusLabel(state.status)} · ${tr('dernière synchro', 'last sync')} ${when}${state.message ? ` · ${translateError(state.message, i18n.getLocale())}` : ''}`;
       const reauth = $('[data-reauth]');
       if (reauth) reauth.hidden = state.code !== 'totp_required';
     };
@@ -5150,7 +5151,7 @@ class AppController {
         try {
           type = vaultStore.createVaultType(typeName, limits.maxVaultTypes).id;
         } catch (err) {
-          this.showToast(err instanceof Error ? err.message : String(err), 'error');
+          this.showToast(accountErrorMessage(err), 'error');
           return;
         }
       }
@@ -5678,7 +5679,7 @@ class AppController {
         vaultStore.updateTag(tag.id, { name: input.value });
         if (wasActive) this.activeTag = vaultStore.getTags().find(t => t.id === tag.id)?.name ?? null;
       } catch (err) {
-        this.showToast(err instanceof Error ? err.message : String(err), 'error');
+        this.showToast(accountErrorMessage(err), 'error');
       }
       render();
     });
@@ -5702,7 +5703,7 @@ class AppController {
         updatePreview();
         render();
       } catch (err) {
-        this.showToast(err instanceof Error ? err.message : String(err), 'error');
+        this.showToast(accountErrorMessage(err), 'error');
       }
       nameInput.focus();
     });
@@ -5905,6 +5906,7 @@ document.addEventListener('click', event => {
 });
 
 // Le stockage de l'appareil est chargé avant l'interface : fichier natif sous Tauri, navigateur sinon
+setApiLocale(() => i18n.getLocale());
 createDeviceStorage().then(storage => {
   const surface = extensionSurface();
   if (surface) document.body.classList.add(`ext-${surface}`);

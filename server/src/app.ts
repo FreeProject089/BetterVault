@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { avatarInfo, avatarRoutes, DEFAULT_AVATARS } from './avatars.ts';
+import { localizeMessage, requestLocale } from './messages.ts';
 import {
   HttpError,
   invalid,
@@ -25,7 +26,7 @@ import { attachmentRoutes, deleteUserAttachments } from './attachments.ts';
 import { databaseSnapshot, encryptBackup, type BackupService, type BackupSettings } from './backup.ts';
 import { sessionRoutes } from './sessions.ts';
 import { billingRoutes, createLimitsResolver } from './billing.ts';
-import { LEGAL_DOCUMENTS, legalConfigured, renderLegalPage } from './legal.ts';
+import { LEGAL_DOCUMENTS, legalConfigured, legalTitle, renderLegalPage } from './legal.ts';
 import { analytics, createAudit, type Metrics } from './metrics.ts';
 import { describeUserAgent, truncateIp, type GeoLookup } from './geoip.ts';
 import { route } from './context.ts';
@@ -706,15 +707,18 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
   const legalDir = options.legalDir ?? fileURLToPath(new URL('../legal', import.meta.url));
 
   Object.assign(routes, accountKeyRoutes(context), sessionRoutes(context), billingRoutes(context, fetchImpl), avatarRoutes(context), {
-    'GET /api/v1/legal': async (): Promise<Reply> => ({
-      status: 200,
-      body: {
-        configured: legalConfigured(settings.legal),
-        operatorName: settings.legal.operatorName || null,
-        effectiveDate: settings.legal.effectiveDate || null,
-        documents: LEGAL_DOCUMENTS.map(doc => ({ ...doc, url: `/legal/${doc.slug}` }))
-      }
-    }),
+    'GET /api/v1/legal': async (req: IncomingMessage): Promise<Reply> => {
+      const locale = requestLocale(req);
+      return {
+        status: 200,
+        body: {
+          configured: legalConfigured(settings.legal),
+          operatorName: settings.legal.operatorName || null,
+          effectiveDate: settings.legal.effectiveDate || null,
+          documents: LEGAL_DOCUMENTS.map(doc => ({ slug: doc.slug, title: legalTitle(doc, locale), url: `/legal/${doc.slug}?lang=${locale}` }))
+        }
+      };
+    },
     'GET /api/v1/admin/dashboard': async (req: IncomingMessage): Promise<Reply> => {
       requireAdmin(req);
       return {
@@ -777,8 +781,10 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       return { status: 204 };
     }
   });
-  const legalPage = (slug: string): Reply => {
-    const html = renderLegalPage(legalDir, slug, legalContext());
+  const legalPage = (slug: string, req: IncomingMessage): Reply => {
+    const lang = new URL(req.url ?? '/', 'http://localhost').searchParams.get('lang');
+    const locale = lang === 'en' || lang === 'fr' ? lang : requestLocale(req);
+    const html = renderLegalPage(legalDir, slug, legalContext(), locale);
     if (!html) throw new HttpError(404, 'not_found', 'Document inconnu');
     return { status: 200, raw: Buffer.from(html), contentType: 'text/html; charset=utf-8' };
   };
@@ -786,8 +792,8 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
   const patternRoutes: PatternRoute[] = [
     ...sharingRoutes(context),
     ...attachmentRoutes(context),
-    route('GET', '/legal', async () => legalPage('privacy')),
-    route('GET', '/legal/:slug', async (_req, params) => legalPage(params.slug))
+    route('GET', '/legal', async req => legalPage('privacy', req)),
+    route('GET', '/legal/:slug', async (req, params) => legalPage(params.slug, req))
   ];
   backup?.start();
 
@@ -854,11 +860,12 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         send(res, reply.status, reply.body);
       }
     } catch (err) {
+      const locale = requestLocale(req);
       if (err instanceof HttpError) {
-        send(res, err.status, { error: { code: err.code, message: err.message, ...(err.details === undefined ? {} : { details: err.details }) } });
+        send(res, err.status, { error: { code: err.code, message: localizeMessage(err.message, locale), ...(err.details === undefined ? {} : { details: err.details }) } });
       } else {
         console.error(err);
-        send(res, 500, { error: { code: 'internal', message: 'Erreur interne du serveur' } });
+        send(res, 500, { error: { code: 'internal', message: localizeMessage('Erreur interne du serveur', locale) } });
       }
     }
   };

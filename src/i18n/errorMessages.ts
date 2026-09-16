@@ -1,0 +1,112 @@
+/**
+ * Messages d'erreur de l'application : écrits en français dans le code, traduits à l'affichage.
+ * Les messages venant du serveur arrivent déjà dans la langue demandée (Accept-Language).
+ */
+
+const EXACT: Record<string, string> = {
+  'Adresse du serveur invalide': 'Invalid server address',
+  'Adresse du serveur requise': 'Server address required',
+  'Adresse email invalide': 'Invalid email address',
+  'Adresse non prise en charge': 'Unsupported address',
+  'Archive .1pux invalide : export.data introuvable': 'Invalid .1pux archive: export.data not found',
+  'Aucun compte sur cet appareil': 'No account on this device',
+  'Aucun compte synchronisé': 'No synced account',
+  'Authentification annulée': 'Authentication cancelled',
+  'Caméra indisponible sur cet appareil': 'Camera unavailable on this device',
+  'Canvas indisponible': 'Canvas unavailable',
+  'Ce compte est déjà synchronisé': 'This account is already synced',
+  'Cette adresse ne répond pas comme un serveur BetterVault': 'This address does not answer like a BetterVault server',
+  'Cette fonction demande un compte synchronisé': 'This feature needs a synced account',
+  'Coffre distant introuvable': 'Remote vault not found',
+  'Coffre illisible : données altérées ou clé incorrecte': 'Unreadable vault: altered data or wrong key',
+  'Coffre introuvable': 'Vault not found',
+  'Coffre partagé non chargé': 'Shared vault not loaded',
+  'Coffre verrouillé': 'Vault locked',
+  'Conflits de synchronisation répétés, réessayez': 'Repeated sync conflicts, try again',
+  'Conflits répétés sur le coffre partagé, réessayez': 'Repeated conflicts on the shared vault, try again',
+  'Données du coffre introuvables sur cet appareil': 'Vault data not found on this device',
+  'Déconnectez le compte actuel de cet appareil avant d’en utiliser un autre': 'Sign the current account out of this device before using another one',
+  'Déverrouillage biométrique invalide : utilisez le mot de passe principal puis réactivez-le': 'Biometric unlock is no longer valid: use the master password, then turn it on again',
+  'Déverrouillage biométrique non activé': 'Biometric unlock is not on',
+  'Déverrouillez le coffre d’abord': 'Unlock the vault first',
+  'Format chiffré non supporté': 'Unsupported encrypted format',
+  'Format de fichier non reconnu. Formats pris en charge : KeePass, 1Password, Bitwarden, FIDO CXF, BetterVault, CSV.': 'File format not recognised. Supported formats: KeePass, 1Password, Bitwarden, FIDO CXF, BetterVault, CSV.',
+  'Gardez au moins un coffre personnel': 'Keep at least one personal vault',
+  'Image PNG, JPEG, WebP, GIF ou AVIF attendue': 'PNG, JPEG, WebP, GIF or AVIF image expected',
+  'Image illisible': 'Unreadable image',
+  'Image trop volumineuse (20 Mo maximum avant réduction)': 'Image too large (20 MB maximum before resizing)',
+  'Image trop volumineuse': 'Image too large',
+  'Impossible de supprimer le dernier coffre': 'The last vault cannot be deleted',
+  'Le nom du tag est vide': 'The tag name is empty',
+  'Le nom du type est vide': 'The type name is empty',
+  'Le nouveau mot de passe doit être différent de l’actuel': 'The new password must differ from the current one',
+  'Le serveur doit utiliser HTTPS (HTTP accepté uniquement en local)': 'The server must use HTTPS (HTTP is only accepted locally)',
+  'Lien https vers une image attendu': 'An https link to an image is expected',
+  'Mot de passe incorrect ou fichier altéré': 'Wrong password or altered file',
+  'Paramètres Argon2id invalides dans le fichier chiffré': 'Invalid Argon2id parameters in the encrypted file',
+  'Pièce jointe altérée ou clé incorrecte': 'Altered attachment or wrong key',
+  'Pièce jointe dans un format inconnu': 'Attachment in an unknown format',
+  'Runtime Tauri indisponible': 'Tauri runtime unavailable',
+  'Secret introuvable dans le Gestionnaire d’identification': 'Secret not found in Credential Manager',
+  'Secret introuvable dans le trousseau': 'Secret not found in the keychain',
+  'Serveur BetterVault injoignable': 'BetterVault server unreachable',
+  'Session expirée : saisissez un code de votre application d’authentification pour reprendre la synchronisation.': 'Session expired: enter a code from your authenticator app to resume syncing.',
+  'Tous les caractères sont exclus': 'All characters are excluded',
+  'Un autre compte est ouvert sur cet appareil. Retirez-le d’abord.': 'Another account is open on this device. Remove it first.',
+  'Un compte existe déjà sur cet appareil': 'An account already exists on this device',
+  'Version ou algorithme d’export chiffré non supporté': 'Unsupported encrypted export version or algorithm',
+  'Votre rôle dans ce coffre partagé ne permet pas de le modifier': 'Your role in this shared vault does not allow changes',
+  'XML malformé : CDATA non terminé': 'Malformed XML: unterminated CDATA',
+  'XML malformé : balise non terminée': 'Malformed XML: unterminated tag',
+  'XML malformé : nom de balise manquant': 'Malformed XML: missing tag name',
+  'XML malformé : section non terminée': 'Malformed XML: unterminated section',
+  'Mot de passe principal actuel incorrect': 'Incorrect current master password',
+  'La clé de secours doit contenir 52 caractères': 'The recovery key must be 52 characters long',
+  'Clé de secours incorrecte': 'Incorrect recovery key',
+  'Email ou mot de passe incorrect': 'Incorrect email or password',
+  'Ce compte n’a pas de clé de secours': 'This account has no recovery key',
+  'Impossible d’ouvrir la clé de ce coffre partagé': 'Could not open this shared vault’s key',
+  'Clés de partage illisibles (coffre réinitialisé ?). Quittez vos coffres partagés puis reconnectez-vous.': 'Unreadable sharing keys (was the vault reset?). Leave your shared vaults, then sign in again.',
+  'Borne aléatoire invalide': 'Invalid random bound',
+  'Fichier KDBX tronqué ou corrompu': 'Truncated or corrupted KDBX file',
+  'Dictionnaire de paramètres KDF non supporté': 'Unsupported KDF parameter dictionary',
+  'Signature KDBX invalide': 'Invalid KDBX signature',
+  'En-tête KDBX incomplet': 'Incomplete KDBX header',
+  'Paramètres AES-KDF manquants': 'Missing AES-KDF parameters',
+  'Paramètres KDF manquants': 'Missing KDF parameters',
+  'Fonction de dérivation de clé KeePass non supportée': 'Unsupported KeePass key derivation function',
+  'Algorithme de chiffrement non supporté (Twofish ?) — utilisez AES-256 ou ChaCha20': 'Unsupported cipher (Twofish?) — use AES-256 or ChaCha20',
+  'Bloc de données KDBX corrompu': 'Corrupted KDBX data block',
+  'En-tête KDBX corrompu': 'Corrupted KDBX header',
+  'Document KeePass XML invalide': 'Invalid KeePass XML document',
+  'Un mot de passe est requis pour l’export KeePass': 'A password is required for the KeePass export',
+  'Mot de passe principal incorrect': 'Incorrect master password',
+  'Clé de secours invalide': 'Invalid recovery key',
+  'Service Have I Been Pwned injoignable (hors ligne ou bloqué par le réseau)': 'Have I Been Pwned unreachable (offline or blocked by the network)',
+  'Export Passky chiffré : dans Passky, exportez en JSON non chiffré (Paramètres › Exporter)': 'Encrypted Passky export: in Passky, export as unencrypted JSON (Settings › Export)'
+};
+
+const PATTERNS: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
+  [/^Le mot de passe d'export doit contenir au moins (\d+) caractères$/, m => `The export password must be at least ${m[1]} characters`],
+  [/^Le mot de passe principal doit contenir au moins (\d+) caractères$/, m => `The master password must be at least ${m[1]} characters`],
+  [/^Le tag « (.+) » existe déjà$/, m => `The tag "${m[1]}" already exists`],
+  [/^Limite de (\d+) types de coffres atteinte$/, m => `Limit of ${m[1]} vault types reached`],
+  [/^XML incomplet : <(.+)> non fermée$/, m => `Incomplete XML: <${m[1]}> not closed`],
+  [/^XML malformé : balise fermante inattendue <\/(.+)>$/, m => `Malformed XML: unexpected closing tag </${m[1]}>`],
+  [/^Have I Been Pwned a répondu une erreur HTTP (\d+)$/, m => `Have I Been Pwned returned HTTP error ${m[1]}`],
+  [/^Caractère « (.+) » inattendu dans la clé de secours$/, m => `Unexpected character "${m[1]}" in the recovery key`],
+  [/^Flux de protection interne (.+) non supporté$/, m => `Unsupported inner protection stream ${m[1]}`],
+  [/^Version KDBX (.+) non supportée$/, m => `Unsupported KDBX version ${m[1]}`],
+  [/^Erreur serveur \((\d+)\)$/, m => `Server error (${m[1]})`],
+  [/^Enregistrement impossible : (.*)$/s, m => `Could not save: ${translateError(m[1], 'en')}`]
+];
+
+export function translateError(message: string, locale: string): string {
+  if (locale === 'fr') return message;
+  if (EXACT[message]) return EXACT[message];
+  for (const [pattern, build] of PATTERNS) {
+    const match = message.match(pattern);
+    if (match) return build(match);
+  }
+  return message;
+}

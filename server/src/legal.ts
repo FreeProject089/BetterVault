@@ -31,13 +31,17 @@ export const DEFAULT_LEGAL: LegalSettings = {
   effectiveDate: ''
 };
 
+export type LegalLocale = 'fr' | 'en';
+
 export const LEGAL_DOCUMENTS = [
-  { slug: 'terms', title: 'Conditions d’utilisation' },
-  { slug: 'privacy', title: 'Politique de confidentialité' },
-  { slug: 'dpa', title: 'Accord de traitement des données (DPA)' },
-  { slug: 'security', title: 'Mesures de sécurité' },
-  { slug: 'subprocessors', title: 'Sous-traitants' }
+  { slug: 'terms', title: 'Conditions d’utilisation', titleEn: 'Terms of use' },
+  { slug: 'privacy', title: 'Politique de confidentialité', titleEn: 'Privacy policy' },
+  { slug: 'dpa', title: 'Accord de traitement des données (DPA)', titleEn: 'Data processing agreement (DPA)' },
+  { slug: 'security', title: 'Mesures de sécurité', titleEn: 'Security measures' },
+  { slug: 'subprocessors', title: 'Sous-traitants', titleEn: 'Subprocessors' }
 ] as const;
+
+export const legalTitle = (doc: (typeof LEGAL_DOCUMENTS)[number], locale: LegalLocale) => (locale === 'en' ? doc.titleEn : doc.title);
 
 export function legalFromEnv(env: Record<string, string | undefined>): LegalSettings {
   return {
@@ -140,20 +144,25 @@ export function markdownToHtml(markdown: string): string {
 }
 
 /** Remplace {{variable}} et garde ou retire les blocs {{#si condition}} … {{/si}} */
-export function fillTemplate(template: string, values: Record<string, string>, flags: Record<string, boolean>): string {
+export function fillTemplate(template: string, values: Record<string, string>, flags: Record<string, boolean>, locale: LegalLocale = 'fr'): string {
   let text = template;
   for (;;) {
     const next = text.replace(/\{\{#si (\w+)\}\}([\s\S]*?)\{\{\/si\}\}/g, (_, flag: string, content: string) => (flags[flag] ? content : ''));
     if (next === text) break;
     text = next;
   }
-  return text.replace(/\{\{(\w+)\}\}/g, (_, key: string) => values[key] || `[${key} à compléter]`);
+  return text.replace(/\{\{(\w+)\}\}/g, (_, key: string) => values[key] || (locale === 'en' ? `[${key} to be completed]` : `[${key} à compléter]`));
 }
 
-export function renderLegalPage(root: string, slug: string, context: LegalContext): string | null {
+export function renderLegalPage(root: string, slug: string, context: LegalContext, requested: LegalLocale = 'fr'): string | null {
   const doc = LEGAL_DOCUMENTS.find(d => d.slug === slug);
-  const templatePath = join(root, `${slug}.fr.md`);
-  if (!doc || !existsSync(templatePath)) return null;
+  if (!doc) return null;
+  // Modèle dans la langue demandée, sinon en français
+  const localized = join(root, `${slug}.${requested}.md`);
+  const locale: LegalLocale = existsSync(localized) ? requested : 'fr';
+  const templatePath = join(root, `${slug}.${locale}.md`);
+  if (!existsSync(templatePath)) return null;
+  const query = locale === 'en' ? '?lang=en' : '';
   const { legal } = context;
   const values: Record<string, string> = {
     ...legal,
@@ -168,14 +177,24 @@ export function renderLegalPage(root: string, slug: string, context: LegalContex
     geo: context.geoEnabled,
     dpo: !!legal.dpoContact
   };
-  const body = markdownToHtml(fillTemplate(readFileSync(templatePath, 'utf8'), values, flags));
-  const nav = LEGAL_DOCUMENTS.map(d => `<a href="/legal/${d.slug}"${d.slug === slug ? ' aria-current="page"' : ''}>${escapeHtml(d.title)}</a>`).join('');
+  // Les liens entre documents gardent la langue affichée
+  const body = markdownToHtml(fillTemplate(readFileSync(templatePath, 'utf8'), values, flags, locale))
+    .replace(/href="\/legal\/(\w+)"/g, `href="/legal/$1?lang=${locale}"`);
+  const nav = LEGAL_DOCUMENTS.map(d => `<a href="/legal/${d.slug}${query}"${d.slug === slug ? ' aria-current="page"' : ''}>${escapeHtml(legalTitle(d, locale))}</a>`).join('');
+  const switcher = locale === 'en'
+    ? `<a class="lang" href="/legal/${slug}?lang=fr" hreflang="fr" lang="fr">Français</a>`
+    : `<a class="lang" href="/legal/${slug}?lang=en" hreflang="en" lang="en">English</a>`;
+  const notice = locale === 'en'
+    ? '<p class="meta"><strong>Template not completed:</strong> the operator of this server must fill in their details on the administration page.</p>'
+    : '<p class="meta"><strong>Modèle non complété :</strong> l’hébergeur de ce serveur doit renseigner ses informations dans la page d’administration.</p>';
   return `<!DOCTYPE html>
-<html lang="fr">
+<html lang="${locale}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${escapeHtml(doc.title)} · ${escapeHtml(legal.operatorName || 'BetterVault')}</title>
+<title>${escapeHtml(legalTitle(doc, locale))} · ${escapeHtml(legal.operatorName || 'BetterVault')}</title>
+<link rel="alternate" hreflang="fr" href="/legal/${slug}?lang=fr">
+<link rel="alternate" hreflang="en" href="/legal/${slug}?lang=en">
 <style>
 :root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#7773e8;color-scheme:dark}
 @media (prefers-color-scheme:light){:root{--bg:#f6f8fa;--card:#fff;--border:#d0d7de;--text:#1f2328;--muted:#656d76;--accent:#5754c7;color-scheme:light}}
@@ -186,12 +205,14 @@ main{max-width:860px;margin:0 auto;padding:24px 16px 64px}h1{font-size:28px;line
 a{color:var(--accent)}code{font-size:13px;padding:1px 5px;border:1px solid var(--border);border-radius:5px}
 .table{overflow-x:auto}table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px}th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}th{background:var(--card)}
 hr{border:none;border-top:1px solid var(--border);margin:32px 0}.meta{color:var(--muted);font-size:13px}
+.lang{font-size:13px;padding:3px 10px;border:1px solid var(--border);border-radius:999px;text-decoration:none}
+@media (max-width:560px){header div{padding:12px}h1{font-size:23px}main{padding:18px 12px 48px}}
 </style>
 </head>
 <body>
-<header><div><strong>${escapeHtml(legal.operatorName || 'BetterVault')}</strong><nav>${nav}</nav></div></header>
+<header><div><strong>${escapeHtml(legal.operatorName || 'BetterVault')}</strong>${switcher}<nav>${nav}</nav></div></header>
 <main>
-${legalConfigured(legal) ? '' : '<p class="meta"><strong>Modèle non complété :</strong> l’hébergeur de ce serveur doit renseigner ses informations dans la page d’administration.</p>'}
+${legalConfigured(legal) ? '' : notice}
 ${body}
 </main>
 </body>

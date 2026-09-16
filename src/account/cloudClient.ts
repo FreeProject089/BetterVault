@@ -151,6 +151,12 @@ export const isTotpRequired = (err: unknown) => err instanceof CloudError && err
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
+/** Langue des messages renvoyés par le serveur : celle choisie dans l'application */
+let apiLocale: () => string = () => globalThis.navigator?.language ?? 'fr';
+export function setApiLocale(provider: () => string): void {
+  apiLocale = provider;
+}
+
 export function normalizeServerUrl(input: string): string {
   let url: URL;
   try {
@@ -183,6 +189,7 @@ export class CloudClient {
       response = await fetch(`${this.baseUrl}${path}`, {
         method,
         headers: {
+          'Accept-Language': apiLocale(),
           ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
           ...(this.token ? { Authorization: `Bearer ${this.token}` } : {})
         },
@@ -407,6 +414,7 @@ export class CloudClient {
       response = await fetch(`${this.baseUrl}${path}`, {
         method,
         headers: {
+          'Accept-Language': apiLocale(),
           ...(body ? { 'Content-Type': 'application/octet-stream' } : {}),
           ...(this.token ? { Authorization: `Bearer ${this.token}` } : {})
         },

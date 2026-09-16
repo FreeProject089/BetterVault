@@ -155,6 +155,16 @@ describe('Serveur : sessions, offres, documents légaux, tableau de bord', () =>
       expect(html).not.toMatch(/\{\{/);
     }
     expect((await fetch(`${ctx.url}/legal/inconnu`)).status).toBe(404);
+
+    // Version anglaise : ?lang=en ou navigateur en anglais
+    const english = await (await fetch(`${ctx.url}/legal/dpa?lang=en`)).text();
+    expect(english).toContain('<html lang="en">');
+    expect(english).toContain('Data processing agreement');
+    expect(english).toContain('href="/legal/security?lang=en"');
+    const byHeader = await (await fetch(`${ctx.url}/legal/terms`, { headers: { 'Accept-Language': 'en-GB' } })).text();
+    expect(byHeader).toContain('Terms of use');
+    const listEn = await (await fetch(`${ctx.url}/api/v1/legal`, { headers: { 'Accept-Language': 'en' } })).json();
+    expect(listEn.documents[0]).toMatchObject({ title: 'Terms of use', url: '/legal/terms?lang=en' });
     expect(fillTemplate('{{a}}{{#si b}} oui{{/si}}{{#si c}} non{{/si}}', { a: '<x>' }, { b: true, c: false })).toBe('<x> oui');
   });
 
