@@ -96,6 +96,7 @@ const PATTERNS: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
   [/^Le tag « (.+) » existe déjà$/, m => `The tag "${m[1]}" already exists`],
   [/^Limite de (\d+) types de coffres atteinte$/, m => `Limit of ${m[1]} vault types reached`],
   [/^Les dossiers ne peuvent pas s'imbriquer plus de (\d+) fois$/, m => `Folders cannot nest more than ${m[1]} levels deep`],
+  [/^Les fichiers gardés dans ce coffre dépassent (\d+) Mo$/, m => `Files kept inside this vault exceed ${m[1]} MB`],
   [/^XML incomplet : <(.+)> non fermée$/, m => `Incomplete XML: <${m[1]}> not closed`],
   [/^XML malformé : balise fermante inattendue <\/(.+)>$/, m => `Malformed XML: unexpected closing tag </${m[1]}>`],
   [/^Have I Been Pwned a répondu une erreur HTTP (\d+)$/, m => `Have I Been Pwned returned HTTP error ${m[1]}`],
