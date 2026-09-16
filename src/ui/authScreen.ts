@@ -12,6 +12,7 @@ import { renderSVG } from 'uqr';
 import { secretGridHtml } from './secretDisplay';
 import { translateError } from '../i18n/errorMessages';
 import { tabIcon } from './tabIcons';
+import { mountStepper, type StepDef } from './stepper';
 
 const isTauriRuntime = typeof (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined';
 
@@ -160,45 +161,63 @@ export function mountAuthScreen(
     create: () => `
       ${brand()}
       ${tabs('create')}
-      <form class="auth-form" data-form="create" novalidate>
-        ${emailField()}
-        ${passwordField('auth-password', tr('Mot de passe principal', 'Master password'), 'new-password')}
-        ${strengthMeter()}
-        ${passwordField('auth-password-confirm', tr('Confirmer le mot de passe', 'Confirm password'), 'new-password')}
-        <fieldset class="auth-choice">
-          <legend class="form-label">${tr('Stockage', 'Storage')}</legend>
-          <label>
-            <input type="radio" name="auth-mode" value="local" checked>
-            <span class="auth-choice-title">${tr('Cet appareil', 'This device')}</span>
-            <span class="auth-choice-sub">${tr('Rien n’est envoyé', 'Nothing is uploaded')}</span>
+      <div data-stepper-header></div>
+      <form class="auth-form" data-form="create" data-stepper-body novalidate>
+        <section data-step="storage" hidden>
+          <fieldset class="auth-choice">
+            <legend class="form-label">${tr('Où garder ce coffre ?', 'Where should this vault live?')}</legend>
+            <label>
+              <input type="radio" name="auth-mode" value="local" checked>
+              <span class="auth-choice-title">${tr('Cet appareil', 'This device')}</span>
+              <span class="auth-choice-sub">${tr('Rien n’est envoyé', 'Nothing is uploaded')}</span>
+            </label>
+            <label>
+              <input type="radio" name="auth-mode" value="cloud">
+              <span class="auth-choice-title">${tr('Synchronisé', 'Synced')}</span>
+              <span class="auth-choice-sub">${tr('Chiffré sur un serveur', 'Encrypted on a server')}</span>
+            </label>
+          </fieldset>
+          ${serverField(true)}
+          <label class="check-row" data-terms hidden>
+            <input type="checkbox" data-accept-terms>
+            <span>${tr('J’accepte les', 'I accept the')} <a data-legal="terms" target="_blank" rel="noopener">${tr('conditions d’utilisation', 'terms of use')}</a> ${tr('et la', 'and the')} <a data-legal="privacy" target="_blank" rel="noopener">${tr('politique de confidentialité', 'privacy policy')}</a> ${tr('de ce serveur', 'of this server')}</span>
           </label>
-          <label>
-            <input type="radio" name="auth-mode" value="cloud">
-            <span class="auth-choice-title">${tr('Synchronisé', 'Synced')}</span>
-            <span class="auth-choice-sub">${tr('Chiffré sur un serveur', 'Encrypted on a server')}</span>
-          </label>
-        </fieldset>
-        ${serverField(true)}
-        <label class="check-row" data-terms hidden>
-          <input type="checkbox" data-accept-terms>
-          <span>${tr('J’accepte les', 'I accept the')} <a data-legal="terms" target="_blank" rel="noopener">${tr('conditions d’utilisation', 'terms of use')}</a> ${tr('et la', 'and the')} <a data-legal="privacy" target="_blank" rel="noopener">${tr('politique de confidentialité', 'privacy policy')}</a> ${tr('de ce serveur', 'of this server')}</span>
-        </label>
-        <p class="auth-warning">${tr('Ce mot de passe chiffre le coffre et n’est jamais envoyé. Une clé de secours vous sera donnée pour pouvoir le changer si vous l’oubliez.', 'This password encrypts the vault and is never sent. You will get a recovery key to reset it if you forget it.')}</p>
+        </section>
+
+        <section data-step="account" hidden>
+          ${emailField()}
+          <p class="auth-hint">${tr('L’adresse sert à retrouver le compte : elle n’est pas vérifiée sur un coffre gardé sur cet appareil.', 'The address identifies the account: it is not verified for a vault kept on this device.')}</p>
+        </section>
+
+        <section data-step="password" hidden>
+          ${passwordField('auth-password', tr('Mot de passe principal', 'Master password'), 'new-password')}
+          ${strengthMeter()}
+          ${passwordField('auth-password-confirm', tr('Confirmer le mot de passe', 'Confirm password'), 'new-password')}
+          <p class="auth-warning">${tr('Ce mot de passe chiffre le coffre et n’est jamais envoyé. Une clé de secours vous sera donnée pour pouvoir le changer si vous l’oubliez.', 'This password encrypts the vault and is never sent. You will get a recovery key to reset it if you forget it.')}</p>
+        </section>
+
         <div class="auth-error" role="alert" hidden></div>
-        <button type="submit" class="btn-primary btn-accent auth-submit">${tr('Créer le coffre', 'Create vault')}</button>
-      </form>`,
+        <button type="submit" class="auth-hidden-submit" tabindex="-1" aria-hidden="true"></button>
+      </form>
+      <div data-stepper-footer></div>`,
 
     signin: () => `
       ${brand()}
       ${tabs('signin')}
-      <form class="auth-form" data-form="signin" novalidate>
-        ${serverField(false)}
-        ${emailField()}
-        ${passwordField('auth-password', tr('Mot de passe principal', 'Master password'), 'current-password')}
-        ${otpField('auth-totp', tr('Code de l’application d’authentification', 'Authenticator app code'), '', true)}
+      <div data-stepper-header></div>
+      <form class="auth-form" data-form="signin" data-stepper-body novalidate>
+        <section data-step="server" hidden>
+          ${serverField(false)}
+        </section>
+        <section data-step="account" hidden>
+          ${emailField()}
+          ${passwordField('auth-password', tr('Mot de passe principal', 'Master password'), 'current-password')}
+          ${otpField('auth-totp', tr('Code de l’application d’authentification', 'Authenticator app code'), '', true)}
+        </section>
         <div class="auth-error" role="alert" hidden></div>
-        <button type="submit" class="btn-primary btn-accent auth-submit">${tr('Se connecter', 'Sign in')}</button>
+        <button type="submit" class="auth-hidden-submit" tabindex="-1" aria-hidden="true"></button>
       </form>
+      <div data-stepper-footer></div>
       <button type="button" class="auth-link" data-screen="recover">${tr('Mot de passe oublié ?', 'Forgot password?')}</button>`,
 
     recover: () => {
@@ -433,6 +452,98 @@ export function mountAuthScreen(
         if (field) field.hidden = radio.value !== 'cloud';
       });
     });
+
+    /* ── Parcours en étapes de la création de compte et de la connexion ── */
+    const stepperBody = card.querySelector<HTMLElement>('[data-stepper-body]');
+    const stepperHeader = card.querySelector<HTMLElement>('[data-stepper-header]');
+    const stepperFooter = card.querySelector<HTMLElement>('[data-stepper-footer]');
+
+    if (stepperBody && stepperHeader && stepperFooter) {
+      const form = stepperBody as HTMLFormElement;
+      const errorEl = card.querySelector<HTMLElement>('.auth-error')!;
+      const field = (id: string) => card.querySelector<HTMLInputElement>(`#${id}`);
+      const showError = (message: string) => {
+        errorEl.textContent = message;
+        errorEl.hidden = false;
+      };
+
+      const checkServer = (): string | undefined => {
+        const server = field('auth-server');
+        if (!server || server.closest('[data-server-field]')?.hasAttribute('hidden')) return undefined;
+        if (server.value.trim()) return undefined;
+        server.focus();
+        return tr('Adresse du serveur requise', 'Server address required');
+      };
+
+      const checkTerms = (): string | undefined => {
+        const terms = card.querySelector<HTMLInputElement>('[data-accept-terms]');
+        const row = card.querySelector<HTMLElement>('[data-terms]');
+        if (!terms || row?.hidden || terms.checked) return undefined;
+        terms.focus();
+        return tr('Acceptez les conditions de ce serveur pour continuer', 'Accept this server\u2019s terms to continue');
+      };
+
+      const checkEmail = (): string | undefined => {
+        const email = field('auth-email');
+        if (!email) return undefined;
+        if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim())) return undefined;
+        email.focus();
+        return tr('Adresse email invalide', 'Invalid email address');
+      };
+
+      const checkNewPassword = (): string | undefined => {
+        const password = field('auth-password');
+        const confirm = field('auth-password-confirm');
+        if (!password) return undefined;
+        if (password.value.length < MIN_MASTER_PASSWORD_LENGTH) {
+          password.focus();
+          return tr(`Le mot de passe principal doit contenir au moins ${MIN_MASTER_PASSWORD_LENGTH} caractères`,
+                    `The master password must be at least ${MIN_MASTER_PASSWORD_LENGTH} characters`);
+        }
+        if (confirm && confirm.value !== password.value) {
+          confirm.focus();
+          return tr('Les deux mots de passe ne correspondent pas', 'The two passwords do not match');
+        }
+        return undefined;
+      };
+
+      const checkSigninFields = (): string | undefined => {
+        const emailProblem = checkEmail();
+        if (emailProblem) return emailProblem;
+        const password = field('auth-password');
+        if (password && !password.value) {
+          password.focus();
+          return tr('Mot de passe principal requis', 'Master password required');
+        }
+        return undefined;
+      };
+
+      const isCreate = form.dataset.form === 'create';
+      const steps: StepDef[] = isCreate
+        ? [
+            { id: 'storage', label: tr('Stockage', 'Storage'), validate: () => checkServer() ?? checkTerms() },
+            { id: 'account', label: tr('Compte', 'Account'), validate: checkEmail },
+            { id: 'password', label: tr('Mot de passe', 'Password'), validate: checkNewPassword }
+          ]
+        : [
+            { id: 'server', label: tr('Serveur', 'Server'), validate: checkServer },
+            { id: 'account', label: tr('Compte', 'Account'), validate: checkSigninFields }
+          ];
+
+      mountStepper({
+        body: stepperBody,
+        header: stepperHeader,
+        footer: stepperFooter,
+        steps,
+        tr,
+        finishLabel: isCreate ? tr('Créer le coffre', 'Create vault') : tr('Se connecter', 'Sign in'),
+        cancelLabel: isCreate ? tr('Se connecter', 'Sign in') : tr('Créer un compte', 'Create account'),
+        onCancel: () => render(isCreate ? 'signin' : 'create'),
+        onError: showError,
+        onStepChange: () => { errorEl.hidden = true; },
+        onFinish: () => form.requestSubmit()
+      });
+    }
 
     const passwordInput = card.querySelector<HTMLInputElement>('#auth-password');
     const strength = card.querySelector<HTMLElement>('[data-strength]');
