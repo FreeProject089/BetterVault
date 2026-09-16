@@ -45,19 +45,43 @@ describe('Vault Cryptography & Entropy Engine', () => {
   });
 
   it('should generate diceware passphrases with specified word counts and separators', () => {
+    // La liste EFF contient quatre mots à trait d'union (« t-shirt », « yo-yo »…).
+    // Découper sur « - » comptait donc parfois un mot de trop : on compte avec un
+    // séparateur qui ne peut pas apparaître dans un mot, et on vérifie le trait
+    // d'union séparément.
     const phrase = generatePassphrase({
       wordCount: 5,
-      separator: '-',
+      separator: ' ',
       capitalize: true,
       includeNumber: false
     });
 
-    const parts = phrase.split('-');
+    const parts = phrase.split(' ');
     expect(parts.length).toBe(5);
     parts.forEach(word => {
       expect(word.length).toBeGreaterThan(0);
       expect(word[0]).toBe(word[0].toUpperCase());
     });
+
+    const tirets = generatePassphrase({ wordCount: 4, separator: '-', capitalize: false, includeNumber: false });
+    expect(tirets.split('-').length).toBeGreaterThanOrEqual(4);
+    expect(tirets.startsWith('-')).toBe(false);
+    expect(tirets.endsWith('-')).toBe(false);
+  });
+
+  it('reste correct même quand un mot de la liste contient le séparateur', () => {
+    // Quatre mots sur 7 776 portent un trait d'union : environ une génération de
+    // cinq mots sur 380 en contient un. Tirer large rend le cas quasi certain.
+    const motsATiret = PASSPHRASE_WORDLIST.filter(w => w.includes('-'));
+    expect(motsATiret.length).toBeGreaterThan(0);
+
+    for (let i = 0; i < 400; i++) {
+      const phrase = generatePassphrase({ wordCount: 5, separator: '-', capitalize: true, includeNumber: false });
+      // Aucun séparateur en double ni en bout : le mot à trait d'union reste entier
+      expect(phrase).not.toContain('--');
+      expect(phrase.startsWith('-')).toBe(false);
+      expect(phrase.endsWith('-')).toBe(false);
+    }
   });
 
   it('uses the full EFF large wordlist (7 776 words) for passphrases', () => {

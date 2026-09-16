@@ -1856,8 +1856,6 @@
   gap: 6px;
   margin: 0 -16px -4px;
   padding: 0 16px 2px;
-  overflow-x: auto;
-  scrollbar-width: none;
 }
 
 .filter-bar::-webkit-scrollbar { display: none; }
@@ -1902,7 +1900,7 @@
 .filter-sort {
   flex-shrink: 0;
   width: auto;
-  margin-left: auto;
+  max-width: 45%;
   padding: 4px 26px 4px 8px;
   font-size: 12px;
 }
@@ -3046,16 +3044,38 @@ input[type="datetime-local"].form-input {
     color: var(--accent);
   }
 
+  /*
+   * Le bouton d'ajout garde la forme des autres onglets (icône puis libellé) mais
+   * son icône vit dans un disque qui remonte au-dessus de la barre. Le liseré
+   * reprend la couleur du fond : le disque paraît découpé dans la barre.
+   */
   .mobile-tab-add {
     justify-self: center;
-    width: 48px;
-    height: 48px;
-    min-height: 0;
+    gap: 2px;
+    color: var(--accent);
+  }
+
+  .mobile-add-disc {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    margin-top: -20px;
     color: #fff;
     background-color: var(--accent);
+    border: 3px solid var(--bg-secondary);
     border-radius: 50%;
-    box-shadow: 0 6px 18px rgba(var(--accent-rgb), 0.45);
+    box-shadow: 0 6px 16px rgba(var(--accent-rgb), 0.4);
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
   }
+
+  .mobile-tab-add:active .mobile-add-disc {
+    transform: scale(0.94);
+    box-shadow: 0 3px 10px rgba(var(--accent-rgb), 0.35);
+  }
+
+  /* La barre laisse dépasser le disque */
+  .mobile-tabbar { overflow: visible; }
 
   .items-scroll {
     padding-bottom: calc(76px + env(safe-area-inset-bottom));
@@ -3654,3 +3674,82 @@ body.dragging-item .folder-item { outline: 1px dashed var(--border-subtle); outl
 
 body.dragging-item .folder-breadcrumb button { outline: 1px dashed var(--border-subtle); }
 .folder-breadcrumb button.folder-drop { background-color: color-mix(in srgb, var(--accent) 20%, transparent); outline: 1px solid var(--accent); color: var(--text-primary); }
+
+/* ── La barre de filtres défile, elle n'élargit pas sa colonne ──────────── */
+.list-pane, .list-header, .list-controls { min-width: 0; }
+
+.filter-bar {
+  /* Sans cette borne, le contenu impose sa largeur au lieu de défiler */
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Le tri reste atteignable : il ne part pas au bout du défilement horizontal */
+.filter-bar-scroll {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  scroll-padding-inline: 16px;
+}
+
+.filter-bar-scroll::-webkit-scrollbar { display: none; }
+
+/* La bande de pastilles prend la place qui reste ; le tri garde une largeur sobre */
+.filter-bar-scroll { flex: 1 1 auto; }
+
+@media (max-width: 560px) {
+  /* Sur un téléphone, le tri s'efface au profit des pastilles : son libellé se coupe tout seul */
+  .filter-sort { max-width: 132px; }
+}
+
+/* Le choix « élément ou tâche » se pose en bas de l'écran sur un téléphone */
+@media (max-width: 560px) {
+  /* « .modal-box.modal-sm » fixe une largeur : il faut au moins autant de poids pour la défaire */
+  .modal-box.create-sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    box-sizing: border-box;
+    width: auto;
+    max-width: none;
+    margin: 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .modal-box.create-sheet .type-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Choix de priorité d'une tâche ─────────────────────────────────────── */
+.priority-picker {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.priority-option {
+  padding: 8px 6px;
+  min-height: 38px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-secondary);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+.priority-option:hover { color: var(--text-primary); border-color: var(--text-muted); }
+
+.priority-option.active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  background-color: rgba(var(--accent-rgb), 0.12);
+  font-weight: 600;
+}
