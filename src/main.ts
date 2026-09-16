@@ -351,8 +351,11 @@ class AppController {
   }
 
   /** Icône choisie pour l'identifiant, sinon logo détecté depuis le site */
-  private credentialIcon(cred: { icon?: ItemIcon; website: string; title: string }, size = 20): string {
+  private credentialIcon(cred: { icon?: ItemIcon; website: string; title: string; type?: ItemType }, size = 20): string {
     if (cred.icon) return renderItemIcon(cred.icon, size);
+    // Le logo du service n'a de sens que pour un identifiant ; les autres types portent l'icône de leur type
+    const type = itemTypeOf(cred.type);
+    if (type !== 'login') return tabIcon(ITEM_TYPE_INFO[type].icon, size);
     return getServiceIconSvg(cred.website || cred.title).replace('width="20" height="20"', `width="${size}" height="${size}"`);
   }
 
@@ -2094,7 +2097,7 @@ class AppController {
 
     const box = this.openModal(`
       <div class="modal-header">
-        <div class="modal-title">${isEdit ? tr('Modifier l’identifiant', 'Edit credential') : tr('Nouvel identifiant', 'New credential')}</div>
+        <div class="modal-title">${isEdit ? tr('Modifier l’élément', 'Edit item') : tr('Nouvel élément', 'New item')}</div>
         <button class="modal-close" type="button">${GEN_ICONS.close}</button>
       </div>
       <div class="modal-body">
@@ -2325,6 +2328,8 @@ class AppController {
 
     /* ── Type de l'élément : il décide des champs affichés et des étapes ── */
     let itemType: ItemType = itemTypeOf(existing?.type);
+    // Tant que rien n'est choisi, la modale reste neutre : « identifiant » n'est qu'une présélection
+    let typeChosen = isEdit;
 
     const typeGrid = $<HTMLElement>('#cred-type-grid');
     const renderTypeGrid = () => {
@@ -2351,7 +2356,7 @@ class AppController {
     const iconButton = $<HTMLButtonElement>('#cred-icon-btn');
     const iconPanel = $<HTMLElement>('#cred-icon-panel');
     const updateIconPreview = () => {
-      $<HTMLElement>('#cred-icon-preview').innerHTML = this.credentialIcon({ icon: chosenIcon, website: websiteInput.value, title: titleInput.value }, 28);
+      $<HTMLElement>('#cred-icon-preview').innerHTML = this.credentialIcon({ icon: chosenIcon, website: websiteInput.value, title: titleInput.value, type: itemType }, 28);
     };
     const closeIconPanel = () => {
       iconPanel.hidden = true;
@@ -2680,6 +2685,16 @@ class AppController {
         : 'GitHub, Netflix, Banque…';
 
       if (itemType === 'card') { paintCardNumber(); updateCardHints(); }
+
+      // Le titre ne nomme le type qu'une fois celui-ci choisi, pas sur l'écran de choix
+      if (typeChosen) {
+        const info = ITEM_TYPE_INFO[itemType];
+        const typeName = tr(info.fr, info.en);
+        $<HTMLElement>('.modal-title').textContent = isEdit
+          ? tr(`Modifier : ${typeName}`, `Edit ${typeName}`)
+          : tr(`Nouveau : ${typeName}`, `New ${typeName}`);
+      }
+
       updateIconPreview();
     };
 
@@ -2687,6 +2702,7 @@ class AppController {
       const choice = (event.target as HTMLElement).closest<HTMLElement>('[data-type]')?.dataset.type;
       if (!choice) return;
       itemType = itemTypeOf(choice);
+      typeChosen = true;
       renderTypeGrid();
       applyType();
       stepper.setSteps(stepsForType());

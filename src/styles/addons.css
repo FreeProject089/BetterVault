@@ -3424,15 +3424,17 @@ button.shortcut-key:hover { border-color: var(--accent); }
 .stepper-track {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
+  row-gap: 6px;
   margin-bottom: 18px;
 }
 
 .stepper-step {
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: 7px;
-  min-width: 0;
   padding: 4px 2px;
   color: var(--text-muted);
   font-size: 12px;
@@ -3464,7 +3466,7 @@ button.shortcut-key:hover { border-color: var(--accent); }
 .stepper-step.active .stepper-dot { border-color: var(--accent); background-color: var(--accent); color: #fff; }
 .stepper-step.done .stepper-dot { border-color: var(--accent); color: var(--accent); }
 
-.stepper-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stepper-label { white-space: nowrap; }
 
 /* Sur un écran étroit, seule l'étape en cours garde son libellé */
 @media (max-width: 560px) {
@@ -3563,3 +3565,6 @@ button.shortcut-key:hover { border-color: var(--accent); }
 }
 
 .field-hint-warn { color: var(--accent-red, #f85149); }
+
+/* Icone de type dans une ligne de liste ou en tete de fiche : elle occupe la place du logo */
+.record-icon .tab-icon, .detail-main-icon .tab-icon { opacity: 1; color: var(--text-secondary); }
