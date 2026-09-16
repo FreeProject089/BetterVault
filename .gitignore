@@ -35,9 +35,10 @@ site
 # Tauri build artifacts
 src-tauri/target
 
-# Android build artifacts
+# Android build artifacts (le dossier build/ à la racine contient l'outillage Vite et reste suivi)
 .gradle
-build/
-**/build/
-*.lock
+src-tauri/**/build/
+src-tauri/gen/**/*.lock
+src-tauri/target/
+build/splice.mjs
 
