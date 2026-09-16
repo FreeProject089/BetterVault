@@ -1,3 +1,4 @@
+import { renderItemIcon } from '../icons/iconLibrary';
 import type { TagDef } from '../types/vault';
 import { normalizeTagName } from '../store/vaultStore';
 
@@ -11,7 +12,7 @@ const escapeHtml = (value: string) =>
 const safeColor = (color?: string) => (color && /^#[0-9a-f]{6}$/i.test(color) ? color : '#8b949e');
 
 /** Champ de saisie de tags : pastilles, suggestions des tags existants, Entrée ou virgule pour ajouter */
-export function mountTagInput(host: HTMLElement, options: { initial: string[]; suggestions: TagDef[]; placeholder: string }): TagInputHandle {
+export function mountTagInput(host: HTMLElement, options: { initial: string[]; suggestions: TagDef[]; placeholder: string; removeLabel: (tag: string) => string }): TagInputHandle {
   const tags: string[] = [];
   const listId = `tag-suggestions-${Math.random().toString(36).slice(2, 9)}`;
 
@@ -26,11 +27,15 @@ export function mountTagInput(host: HTMLElement, options: { initial: string[]; s
   const findDef = (name: string) => options.suggestions.find(t => t.name.toLowerCase() === name.toLowerCase());
 
   const render = () => {
-    chips.innerHTML = tags.map((tag, index) => `
-      <span class="tag-chip" style="--tag-color:${safeColor(findDef(tag)?.color)}">
+    chips.innerHTML = tags.map((tag, index) => {
+      const def = findDef(tag);
+      return `
+      <span class="tag-chip" style="--tag-color:${safeColor(def?.color)}">
+        ${def?.icon ? `<span class="tag-chip-icon">${renderItemIcon(def.icon, 12)}</span>` : ''}
         <span>${escapeHtml(tag)}</span>
-        <button type="button" class="tag-chip-remove" data-index="${index}" aria-label="Retirer ${escapeHtml(tag)}">×</button>
-      </span>`).join('');
+        <button type="button" class="tag-chip-remove" data-index="${index}" aria-label="${escapeHtml(options.removeLabel(tag))}">×</button>
+      </span>`;
+    }).join('');
   };
 
   const add = (raw: string) => {

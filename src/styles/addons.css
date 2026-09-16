@@ -3390,3 +3390,32 @@ button.shortcut-key:hover { border-color: var(--accent); }
   .profile-row { flex-direction: column; align-items: center; }
   .profile-controls { width: 100%; }
 }
+
+/* ── Icônes des onglets ─────────────────────────────────────────────────── */
+.tab-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.tab-btn .tab-icon { flex-shrink: 0; opacity: 0.75; }
+.tab-btn.active .tab-icon { opacity: 1; }
+
+/* Écran tactile : l'onglet reste attrapable au doigt */
+@media (pointer: coarse) {
+  .tab-btn { min-height: 38px; }
+}
+
+/* Onglets étroits (téléphone, panneau de l'extension) : l'icône seule, le texte reste lu par les lecteurs d'écran */
+@media (max-width: 460px) {
+  .account-tabs .tab-btn span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .account-tabs .tab-btn { padding-inline: 10px; }
+  .account-tabs .tab-btn.active span {
+    position: static;
+    width: auto;
+    height: auto;
+    clip: auto;
+  }
+}

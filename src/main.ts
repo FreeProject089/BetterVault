@@ -53,6 +53,7 @@ import { MANAGER_EXPORTS } from './import_export/managerExports';
 import { secretGridHtml } from './ui/secretDisplay';
 import { resizeAvatar } from './ui/avatarImage';
 import { translateError } from './i18n/errorMessages';
+import { tabIcon } from './ui/tabIcons';
 import { bindingFromEvent, checkBinding, DEFAULT_SHORTCUTS, formatBinding, isPlainKey, loadShortcuts, saveShortcuts, SHORTCUT_ORDER, type ShortcutAction, type ShortcutBindings } from './ui/shortcuts';
 import { CREDENTIAL_FILTERS, countByFilter, queryCredentials, reusedPasswords, type CredentialFilter, type CredentialSort } from './store/credentialFilters';
 import { checkCredential, remainingCapacity } from './account/limits';
@@ -2212,7 +2213,8 @@ class AppController {
     const tagInput = mountTagInput($<HTMLElement>('#field-tags'), {
       initial: existing?.tags ?? [],
       suggestions: vaultStore.getTags(),
-      placeholder: tr('Ajouter un tag…', 'Add a tag…')
+      placeholder: tr('Ajouter un tag…', 'Add a tag…'),
+      removeLabel: name => tr(`Retirer le tag ${name}`, `Remove tag ${name}`)
     });
 
     const expiresField = mountDateField($<HTMLElement>('#field-expires'), {
@@ -2582,7 +2584,8 @@ class AppController {
     const taskTagInput = mountTagInput(box.querySelector('#task-tags') as HTMLElement, {
       initial: existing?.tags ?? [],
       suggestions: vaultStore.getTags(),
-      placeholder: this.tr('Ajouter un tag…', 'Add a tag…')
+      placeholder: this.tr('Ajouter un tag…', 'Add a tag…'),
+      removeLabel: name => this.tr(`Retirer le tag ${name}`, `Remove tag ${name}`)
     });
     const trTask = (fr: string, en: string) => this.tr(fr, en);
     const dueField = mountDateField(box.querySelector('#task-due') as HTMLElement, {
@@ -2769,9 +2772,9 @@ class AppController {
           <span class="gen-strength-label" data-gen="strength"></span>
         </div>
         <div class="tab-btn-group" role="tablist">
-          <button type="button" class="tab-btn" role="tab" data-mode="password">${this.tr('Mot de passe', 'Password')}</button>
-          <button type="button" class="tab-btn" role="tab" data-mode="passphrase">${this.tr('Phrase secrète', 'Passphrase')}</button>
-          <button type="button" class="tab-btn" role="tab" data-mode="pin">${this.tr('Code PIN', 'PIN')}</button>
+          <button type="button" class="tab-btn" role="tab" data-mode="password">${tabIcon('password')}<span>${this.tr('Mot de passe', 'Password')}</span></button>
+          <button type="button" class="tab-btn" role="tab" data-mode="passphrase">${tabIcon('passphrase')}<span>${this.tr('Phrase secrète', 'Passphrase')}</span></button>
+          <button type="button" class="tab-btn" role="tab" data-mode="pin">${tabIcon('pin')}<span>${this.tr('Code PIN', 'PIN')}</span></button>
         </div>
 
         <div class="gen-section" data-section="password">
@@ -3216,8 +3219,8 @@ class AppController {
       </div>
       <div class="modal-body">
         <div class="tab-btn-group" role="tablist">
-          <button type="button" class="tab-btn active" role="tab" data-tab="import" aria-selected="true">${tr('Importer', 'Import')}</button>
-          <button type="button" class="tab-btn" role="tab" data-tab="export" aria-selected="false">${tr('Exporter', 'Export')}</button>
+          <button type="button" class="tab-btn active" role="tab" data-tab="import" aria-selected="true">${tabIcon('import')}<span>${tr('Importer', 'Import')}</span></button>
+          <button type="button" class="tab-btn" role="tab" data-tab="export" aria-selected="false">${tabIcon('export')}<span>${tr('Exporter', 'Export')}</span></button>
         </div>
 
         <div data-panel="import">
@@ -4044,11 +4047,11 @@ class AppController {
         </div>
 
         <div class="tab-btn-group account-tabs" role="tablist">
-          <button type="button" class="tab-btn active" role="tab" aria-selected="true" data-account-tab="general">${tr('Général', 'General')}</button>
-          <button type="button" class="tab-btn" role="tab" aria-selected="false" data-account-tab="security">${tr('Sécurité', 'Security')}</button>
-          ${isCloud ? `<button type="button" class="tab-btn" role="tab" aria-selected="false" data-account-tab="sessions">${tr('Sessions', 'Sessions')}</button>` : ''}
-          <button type="button" class="tab-btn" role="tab" aria-selected="false" data-account-tab="plan">${isCloud ? tr('Espace', 'Storage') : tr('Limites', 'Limits')}</button>
-          <button type="button" class="tab-btn" role="tab" aria-selected="false" data-account-tab="data">${tr('Données', 'Data')}</button>
+          <button type="button" class="tab-btn active" role="tab" aria-selected="true" data-account-tab="general">${tabIcon('general')}<span>${tr('Général', 'General')}</span></button>
+          <button type="button" class="tab-btn" role="tab" aria-selected="false" data-account-tab="security">${tabIcon('security')}<span>${tr('Sécurité', 'Security')}</span></button>
+          ${isCloud ? `<button type="button" class="tab-btn" role="tab" aria-selected="false" data-account-tab="sessions">${tabIcon('sessions')}<span>${tr('Sessions', 'Sessions')}</span></button>` : ''}
+          <button type="button" class="tab-btn" role="tab" aria-selected="false" data-account-tab="plan">${tabIcon('storage')}<span>${isCloud ? tr('Espace', 'Storage') : tr('Limites', 'Limits')}</span></button>
+          <button type="button" class="tab-btn" role="tab" aria-selected="false" data-account-tab="data">${tabIcon('data')}<span>${tr('Données', 'Data')}</span></button>
         </div>
 
         <div data-tab-panel="general">
@@ -4963,9 +4966,9 @@ class AppController {
       <div class="modal-body">
         ${shared ? `
           <div class="tab-btn-group" role="tablist">
-            <button type="button" class="tab-btn active" data-tab="general" role="tab">${tr('Général', 'General')}</button>
-            <button type="button" class="tab-btn" data-tab="members" role="tab">${tr('Membres', 'Members')}</button>
-            <button type="button" class="tab-btn" data-tab="roles" role="tab">${tr('Rôles', 'Roles')}</button>
+            <button type="button" class="tab-btn active" data-tab="general" role="tab">${tabIcon('general')}<span>${tr('Général', 'General')}</span></button>
+            <button type="button" class="tab-btn" data-tab="members" role="tab">${tabIcon('members')}<span>${tr('Membres', 'Members')}</span></button>
+            <button type="button" class="tab-btn" data-tab="roles" role="tab">${tabIcon('roles')}<span>${tr('Rôles', 'Roles')}</span></button>
           </div>` : ''}
 
         <div data-panel="general" style="display:flex;flex-direction:column;gap:16px;">
@@ -5904,6 +5907,17 @@ document.addEventListener('click', event => {
   event.preventDefault();
   void openExternal(url).catch(err => console.warn('Lien non ouvert', err));
 });
+
+// Popup de l'extension : ouvrir le sélecteur de fichiers ferme le popup (Chrome) et l'envoi est perdu.
+// Les fichiers se choisissent donc dans l'application ouverte en onglet.
+document.addEventListener('click', event => {
+  if (extensionSurface() !== 'popup') return;
+  const target = event.target as HTMLElement | null;
+  const input = target?.closest?.('input[type="file"]') ?? target?.closest?.('label')?.querySelector('input[type="file"]');
+  if (!input) return;
+  event.preventDefault();
+  openFullTab();
+}, true);
 
 // Le stockage de l'appareil est chargé avant l'interface : fichier natif sous Tauri, navigateur sinon
 setApiLocale(() => i18n.getLocale());
