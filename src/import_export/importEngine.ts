@@ -150,7 +150,9 @@ export function parseImportFile(fileContent: string, fileName = ''): ImportResul
     const exactTitleIdx = headerCols.findIndex(c => c === 'name' || c === 'title');
     const titleIdx = exactTitleIdx >= 0 ? exactTitleIdx : headerCols.findIndex(c => (c.includes('name') && !c.includes('user')) || c.includes('title'));
     const urlIdx = headerCols.findIndex(c => c.includes('uri') || c.includes('url') || c.includes('website'));
-    const userIdx = headerCols.findIndex(c => c === 'login_username' || c === 'username' || c === 'email' || c.includes('username') || c.includes('email') || (c.includes('user') && !c.includes('uri')));
+    // Colonne « username » en priorité, « email » en secours ligne par ligne (Proton Pass remplit l'une ou l'autre)
+    const userIdx = headerCols.findIndex(c => c === 'login_username' || c === 'username' || c.includes('username') || (c.includes('user') && !c.includes('uri')));
+    const emailIdx = headerCols.findIndex(c => c === 'email' || c.includes('email'));
     const passIdx = headerCols.findIndex(c => c === 'login_password' || c === 'password' || c.includes('password') || c.includes('pass'));
     const totpIdx = headerCols.findIndex(c => c.includes('totp') || c.includes('otp') || c.includes('2fa'));
     const notesIdx = headerCols.findIndex(c => c.includes('note') || c.includes('comment') || c === 'extra');
@@ -163,7 +165,7 @@ export function parseImportFile(fileContent: string, fileName = ''): ImportResul
         credentials.push({
           title: (titleIdx >= 0 ? cols[titleIdx] : cols[0]) || 'Compte sans titre',
           website: urlIdx >= 0 ? cols[urlIdx] : '',
-          username: userIdx >= 0 ? cols[userIdx] : '',
+          username: (userIdx >= 0 ? cols[userIdx] : '') || (emailIdx >= 0 ? cols[emailIdx] : ''),
           password: passIdx >= 0 ? cols[passIdx] : '',
           totpSecret: totpIdx >= 0 ? cols[totpIdx] : undefined,
           notes: notesIdx >= 0 ? cols[notesIdx] : '',

@@ -49,6 +49,7 @@ import { mountDateField } from './ui/dateField';
 import { showToast as pushToast } from './ui/toast';
 import { EXPIRY_SOON_DAYS, expiryInfo, renderExpiryBadge } from './ui/expiry';
 import { printRecoveryKey, recoveryKeyFile } from './ui/recoveryKey';
+import { MANAGER_EXPORTS } from './import_export/managerExports';
 import { secretGridHtml } from './ui/secretDisplay';
 import { CREDENTIAL_FILTERS, countByFilter, queryCredentials, reusedPasswords, type CredentialFilter, type CredentialSort } from './store/credentialFilters';
 import { checkCredential, remainingCapacity } from './account/limits';
@@ -3210,7 +3211,7 @@ class AppController {
       { id: 'bitwarden', name: 'Bitwarden', logo: brand('bitwarden'), formats: 'JSON · CSV', accept: '.json,.csv', steps: [tr('Coffre web : Outils, puis Exporter le coffre', 'Web vault: Tools, then Export vault'), tr('Format .json de préférence (garde les codes 2FA et les champs)', 'Prefer .json (keeps 2FA codes and fields)')] },
       { id: '1password', name: '1Password', logo: brand('1password'), formats: '1PUX', accept: '.1pux', steps: [tr('Application de bureau : Fichier, puis Exporter', 'Desktop app: File, then Export'), tr('Choisissez le format 1PUX', 'Choose the 1PUX format')] },
       { id: 'keepass', name: 'KeePass', logo: brand('keepassxc'), formats: 'KDBX · XML', accept: '.kdbx,.xml', steps: [tr('Choisissez directement votre base .kdbx', 'Pick your .kdbx database directly'), tr('Son mot de passe est demandé ensuite', 'Its password is asked next')] },
-      { id: 'proton', name: 'Proton Pass', logo: brand('protonpass'), formats: 'CSV · JSON', accept: '.csv,.json', steps: [tr('Paramètres, puis Exporter', 'Settings, then Export'), tr('Format CSV', 'CSV format')] },
+      { id: 'proton', name: 'Proton Pass', logo: brand('proton'), formats: 'CSV · JSON', accept: '.csv,.json', steps: [tr('Paramètres, puis Exporter', 'Settings, then Export'), tr('Format CSV', 'CSV format')] },
       { id: 'chrome', name: 'Chrome', logo: brand('googlechrome'), formats: 'CSV', accept: '.csv', steps: [tr('Ouvrez chrome://password-manager/settings', 'Open chrome://password-manager/settings'), tr('Exporter les mots de passe', 'Export passwords')] },
       { id: 'firefox', name: 'Firefox', logo: brand('firefoxbrowser'), formats: 'CSV', accept: '.csv', steps: [tr('Ouvrez about:logins', 'Open about:logins'), tr('Menu ⋯, puis Exporter les identifiants', 'Menu ⋯, then Export logins')] },
       { id: 'lastpass', name: 'LastPass', logo: brand('lastpass'), formats: 'CSV', accept: '.csv', steps: [tr('Options avancées, puis Exporter', 'Advanced options, then Export')] },
@@ -3313,6 +3314,14 @@ class AppController {
             ${exportItem('json', bvLogo, 'JSON BetterVault', tr('Tout le contenu du coffre, tâches comprises', 'Everything in the vault, tasks included'))}
             ${exportItem('csv', brand('bitwarden'), 'CSV', tr('Compatible Bitwarden, Chrome, Firefox et tableurs', 'Works with Bitwarden, Chrome, Firefox and spreadsheets'))}
           </div>
+
+          <div class="ie-group-title">${tr('Vers un autre gestionnaire', 'To another password manager')}</div>
+          <p class="field-hint">${tr('Fichier au format attendu par l’import de chaque application. Non chiffré.', 'File in the format each app expects on import. Not encrypted.')}</p>
+          <div class="ie-export-list ie-export-grid">
+            ${MANAGER_EXPORTS.map(format => exportItem(`manager:${format.id}`, format.logo ? brand(format.logo) : GENERIC_FILE_ICON,
+              format.id === 'apple' ? tr('Mots de passe Apple (CSV)', 'Apple Passwords (CSV)') : format.name,
+              format.extension.toUpperCase())).join('')}
+          </div>
         </div>
       </div>
       <div class="modal-footer">
@@ -3380,6 +3389,11 @@ class AppController {
           return;
         }
         if (!(await confirmPlaintextExport())) return;
+        const manager = kind?.startsWith('manager:') ? MANAGER_EXPORTS.find(f => `manager:${f.id}` === kind) : undefined;
+        if (manager) {
+          downloadExportFile(manager.build(creds), `bettervault-${manager.id}-${exportDate}.${manager.extension}`,
+            manager.extension === 'json' ? 'application/json' : 'text/csv;charset=utf-8;');
+        }
         if (kind === 'cxf') downloadExportFile(exportCredentialsAsCxf(creds), `bettervault-${exportDate}.cxf.json`, 'application/json');
         if (kind === 'json') downloadExportFile(exportVaultAsJson(creds, tasks), `bettervault-${exportDate}.json`, 'application/json');
         if (kind === 'csv') downloadExportFile(exportVaultAsCsv(creds), `bettervault-${exportDate}.csv`, 'text/csv;charset=utf-8;');
