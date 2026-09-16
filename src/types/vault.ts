@@ -93,7 +93,8 @@ export interface CredentialItem {
 export interface VaultMetadata {
   id: string;
   name: string;
-  type: 'personal' | 'work' | 'team';
+  /** « personal », « work », « team » ou l'identifiant d'un type créé dans ce coffre */
+  type: string;
   icon?: ItemIcon;
   shared?: SharedVaultInfo;
   createdAt: number;
@@ -109,12 +110,21 @@ export interface TagDef {
   updatedAt: number;
 }
 
+/** Type de coffre créé par l'utilisateur, en plus de « Personnel », « Travail » et « Équipe » */
+export interface VaultTypeDef {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface UnlockedVaultData {
   vaults: VaultMetadata[];
   activeVaultId: string;
   credentials: CredentialItem[];
   tasks: Task[];
   tagDefs: TagDef[];
+  vaultTypes?: VaultTypeDef[];
   /** Suppressions synchronisables : id de l'élément → horodatage de suppression */
   deleted: Record<string, number>;
 }

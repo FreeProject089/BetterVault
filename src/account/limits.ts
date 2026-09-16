@@ -6,6 +6,7 @@ import type { CredentialItem, Task, UnlockedVaultData } from '../types/vault';
  */
 export interface VaultLimits {
   maxVaults: number;
+  maxVaultTypes: number;
   maxCredentialsPerVault: number;
   maxTasksPerVault: number;
   maxTitleLength: number;
@@ -22,6 +23,7 @@ export interface VaultLimits {
 
 export const DEFAULT_VAULT_LIMITS: VaultLimits = {
   maxVaults: 20,
+  maxVaultTypes: 20,
   maxCredentialsPerVault: 5000,
   maxTasksPerVault: 5000,
   maxTitleLength: 200,

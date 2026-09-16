@@ -107,7 +107,10 @@ const LIMITS = [
   ['maxTagsPerItem', ['Tags par élément', 'Tags per item']],
   ['maxVaultMb', ['Taille d’un coffre (Mo)', 'Vault size (MB)']],
   ['maxAttachmentMb', ['Taille d’une pièce jointe (Mo)', 'Attachment size (MB)']],
-  ['attachmentQuotaMb', ['Espace fichiers par compte (Mo)', 'File space per account (MB)']]
+  ['attachmentQuotaMb', ['Espace fichiers par compte (Mo)', 'File space per account (MB)']],
+  ['maxVaultTypes', ['Types de coffres', 'Vault types']],
+  ['maxMembersPerSharedVault', ['Membres par coffre partagé', 'Members per shared vault']],
+  ['maxRolesPerSharedVault', ['Rôles par coffre partagé', 'Roles per shared vault']]
 ];
 
 /** Limites saisies en Mo dans la page, stockées en octets */
