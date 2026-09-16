@@ -13,6 +13,8 @@ export interface ItemIcon {
   title?: string;
   /** Couleur de marque (Simple Icons), sans # */
   hex?: string;
+  /** Logo de marque affiché dans la couleur du texte plutôt que dans sa couleur officielle */
+  mono?: boolean;
   /** Contenu SVG nettoyé (éléments de forme uniquement) */
   body: string;
 }
@@ -74,7 +76,7 @@ export function normalizeItemIcon(input: unknown): ItemIcon | undefined {
   const body = sanitizeIconBody(String(icon.body ?? ''));
   if (!body || typeof icon.name !== 'string') return undefined;
   const hex = typeof icon.hex === 'string' && /^[0-9a-f]{6}$/i.test(icon.hex) ? icon.hex : undefined;
-  return { set: icon.set, name: icon.name.slice(0, 80), title: typeof icon.title === 'string' ? icon.title.slice(0, 80) : undefined, hex, body };
+  return { set: icon.set, name: icon.name.slice(0, 80), title: typeof icon.title === 'string' ? icon.title.slice(0, 80) : undefined, hex, body, ...(icon.mono === true ? { mono: true } : {}) };
 }
 
 /* ── Couleurs de marque lisibles dans les deux thèmes ───────────────────── */
@@ -99,7 +101,7 @@ export function brandColors(hex: string): { onDark: string; onLight: string } {
 export function renderItemIcon(icon: ItemIcon, size = 20): string {
   const title = icon.title ? `<title>${icon.title.replace(/[<>&"]/g, '')}</title>` : '';
   if (icon.set === 'simple') {
-    const colors = icon.hex ? brandColors(icon.hex) : null;
+    const colors = icon.hex && !icon.mono ? brandColors(icon.hex) : null;
     const style = colors ? ` style="--brand-on-dark:${colors.onDark};--brand-on-light:${colors.onLight}"` : '';
     return `<svg class="svc-icon brand" width="${size}" height="${size}" viewBox="${VIEWBOX.simple}" fill="currentColor" aria-hidden="true"${style}>${title}${icon.body}</svg>`;
   }

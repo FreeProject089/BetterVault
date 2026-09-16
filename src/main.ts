@@ -5201,7 +5201,9 @@ class AppController {
       li.setAttribute('aria-pressed', String(this.activeTag === tag.name));
       li.innerHTML = `
         <span class="nav-item-left">
-          <span class="tag-dot" style="background-color:${tagColor(tag.color)};"></span>
+          ${tag.icon
+            ? `<span class="tag-icon" style="color:${tagColor(tag.color)};">${renderItemIcon(tag.icon, 15)}</span>`
+            : `<span class="tag-dot" style="background-color:${tagColor(tag.color)};"></span>`}
           <span>${this.escapeHtml(tag.name)}</span>
         </span>
         <span class="nav-count">${count}</span>`;
@@ -5225,8 +5227,10 @@ class AppController {
 
   private renderTagChips(tags: string[]): string {
     if (!tags.length) return '';
-    return `<div class="tag-chip-row">${tags.map(name => `
-      <span class="tag-chip" style="--tag-color:${tagColor(vaultStore.getTagByName(name)?.color)}"><span>${this.escapeHtml(name)}</span></span>`).join('')}</div>`;
+    return `<div class="tag-chip-row">${tags.map(name => {
+      const tag = vaultStore.getTagByName(name);
+      return `<span class="tag-chip" style="--tag-color:${tagColor(tag?.color)}">${tag?.icon ? `<span class="tag-chip-icon">${renderItemIcon(tag.icon, 12)}</span>` : ''}<span>${this.escapeHtml(name)}</span></span>`;
+    }).join('')}</div>`;
   }
 
   private openTagManagerModal(): void {
@@ -5285,18 +5289,28 @@ class AppController {
         const count = vaultStore.countTagUsage(tag.name);
         return `
           <div class="tag-manager-row" data-tag-id="${tag.id}">
-            <span class="tag-dot" style="background-color:${tagColor(tag.color)};"></span>
+            <button type="button" class="tag-icon-button" data-tag-icon title="${tr('Choisir une icône', 'Choose an icon')}" aria-label="${tr('Icône de', 'Icon for')} ${this.escapeHtml(tag.name)}" aria-expanded="false" style="color:${tagColor(tag.color)};">
+              <span data-tag-icon-preview>${tag.icon ? renderItemIcon(tag.icon, 16) : `<span class="tag-dot" style="background-color:${tagColor(tag.color)};"></span>`}</span>
+            </button>
             <input class="form-input tag-rename" value="${this.escapeHtml(tag.name)}" maxlength="32" aria-label="${tr('Nom du tag', 'Tag name')}">
             <span class="tag-usage">${tr(`${count} élément${count > 1 ? 's' : ''}`, `${count} item${count === 1 ? '' : 's'}`)}</span>
             <button type="button" class="icon-btn tag-delete" title="${tr('Supprimer', 'Delete')}" aria-label="${tr('Supprimer', 'Delete')} ${this.escapeHtml(tag.name)}">${ACTION_ICONS.trash}</button>
             <div data-color-host></div>
+            <div class="tag-icon-panel" data-tag-icon-panel hidden></div>
           </div>`;
       }).join('');
 
       listEl.querySelectorAll<HTMLElement>('[data-tag-id]').forEach(row => {
         const tag = tags.find(t => t.id === row.dataset.tagId);
         if (!tag) return;
-        const dot = row.querySelector('.tag-dot') as HTMLElement;
+        const iconButton = row.querySelector('[data-tag-icon]') as HTMLButtonElement;
+        const iconPreview = row.querySelector('[data-tag-icon-preview]') as HTMLElement;
+        const iconPanel = row.querySelector('[data-tag-icon-panel]') as HTMLElement;
+        const renderTagIcon = (icon: ItemIcon | undefined, color: string) => {
+          iconButton.style.color = color;
+          iconPreview.innerHTML = icon ? renderItemIcon(icon, 16) : `<span class="tag-dot" style="background-color:${color};"></span>`;
+        };
+
         mountColorPicker(row.querySelector('[data-color-host]') as HTMLElement, {
           value: tagColor(tag.color),
           presets: TAG_COLORS,
@@ -5304,8 +5318,34 @@ class AppController {
           customLabel: tr('Couleur personnalisée', 'Custom color'),
           onChange: color => {
             vaultStore.updateTag(tag.id, { color });
-            dot.style.backgroundColor = color;
+            renderTagIcon(vaultStore.getTags().find(t => t.id === tag.id)?.icon, color);
+            this.renderSidebar();
           }
+        });
+
+        iconButton.addEventListener('click', () => {
+          const open = iconPanel.hidden;
+          listEl.querySelectorAll<HTMLElement>('[data-tag-icon-panel]').forEach(panel => { panel.hidden = true; });
+          listEl.querySelectorAll<HTMLElement>('[data-tag-icon]').forEach(button => button.setAttribute('aria-expanded', 'false'));
+          if (!open) return;
+          iconPanel.hidden = false;
+          iconButton.setAttribute('aria-expanded', 'true');
+          mountIconPicker(iconPanel, {
+            tr,
+            current: tag.icon,
+            initialSet: tag.icon?.set ?? 'lucide',
+            initialQuery: tag.name,
+            onPick: picked => {
+              vaultStore.updateTag(tag.id, { icon: picked ?? null });
+              const color = vaultStore.getTags().find(t => t.id === tag.id)?.color ?? tag.color;
+              renderTagIcon(picked, tagColor(color));
+              iconPanel.hidden = true;
+              iconButton.setAttribute('aria-expanded', 'false');
+              iconButton.focus();
+              this.renderSidebar();
+              this.renderList();
+            }
+          }).focus();
         });
       });
     };

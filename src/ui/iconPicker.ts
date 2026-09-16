@@ -22,6 +22,7 @@ export function mountIconPicker(host: HTMLElement, options: {
   let activeSet: IconSet = options.current?.set ?? options.initialSet ?? 'simple';
   let results: IconEntry[] = [];
   let requestId = 0;
+  let mono = !!options.current?.mono;
 
   host.classList.add('icon-picker');
   host.innerHTML = `
@@ -36,6 +37,7 @@ export function mountIconPicker(host: HTMLElement, options: {
     </div>
     <div class="icon-picker-grid" role="listbox"></div>
     <div class="icon-picker-footer">
+      <label class="check-row icon-picker-mono" hidden><input type="checkbox" data-mono> ${tr('Logos en monochrome', 'Monochrome logos')}</label>
       <span class="icon-picker-status" aria-live="polite"></span>
       ${options.allowAutomatic !== false ? `<button type="button" class="btn-primary btn-ghost icon-picker-auto">${tr('Icône automatique', 'Automatic icon')}</button>` : ''}
     </div>`;
@@ -47,13 +49,24 @@ export function mountIconPicker(host: HTMLElement, options: {
   search.value = options.initialQuery ?? '';
   grid.setAttribute('aria-label', tr('Icônes', 'Icons'));
 
+  const monoRow = host.querySelector('.icon-picker-mono') as HTMLElement;
+  const monoBox = host.querySelector('[data-mono]') as HTMLInputElement;
+  monoBox.checked = mono;
+
   const renderTabs = () => {
     host.querySelectorAll<HTMLElement>('[data-set]').forEach(tab => {
       const active = tab.dataset.set === activeSet;
       tab.classList.toggle('active', active);
       tab.setAttribute('aria-selected', String(active));
     });
+    // Le choix couleur officielle / monochrome ne concerne que les logos de marques
+    monoRow.hidden = activeSet !== 'simple';
   };
+
+  monoBox.addEventListener('change', () => {
+    mono = monoBox.checked;
+    void renderGrid();
+  });
 
   const renderGrid = async () => {
     const id = ++requestId;
@@ -79,7 +92,7 @@ export function mountIconPicker(host: HTMLElement, options: {
     grid.innerHTML = results.map((entry, index) => {
       const selected = options.current?.set === entry.set && options.current.name === entry.name;
       const label = (entry.title ?? entry.name).replace(/"/g, '&quot;');
-      return `<button type="button" class="icon-picker-item ${selected ? 'selected' : ''}" role="option" aria-selected="${selected}" data-index="${index}" title="${label}" aria-label="${label}">${renderItemIcon(entry, 22)}</button>`;
+      return `<button type="button" class="icon-picker-item ${selected ? 'selected' : ''}" role="option" aria-selected="${selected}" data-index="${index}" title="${label}" aria-label="${label}">${renderItemIcon({ ...entry, mono }, 22)}</button>`;
     }).join('');
 
     const total = query.trim() ? searchIcons(entries, query, Infinity).length : entries.length;
@@ -114,7 +127,7 @@ export function mountIconPicker(host: HTMLElement, options: {
     const index = (e.target as HTMLElement).closest<HTMLElement>('[data-index]')?.dataset.index;
     const entry = index === undefined ? undefined : results[Number(index)];
     if (!entry) return;
-    options.onPick({ set: entry.set, name: entry.name, title: entry.title, hex: entry.hex, body: entry.body });
+    options.onPick({ set: entry.set, name: entry.name, title: entry.title, hex: entry.hex, body: entry.body, ...(mono && entry.set === 'simple' ? { mono: true } : {}) });
   });
 
   host.querySelector('.icon-picker-auto')?.addEventListener('click', () => options.onPick(undefined));
