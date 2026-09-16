@@ -3628,3 +3628,13 @@ button.shortcut-key:hover { border-color: var(--accent); }
 
 .folder-breadcrumb button:hover { background-color: var(--bg-tertiary); color: var(--text-primary); }
 .folder-breadcrumb-sep { color: var(--text-muted); }
+
+/* Le bouton d'envoi du formulaire est pilote par le parcours, pas affiche */
+.auth-hidden-submit { position: absolute; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
+
+.auth-hint { margin: 6px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+
+/* Le parcours de l'ecran d'authentification occupe toute la largeur de la carte */
+.auth-card .stepper-footer { margin-top: 4px; }
+.auth-card .stepper-actions { flex: 1 1 auto; }
+.auth-card .stepper-actions .btn-primary { flex: 1 1 auto; justify-content: center; }
