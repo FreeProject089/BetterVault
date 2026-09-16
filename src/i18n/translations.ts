@@ -29,6 +29,7 @@ export interface Translations {
     passwordsAndLogins: string;
     twoFactorTokens: string;
     taskManager: string;
+    folders: string;
     toolsAndAudit: string;
     generator: string;
     audit: string;
@@ -106,6 +107,7 @@ export const fr: Translations = {
     passwordsAndLogins: 'Identifiants',
     twoFactorTokens: 'Codes 2FA',
     taskManager: 'Tâches',
+    folders: 'Dossiers',
     toolsAndAudit: 'Outils',
     generator: 'Générateur',
     audit: 'Audit de sécurité',
@@ -183,6 +185,7 @@ export const en: Translations = {
     passwordsAndLogins: 'Credentials',
     twoFactorTokens: '2FA codes',
     taskManager: 'Tasks',
+    folders: 'Folders',
     toolsAndAudit: 'Tools',
     generator: 'Generator',
     audit: 'Security audit',
