@@ -213,14 +213,28 @@ export function normalizeVaultData(input: Partial<UnlockedVaultData> | null | un
   for (const folder of data.folders) {
     if (folder.parentId && !folderIds.has(folder.parentId)) delete folder.parentId;
   }
-  for (const folder of data.folders) {
-    const seen = new Set<string>([folder.id]);
-    let parent = folder.parentId ? byId.get(folder.parentId) : undefined;
-    while (parent) {
-      if (seen.has(parent.id)) { delete folder.parentId; break; }
-      seen.add(parent.id);
-      parent = parent.parentId ? byId.get(parent.parentId) : undefined;
+  /*
+   * Détection de boucles en un seul passage.
+   *
+   * Remonter la chaîne des parents depuis CHAQUE dossier coûte le produit du nombre
+   * de dossiers par la profondeur : un coffre partagé contenant une longue chaîne
+   * suffisait alors à figer l'onglet au chargement. Ici chaque dossier est visité
+   * une fois : « en cours » marque la branche courante, « sûr » ce qui a déjà été
+   * jugé. Retomber sur un dossier « en cours » ferme une boucle, qu'on coupe.
+   */
+  const etat = new Map<string, 'en-cours' | 'sur'>();
+  for (const depart of data.folders) {
+    if (etat.has(depart.id)) continue;
+    const branche: FolderDef[] = [];
+    let courant: FolderDef | undefined = depart;
+    while (courant && !etat.has(courant.id)) {
+      etat.set(courant.id, 'en-cours');
+      branche.push(courant);
+      courant = courant.parentId ? byId.get(courant.parentId) : undefined;
     }
+    // On s'est arrêté sur la racine, sur une branche déjà sûre, ou sur une boucle
+    if (courant && etat.get(courant.id) === 'en-cours') delete branche[branche.length - 1].parentId;
+    for (const visite of branche) etat.set(visite.id, 'sur');
   }
   for (const credential of data.credentials) {
     if (credential.folderId && !folderIds.has(credential.folderId)) delete credential.folderId;

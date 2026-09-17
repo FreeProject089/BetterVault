@@ -9,8 +9,27 @@ export function isZipArchive(bytes: Uint8Array): boolean {
   return bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
 }
 
+/*
+ * Plafond de décompression.
+ *
+ * Un ZIP annonce la taille décompressée de chaque entrée, et quelques kilo-octets
+ * de zéros compressés se rendent en gigaoctets une fois déployés. fflate alloue
+ * d'après cette taille annoncée : la contrôler avant d'extraire évite qu'un fichier
+ * .1pux piégé fasse tomber l'onglet. 128 Mio laissent passer les exports réels, y
+ * compris volumineux — export.data ne contient que du JSON.
+ */
+const MAX_EXPORT_DATA = 128 * 1024 * 1024;
+
 export function parse1pux(bytes: Uint8Array): Partial<CredentialItem>[] {
-  const files = unzipSync(bytes, { filter: file => file.name === 'export.data' });
+  const files = unzipSync(bytes, {
+    filter: file => {
+      if (file.name !== 'export.data') return false;
+      if (file.originalSize !== undefined && file.originalSize > MAX_EXPORT_DATA) {
+        throw new Error('Archive .1pux invalide : export.data dépasse la taille autorisée');
+      }
+      return true;
+    }
+  });
   const data = files['export.data'];
   if (!data) throw new Error('Archive .1pux invalide : export.data introuvable');
   return parse1PasswordExportData(JSON.parse(strFromU8(data)));

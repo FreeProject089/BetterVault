@@ -42,10 +42,20 @@ function removeFiles(ctx: RouteContext, ids: string[]): void {
   }
 }
 
+/*
+ * Effacement des fichiers d'un compte supprimé.
+ *
+ * On prend TOUT ce dont l'utilisateur est propriétaire, y compris ce qu'il a déposé
+ * dans un coffre partagé appartenant à quelqu'un d'autre. La ligne en base disparaît
+ * de toute façon (owner_id ... ON DELETE CASCADE) : sans cela le fichier resterait
+ * sur le disque, sans ligne pour le retrouver ni pour le purger des sauvegardes —
+ * des données conservées après une demande de suppression.
+ */
 export function deleteUserAttachments(ctx: RouteContext, userId: string): void {
   const rows = ctx.db.prepare(`
-    SELECT id FROM attachments WHERE (vault_id IS NULL AND owner_id = ?) OR vault_id IN (SELECT id FROM shared_vaults WHERE owner_id = ?)`).all(userId, userId) as Array<{ id: string }>;
+    SELECT id FROM attachments WHERE owner_id = ? OR vault_id IN (SELECT id FROM shared_vaults WHERE owner_id = ?)`).all(userId, userId) as Array<{ id: string }>;
   removeFiles(ctx, rows.map(r => r.id));
+  ctx.db.prepare('DELETE FROM attachments WHERE owner_id = ? OR vault_id IN (SELECT id FROM shared_vaults WHERE owner_id = ?)').run(userId, userId);
 }
 
 export function deleteVaultAttachments(ctx: RouteContext, vaultId: string): void {

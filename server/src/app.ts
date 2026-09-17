@@ -173,8 +173,17 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     twoFactorUsers: db.prepare('SELECT COUNT(*) AS count FROM users WHERE totp_enabled = 1')
   };
 
+  /*
+   * Adresse du client derrière un reverse proxy.
+   *
+   * Un proxy AJOUTE l'adresse qu'il constate à la fin de « X-Forwarded-For ». Tout
+   * ce qui est à gauche a donc été écrit par le client lui-même : prendre le premier
+   * maillon revient à laisser l'appelant choisir son identité. On retient le
+   * dernier, le seul écrit par le hop de confiance.
+   */
   const clientAddress = (req: IncomingMessage) => {
-    const forwarded = options.trustProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() : '';
+    const chain = options.trustProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',') : [];
+    const forwarded = chain.length ? chain[chain.length - 1].trim() : '';
     return forwarded || req.socket.remoteAddress || 'unknown';
   };
 
@@ -183,7 +192,14 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     const current = now();
     const entry = attempts.get(key);
     if (!entry || entry.resetAt <= current) {
-      if (attempts.size > 10_000) attempts.clear();
+      // Purge des entrées expirées plutôt qu'un vidage total : vider remettrait à
+      // zéro les compteurs de tout le monde, ce qui se provoque facilement.
+      if (attempts.size > 10_000) {
+        for (const [existing, value] of attempts) {
+          if (value.resetAt <= current) attempts.delete(existing);
+        }
+        if (attempts.size > 20_000) attempts.clear();
+      }
       attempts.set(key, { count: 1, resetAt: current + rateLimit.windowMs });
       return;
     }
