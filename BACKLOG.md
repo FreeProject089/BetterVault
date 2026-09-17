@@ -1,12 +1,12 @@
 # Backlog en cours
 
 Lot 1 — bugs confirmés
-- [ ] La liste (identifiants / 2FA) ne défile pas quand elle est pleine
-- [ ] « Transformer en coffre partagé » sans effet
-- [ ] Icône de coffre déformée quand le nom est long
-- [ ] Types personnalisés affichés en tags sous « Nouveau coffre » (à retirer)
-- [ ] Supprimer un type depuis la liste déroulante
-- [ ] Marges de la modale Compte
+- [x] La liste (identifiants / 2FA) ne défile pas quand elle est pleine
+- [x] « Transformer en coffre partagé » sans effet
+- [x] Icône de coffre déformée quand le nom est long
+- [x] Types personnalisés affichés en tags sous « Nouveau coffre » (à retirer)
+- [x] Supprimer un type depuis la liste déroulante
+- [x] Marges de la modale Compte
 
 Lot 2 — suppression et export
 - [ ] Onglet Données : exporter (chiffré ou non) puis supprimer, au choix

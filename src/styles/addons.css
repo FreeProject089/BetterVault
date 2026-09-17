@@ -368,14 +368,24 @@
 }
 
 /* ── Fenêtre Compte ──────────────────────────────────────────────────────── */
+/*
+ * Les onglets forment un bloc à part entière, posé sur son propre fond : sans cela
+ * ils flottaient au ras du contenu et la fenêtre paraissait faite d'un seul tenant.
+ */
 .account-tabs {
   display: flex;
   overflow-x: auto;
   scrollbar-width: none;
-  margin-bottom: 4px;
+  gap: 2px;
+  padding: 3px;
+  margin-bottom: 2px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
 }
 
-.account-tabs .tab-btn { flex: 1 0 auto; }
+.account-tabs::-webkit-scrollbar { display: none; }
+.account-tabs .tab-btn { flex: 1 0 auto; border-radius: calc(var(--radius-md) - 2px); }
 
 .account-section-head {
   display: flex;
@@ -1386,10 +1396,13 @@
   white-space: nowrap;
 }
 
+/* En-tête d'identité : sa propre respiration, distincte des sections qui suivent */
 .account-summary {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
+  padding: 2px 2px 14px;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .account-avatar {
@@ -1434,21 +1447,57 @@
   border-radius: var(--radius-md);
 }
 
+/*
+ * Chaque section est une carte.
+ *
+ * Un simple trait de séparation laissait les blocs collés les uns aux autres, sans
+ * marge intérieure : le titre touchait le contenu du bloc précédent. La carte donne
+ * la même respiration partout et rend le regroupement des actions évident.
+ */
 .account-section {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border-subtle);
+  padding: 14px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.account-section:empty,
+.account-section[hidden] {
+  display: none;
 }
 
 .account-section-title {
   font-size: 13px;
   font-weight: 600;
+  margin: 0;
+}
+
+.account-section .field-hint,
+.account-section .modal-text {
+  margin: 0;
+}
+
+.account-danger {
+  border-color: color-mix(in srgb, var(--accent-red) 45%, var(--border-subtle));
 }
 
 .account-danger .account-section-title {
   color: var(--accent-red);
+}
+
+/* Le champ et son bouton passent l'un sous l'autre plutôt que de s'écraser */
+.form-row.row-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.form-row.row-wrap > .form-input {
+  flex: 1 1 200px;
+  min-width: 0;
 }
 
 .account-actions {
@@ -2788,12 +2837,19 @@ input[type="datetime-local"].form-input {
 }
 
 /* ── Coffres : icône dans la navigation et le formulaire ──────────────── */
+/* Sans « flex-shrink: 0 » un nom de coffre long écrase l'icône jusqu'à la déformer */
 .nav-vault-icon {
   display: grid;
   place-items: center;
   width: 18px;
   height: 18px;
+  flex-shrink: 0;
   color: var(--text-secondary);
+}
+
+.nav-vault-icon svg {
+  width: 100%;
+  height: 100%;
 }
 
 .nav-item.active .nav-vault-icon { color: var(--accent); }
@@ -2907,22 +2963,23 @@ input[type="datetime-local"].form-input {
 .secret-card.compact .secret-group { padding: 5px 3px; }
 .secret-card.compact .secret-group b { font-size: 12.5px; letter-spacing: 0.5px; }
 
-.type-manage { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-
-.type-chip {
-  display: inline-flex;
+/* Une liste déroulante suivie d'une action qui porte sur l'entrée choisie */
+.select-with-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 2px;
-  padding: 2px 4px 2px 10px;
-  font-size: 11.5px;
-  color: var(--text-secondary);
-  background: var(--bg-primary);
-  border: 1px solid var(--border-subtle);
-  border-radius: 999px;
+  gap: 6px;
 }
 
-.type-chip .icon-btn { width: 18px; height: 18px; }
-.type-chip .icon-btn svg { width: 11px; height: 11px; }
+.select-with-action .icon-btn {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.select-with-action .icon-btn:hover {
+  color: var(--accent-red, #f87171);
+}
 
 .pending-files { display: flex; flex-direction: column; gap: 4px; }
 

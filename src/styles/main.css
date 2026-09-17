@@ -113,6 +113,7 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
   transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
@@ -159,6 +160,7 @@ body {
 .sidebar-nav {
   padding: 12px 8px;
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -254,6 +256,7 @@ body {
 
 .sidebar-footer {
   padding: 12px 16px;
+  flex-shrink: 0;
   border-top: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
@@ -261,12 +264,21 @@ body {
 }
 
 /* Colonne 2 : Liste Centrale & Recherche */
+/*
+ * Les colonnes qui contiennent une zone défilante portent « min-height: 0 ».
+ *
+ * Par défaut un élément flex refuse de devenir plus petit que son contenu
+ * (« min-height: auto »). La zone de liste grandissait donc avec le nombre
+ * d'éléments au lieu de défiler, et le trop-plein disparaissait sous le bas de
+ * la fenêtre, coupé par « overflow: hidden » du corps de page.
+ */
 .list-pane {
   background-color: var(--bg-primary);
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
 }
 
 .list-header {
@@ -275,6 +287,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  flex-shrink: 0;
 }
 
 .search-box {
@@ -391,6 +404,7 @@ body {
 
 .items-scroll {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 4px 8px;
   display: flex;
@@ -487,6 +501,7 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
   overflow-y: auto;
 }
 
