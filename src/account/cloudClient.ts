@@ -124,6 +124,8 @@ export interface BillingInfo {
 }
 
 export interface LegalInfo {
+  /** Ce serveur publie-t-il des documents légaux ? Un serveur personnel peut ne pas en avoir. */
+  enabled: boolean;
   configured: boolean;
   operatorName: string | null;
   effectiveDate: string | null;

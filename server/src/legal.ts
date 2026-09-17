@@ -5,9 +5,15 @@ import { join } from 'node:path';
  * Documents légaux publiés par chaque serveur (/legal) : conditions d'utilisation, confidentialité,
  * accord de traitement des données (DPA, art. 28 RGPD), mesures de sécurité, sous-traitants.
  * Ce sont des modèles : l'hébergeur renseigne son identité dans /admin et reste responsable de leur contenu.
+ *
+ * Publier ces documents n'a de sens que pour un serveur ouvert à d'autres personnes.
+ * Un serveur personnel n'a personne à informer : « enabled » le retire entièrement —
+ * les pages /legal répondent 404 et l'application n'en propose plus l'acceptation.
  */
 
 export interface LegalSettings {
+  /** Publier les documents légaux de ce serveur */
+  enabled: boolean;
   operatorName: string;
   operatorAddress: string;
   contactEmail: string;
@@ -20,6 +26,7 @@ export interface LegalSettings {
 }
 
 export const DEFAULT_LEGAL: LegalSettings = {
+  enabled: true,
   operatorName: '',
   operatorAddress: '',
   contactEmail: '',
@@ -43,9 +50,14 @@ export const LEGAL_DOCUMENTS = [
 
 export const legalTitle = (doc: (typeof LEGAL_DOCUMENTS)[number], locale: LegalLocale) => (locale === 'en' ? doc.titleEn : doc.title);
 
+/** Un réglage booléen absent garde sa valeur par défaut ; « 0 », « false », « off » et « no » le désactivent */
+const flagFromEnv = (raw: string | undefined, fallback: boolean): boolean =>
+  raw === undefined || raw.trim() === '' ? fallback : !/^(0|false|off|no|non)$/i.test(raw.trim());
+
 export function legalFromEnv(env: Record<string, string | undefined>): LegalSettings {
   return {
     ...DEFAULT_LEGAL,
+    enabled: flagFromEnv(env.LEGAL_ENABLED, DEFAULT_LEGAL.enabled),
     operatorName: env.LEGAL_OPERATOR_NAME ?? '',
     operatorAddress: env.LEGAL_OPERATOR_ADDRESS ?? '',
     contactEmail: env.LEGAL_CONTACT_EMAIL ?? '',
@@ -59,14 +71,16 @@ export function legalFromEnv(env: Record<string, string | undefined>): LegalSett
 export function parseLegalUpdate(input: unknown, current: LegalSettings): LegalSettings {
   const body = (input ?? {}) as Partial<Record<keyof LegalSettings, unknown>>;
   const next = { ...current };
+  if (typeof body.enabled === 'boolean') next.enabled = body.enabled;
   for (const key of Object.keys(DEFAULT_LEGAL) as Array<keyof LegalSettings>) {
-    if (typeof body[key] === 'string') next[key] = (body[key] as string).trim().slice(0, 500);
+    if (key === 'enabled') continue;
+    if (typeof body[key] === 'string') (next[key] as string) = (body[key] as string).trim().slice(0, 500);
   }
   if (next.effectiveDate && !/^\d{4}-\d{2}-\d{2}$/.test(next.effectiveDate)) throw new Error('Date d’entrée en vigueur au format AAAA-MM-JJ');
   return next;
 }
 
-export const legalConfigured = (legal: LegalSettings) => !!legal.operatorName && !!legal.contactEmail;
+export const legalConfigured = (legal: LegalSettings) => !legal.enabled || (!!legal.operatorName && !!legal.contactEmail);
 
 export interface LegalContext {
   legal: LegalSettings;
@@ -155,6 +169,7 @@ export function fillTemplate(template: string, values: Record<string, string>, f
 }
 
 export function renderLegalPage(root: string, slug: string, context: LegalContext, requested: LegalLocale = 'fr'): string | null {
+  if (!context.legal.enabled) return null;
   const doc = LEGAL_DOCUMENTS.find(d => d.slug === slug);
   if (!doc) return null;
   // Modèle dans la langue demandée, sinon en français
@@ -164,8 +179,10 @@ export function renderLegalPage(root: string, slug: string, context: LegalContex
   if (!existsSync(templatePath)) return null;
   const query = locale === 'en' ? '?lang=en' : '';
   const { legal } = context;
+  // « enabled » pilote la publication, il n'a rien à faire dans le texte des modèles
+  const { enabled: _publie, ...champs } = legal;
   const values: Record<string, string> = {
-    ...legal,
+    ...champs,
     effectiveDate: legal.effectiveDate || new Date().toISOString().slice(0, 10),
     retentionDays: String(context.retentionDays),
     sessionDays: String(context.sessionDays)

@@ -88,6 +88,8 @@ const TEXT = {
   durationsHint: ['Une durée par tarif Stripe : mensuel, annuel… Le compte choisit au moment de payer.', 'One duration per Stripe price: monthly, yearly… The account picks one at checkout.'],
   legalTitle: ['Identité de l’hébergeur', 'Operator identity'],
   legalHint: ['Ces informations complètent les modèles publiés sur /legal (conditions, confidentialité, DPA, mesures de sécurité, sous-traitants). Relisez-les : vous restez responsable de leur contenu.', 'This information fills the templates published at /legal (terms, privacy, DPA, security measures, subprocessors). Review them: you remain responsible for their content.'],
+  legalEnabled: ['Publier des documents légaux sur ce serveur', 'Publish legal documents on this server'],
+  legalDisabledHint: ['Décoché, /legal répond 404 et l’application ne demande plus d’accepter de conditions. À réserver à un serveur personnel, sans autre utilisateur.', 'Unchecked, /legal returns 404 and the app no longer asks anyone to accept terms. For a personal server with no other users.'],
   auditTitle: ['Journal de sécurité', 'Security log'],
   auditHint: ['Conservé 90 jours. Les comptes sont désignés par un pseudonyme (HMAC) : on peut relier des événements sans connaître l’adresse email.', 'Kept 90 days. Accounts are shown as a pseudonym (HMAC): events can be linked without knowing the email address.'],
   when: ['Date', 'Date'],
@@ -457,7 +459,7 @@ async function loadOverview() {
     [security.backupEncrypted, fr ? 'Sauvegardes chiffrées (BACKUP_ENCRYPTION_KEY)' : 'Encrypted backups (BACKUP_ENCRYPTION_KEY)'],
     [data.backups.enabled, fr ? 'Sauvegardes automatiques activées' : 'Automatic backups on'],
     [security.emailEnabled, fr ? 'Emails de sécurité (SMTP)' : 'Security emails (SMTP)'],
-    [security.legalConfigured, fr ? 'Documents légaux complétés' : 'Legal documents filled in'],
+    ...(security.legalEnabled === false ? [] : [[security.legalConfigured, fr ? 'Documents légaux complétés' : 'Legal documents filled in']]),
     [security.geoEnabled, fr ? 'Lieu des sessions (base locale)' : 'Session location (local database)'],
     [!security.registrationOpen, fr ? 'Inscriptions fermées (serveur privé)' : 'Registration closed (private server)']
   ];
@@ -622,11 +624,25 @@ $('legal-preview').innerHTML = ['terms', 'privacy', 'dpa', 'security', 'subproce
   .map(slug => `<a href="/legal/${slug}" target="_blank" rel="noopener">/legal/${slug}</a>`).join('');
 
 function fillLegal(legal) {
+  // Réglage absent : un serveur mis à jour depuis une version sans l'interrupteur publiait, on garde cela
+  $('legalEnabled').checked = legal.enabled !== false;
   for (const [key] of LEGAL_FIELDS) $(`legal-${key}`).value = legal[key] ?? '';
+  applyLegalEnabled();
 }
 
+/** Les champs d'identité n'ont plus d'objet quand rien n'est publié */
+function applyLegalEnabled() {
+  const on = $('legalEnabled').checked;
+  $('legal-fields').hidden = !on;
+  $('legal-preview').hidden = !on;
+}
+$('legalEnabled').addEventListener('change', applyLegalEnabled);
+
 function readLegal() {
-  return Object.fromEntries(LEGAL_FIELDS.map(([key]) => [key, $(`legal-${key}`).value.trim()]));
+  return {
+    enabled: $('legalEnabled').checked,
+    ...Object.fromEntries(LEGAL_FIELDS.map(([key]) => [key, $(`legal-${key}`).value.trim()]))
+  };
 }
 
 /* ── Journal ─────────────────────────────────────────────────────────── */

@@ -5553,6 +5553,11 @@ class AppController {
       try {
         const legal = await accountService.getLegal();
         if (!box.isConnected) return;
+        // Un serveur qui ne publie pas de documents n'a pas de section à afficher
+        if (legal.enabled === false || !legal.documents.length) {
+          el.innerHTML = '';
+          return;
+        }
         el.innerHTML = `
           ${legal.operatorName ? `<p class="field-hint">${tr('Serveur hébergé par', 'Server operated by')} ${this.escapeHtml(legal.operatorName)}</p>` : ''}
           <div class="legal-link-list">${legal.documents.map(doc => `<a href="${this.escapeHtml(account.serverUrl + doc.url)}" target="_blank" rel="noopener">${this.escapeHtml(doc.title)}</a>`).join('')}</div>`;
