@@ -47,6 +47,8 @@ const EXACT: Record<string, string> = {
   'Lien https vers une image attendu': 'An https link to an image is expected',
   'Mot de passe incorrect ou fichier altéré': 'Wrong password or altered file',
   'Paramètres Argon2id invalides dans le fichier chiffré': 'Invalid Argon2id parameters in the encrypted file',
+  'Paramètres Argon2 hors limites dans le fichier': 'Argon2 parameters out of bounds in the file',
+  'Nombre de tours AES-KDF hors limites dans le fichier': 'AES-KDF round count out of bounds in the file',
   'Pièce jointe altérée ou clé incorrecte': 'Altered attachment or wrong key',
   'Pièce jointe dans un format inconnu': 'Attachment in an unknown format',
   'Runtime Tauri indisponible': 'Tauri runtime unavailable',
