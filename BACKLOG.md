@@ -18,7 +18,7 @@ Lot 3 — écran de réinitialisation et emails
 - [x] Emails : mise en page soignée, anglais systématique
 
 Lot 4 — 2FA
-- [ ] Import / export des codes 2FA (QR codes, JSON chiffré ou clair)
+- [x] Import / export des codes 2FA (QR codes, JSON chiffré ou clair)
 - [ ] Clé de sécurité matérielle
 
 Lot 5 — éléments
