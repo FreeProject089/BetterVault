@@ -22,7 +22,9 @@ import {
   unwrapVaultKey,
   unwrapWithRecoveryKey,
   wrapVaultKey,
-  type EncryptedBlob
+  type EncryptedBlob,
+  assertAccountKdf,
+  assertSalt
 } from './accountCrypto';
 import { CloudClient, CloudError, type AccountInfo, type AccountSession, type AvatarPolicy, type BillingInfo, type LegalInfo } from './cloudClient';
 import { sanitizeLimits, type VaultLimits } from './limits';
@@ -267,7 +269,8 @@ export class AccountService {
 
     const client = new CloudClient(serverUrl);
     const pre = await client.prelogin(email);
-    const keys = await deriveAccountKeys(password, fromBase64(pre.salt), pre.kdf);
+    // Le sel et le coût viennent du serveur : on refuse tout affaiblissement
+    const keys = await deriveAccountKeys(password, assertSalt(fromBase64(pre.salt)), assertAccountKdf(pre.kdf, this.kdf));
 
     let session;
     try {

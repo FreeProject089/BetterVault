@@ -38,6 +38,14 @@ export function nativeCall<T>(method: string, payload: Record<string, unknown> =
 
 const cancelled = (err: unknown) => /cancel|annul/i.test(String(err instanceof Error ? err.message : err));
 
+/*
+ * Espace de noms refusé à la lecture ordinaire du trousseau (voir PROTECTED_PREFIX
+ * dans src-tauri/src/lib.rs). Un secret rangé ici ne sort qu'en passant par la
+ * commande qui vérifie la biométrie dans le même appel natif : la page ne peut plus
+ * sauter l'étape de vérification en appelant directement la lecture.
+ */
+const PROTECTED_PREFIX = 'bio.';
+
 export function biometricStore(): DeviceSecretStore | null {
   if (isAndroidApp()) {
     return {
@@ -100,14 +108,21 @@ export function biometricStore(): DeviceSecretStore | null {
           return false;
         }
       },
-      save: (name, secret) => osKeychain.set(name, secret),
+      save: (name, secret) => osKeychain.set(PROTECTED_PREFIX + name, secret),
       read: async (name, reason) => {
-        if (!(await tauriInvoke<boolean>('desktop_biometric_verify', { reason }))) throw new BiometricCancelledError();
-        const secret = await osKeychain.get(name);
+        let secret: string | null;
+        try {
+          secret = await tauriInvoke<string | null>('keychain_get_secret_verified', { account: PROTECTED_PREFIX + name, reason });
+        } catch (err) {
+          if (cancelled(err)) throw new BiometricCancelledError();
+          throw err;
+        }
         if (!secret) throw new Error(mac ? 'Secret introuvable dans le trousseau' : 'Secret introuvable dans le Gestionnaire d’identification');
         return secret;
       },
-      remove: name => osKeychain.remove(name)
+      // On nettoie aussi l'ancien emplacement non préfixé, hérité des versions
+      // où la lecture ne passait pas par la vérification native.
+      remove: async name => { await osKeychain.remove(PROTECTED_PREFIX + name); await osKeychain.remove(name); }
     };
   }
 

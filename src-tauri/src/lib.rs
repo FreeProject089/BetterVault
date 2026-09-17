@@ -19,6 +19,17 @@ mod keychain {
     const SERVICE: &str = "app.bettervault";
     const PROBE_ACCOUNT: &str = "__bettervault_keychain_probe__";
 
+    /*
+     * Préfixe réservé aux secrets protégés par la biométrie.
+     *
+     * Vérifier l'empreinte puis lire le trousseau en deux appels séparés depuis la
+     * page ne protège rien : les deux commandes sont exposées à tout ce qui s'exécute
+     * dans la webview, et il suffit d'appeler la seconde. La vérification et la
+     * lecture doivent donc être un seul appel, côté Rust — et le chemin de lecture
+     * ordinaire refuse ces comptes pour qu'on ne puisse pas le contourner.
+     */
+    pub const PROTECTED_PREFIX: &str = "bio.";
+
     fn entry(account: &str) -> Result<keyring::Entry, String> {
         if account.is_empty() || account.len() > 128 {
             return Err("Nom de compte trousseau invalide (1 à 128 caractères)".into());
@@ -42,13 +53,21 @@ mod keychain {
         entry(&account)?.set_password(&secret).map_err(|e| e.to_string())
     }
 
-    #[command]
-    pub fn keychain_get_secret(account: String) -> Result<Option<String>, String> {
-        match entry(&account)?.get_password() {
+    /// Lecture réservée à l'appel qui a d'abord obtenu la preuve biométrique
+    pub fn read_protected(account: &str) -> Result<Option<String>, String> {
+        match entry(account)?.get_password() {
             Ok(secret) => Ok(Some(secret)),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(e.to_string()),
         }
+    }
+
+    #[command]
+    pub fn keychain_get_secret(account: String) -> Result<Option<String>, String> {
+        if account.starts_with(PROTECTED_PREFIX) {
+            return Err("Ce secret exige une vérification biométrique".into());
+        }
+        read_protected(&account)
     }
 
     #[command]
@@ -102,8 +121,24 @@ fn derive_key_argon2(
     if salt.len() < 8 {
         return Err("Le sel Argon2id doit contenir au moins 8 octets".into());
     }
-    if memory_kib > (1 << 21) {
-        return Err("Mémoire Argon2id trop élevée (2 Gio maximum)".into());
+    /*
+     * Les paramètres arrivent de la webview. Sans plafond sur le PRODUIT, une
+     * combinaison acceptable pièce par pièce — 2 Gio, cent passes — occupe le
+     * processus natif assez longtemps pour que l'application paraisse morte, sans
+     * qu'on puisse l'interrompre. Les bornes laissent largement passer le profil
+     * de l'application (t=3, m=64 Mio, p=4) et un durcissement raisonnable.
+     */
+    if !(8..=(1 << 20)).contains(&memory_kib) {
+        return Err("Mémoire Argon2id hors limites (8 Kio à 1 Gio)".into());
+    }
+    if !(1..=64).contains(&iterations) {
+        return Err("Nombre de passes Argon2id hors limites (1 à 64)".into());
+    }
+    if !(1..=16).contains(&parallelism) || memory_kib < 8 * parallelism {
+        return Err("Parallélisme Argon2id hors limites (1 à 16)".into());
+    }
+    if u64::from(memory_kib) * u64::from(iterations) > (1u64 << 21) {
+        return Err("Coût total Argon2id trop élevé".into());
     }
     let params = Params::new(memory_kib, iterations, parallelism, Some(32)).map_err(|e| e.to_string())?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
@@ -323,11 +358,35 @@ async fn desktop_biometric_verify(reason: String) -> Result<bool, String> {
     }
 }
 
+/// Vérifie la biométrie puis lit le secret, sans repasser par la page entre les deux
+#[cfg(not(target_os = "android"))]
 #[command]
-fn generate_secure_bytes(count: usize) -> Vec<u8> {
+async fn keychain_get_secret_verified(account: String, reason: String) -> Result<Option<String>, String> {
+    if !account.starts_with(keychain::PROTECTED_PREFIX) {
+        return Err("Compte hors de l'espace protégé par la biométrie".into());
+    }
+    if !desktop_biometric_verify(reason).await? {
+        return Err("Authentification annulée".into());
+    }
+    keychain::read_protected(&account)
+}
+
+#[cfg(target_os = "android")]
+#[command]
+async fn keychain_get_secret_verified(_account: String, _reason: String) -> Result<Option<String>, String> {
+    Err("Trousseau du système non disponible sur Android".into())
+}
+
+#[command]
+fn generate_secure_bytes(count: usize) -> Result<Vec<u8>, String> {
+    // Une taille venue de la page ne doit pas pouvoir demander une allocation de
+    // plusieurs gigaoctets : aucun usage légitime ne dépasse quelques kilo-octets.
+    if count == 0 || count > 1024 {
+        return Err("Taille demandée hors limites (1 à 1024 octets)".into());
+    }
     let mut bytes = vec![0u8; count];
     rand::thread_rng().fill_bytes(&mut bytes);
-    bytes
+    Ok(bytes)
 }
 
 #[command]
@@ -379,6 +438,7 @@ pub fn run() {
             native_call,
             desktop_biometric_status,
             desktop_biometric_verify,
+            keychain_get_secret_verified,
             get_system_status,
             get_os_keychain_available,
             keychain_set_secret,

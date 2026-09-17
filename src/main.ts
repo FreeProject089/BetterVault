@@ -4536,13 +4536,28 @@ class AppController {
     const kind = previewKind(meta.type, meta.name);
     // Un SVG s'affiche comme une image, mais son contenu peut exécuter du script : il est montré en texte
     const svg = /svg/i.test(meta.type) || meta.name.toLowerCase().endsWith('.svg');
-    const type = meta.type || (kind === 'pdf' ? 'application/pdf' : 'application/octet-stream');
-    const blob = new Blob([data as unknown as BlobPart], { type: svg ? 'text/plain' : type });
+
+    /*
+     * Le type MIME sert à décider comment le navigateur INTERPRÈTE les octets, et il
+     * vient du fichier — donc de qui l'a déposé, un membre d'un coffre partagé par
+     * exemple. Le reprendre tel quel revient à lui laisser ce choix : « photo.pdf »
+     * annoncé « text/html » devient une page, chargée depuis une URL blob: de notre
+     * propre origine, avec accès au coffre déchiffré. On ne garde donc du fichier
+     * que la catégorie d'affichage, et on impose le type correspondant.
+     */
+    const safeType = svg ? 'text/plain'
+      : kind === 'pdf' ? 'application/pdf'
+      : kind === 'image' || kind === 'audio' || kind === 'video'
+        ? (/^(image|audio|video)\/[a-z0-9.+-]+$/i.test(meta.type) ? meta.type.toLowerCase() : 'application/octet-stream')
+        : 'text/plain';
+    const blob = new Blob([data as unknown as BlobPart], { type: safeType });
     const url = URL.createObjectURL(blob);
 
     let body: string;
     if (kind === 'image' && !svg) body = `<img class="attachment-preview-image" src="${url}" alt="${this.escapeHtml(meta.name)}">`;
-    else if (kind === 'pdf') body = `<iframe class="attachment-preview-frame" src="${url}" title="${this.escapeHtml(meta.name)}"></iframe>`;
+    // sandbox vide : le visualiseur PDF interne fonctionne, mais un document qui
+    // s'avérerait être autre chose reste privé de script et d'accès à l'origine.
+    else if (kind === 'pdf') body = `<iframe class="attachment-preview-frame" sandbox referrerpolicy="no-referrer" src="${url}" title="${this.escapeHtml(meta.name)}"></iframe>`;
     else if (kind === 'audio') body = `<audio class="attachment-preview-media" src="${url}" controls></audio>`;
     else if (kind === 'video') body = `<video class="attachment-preview-media" src="${url}" controls></video>`;
     else body = `<pre class="attachment-preview-text">${this.escapeHtml(new TextDecoder().decode(data).slice(0, 200_000))}</pre>`;
@@ -4560,7 +4575,7 @@ class AppController {
       </div>
     `);
     box.querySelector('[data-preview-download]')?.addEventListener('click', () => {
-      downloadExportFile(data, meta.name, type);
+      downloadExportFile(data, meta.name, meta.type || 'application/octet-stream');
     });
     // La fenêtre est retirée du DOM à la fermeture : on libère l'URL à ce moment-là
     new MutationObserver((_records, observer) => {

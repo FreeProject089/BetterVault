@@ -12,6 +12,38 @@ import { deriveArgon2idKey, type Argon2Params } from '../import_export/encrypted
 
 export const ACCOUNT_KDF: Argon2Params = { t: 3, m: 65536, p: 4 };
 
+/**
+ * Paramètres de dérivation annoncés par le serveur, à l'ouverture de session.
+ *
+ * Le serveur est hors de la frontière de confiance : il ne voit que des blobs
+ * chiffrés, mais il reçoit la preuve d'authentification dérivée du mot de passe
+ * principal. S'il choisissait librement le coût du KDF, il lui suffirait
+ * d'annoncer un coût dérisoire pour rendre cette preuve bien plus facile à
+ * casser hors ligne. Il peut donc durcir la dérivation, jamais l'affaiblir
+ * sous la référence de l'application — et pas au point d'épuiser l'appareil.
+ */
+const MAX_ACCOUNT_KDF = { t: 16, m: 1 << 20, p: 16 };
+
+export function assertAccountKdf(value: unknown, plancher: Argon2Params = ACCOUNT_KDF): Argon2Params {
+  const kdf = value as Partial<Argon2Params> | null;
+  const { t, m, p } = kdf ?? {};
+  // Le plancher est le coût que cette application utiliserait elle-même : une
+  // installation configurée plus bas (banc d'essai, serveur personnel) reste
+  // cohérente, sans jamais laisser le serveur descendre sous ce que le client a choisi.
+  const borne = [t, m, p].every(Number.isInteger)
+    && (t as number) >= plancher.t && (t as number) <= MAX_ACCOUNT_KDF.t
+    && (m as number) >= plancher.m && (m as number) <= MAX_ACCOUNT_KDF.m
+    && (p as number) >= 1 && (p as number) <= MAX_ACCOUNT_KDF.p;
+  if (!borne) throw new Error('Le serveur annonce des paramètres de sécurité trop faibles');
+  return { t: t as number, m: m as number, p: p as number };
+}
+
+/** Un sel trop court réduirait l'intérêt même du sel */
+export function assertSalt(bytes: Uint8Array): Uint8Array {
+  if (bytes.length < 16) throw new Error('Le serveur annonce des paramètres de sécurité trop faibles');
+  return bytes;
+}
+
 export interface EncryptedBlob {
   v: 1;
   iv: string;
