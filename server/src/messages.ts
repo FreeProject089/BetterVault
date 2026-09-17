@@ -48,6 +48,8 @@ const EXACT: Record<string, string> = {
   'Liste des membres obsolète, rechargez le coffre': 'Member list is out of date, reload the vault',
   'Seul le rôle Propriétaire peut supprimer le coffre': 'Only the Owner role can delete the vault',
   'Offre inconnue': 'Unknown plan',
+  'Vous ne pouvez pas accorder une permission que vous n’avez pas': 'You cannot grant a permission you do not have',
+  'Vous ne pouvez pas changer votre propre rôle': 'You cannot change your own role',
   'Durée inconnue pour cette offre': 'Unknown duration for this plan',
   'Aucun abonnement à renouveler': 'No subscription to renew',
   'Valeur attendue : true ou false': 'Expected value: true or false',

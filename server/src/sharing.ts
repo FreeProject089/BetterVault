@@ -50,6 +50,32 @@ function parsePermissions(value: unknown, allowDelete: boolean): Permission[] {
   return unique as Permission[];
 }
 
+/**
+ * Un membre ne peut pas accorder une permission qu'il ne détient pas lui-même.
+ *
+ * Sans cette borne, « manage_members » ou « manage_roles » suffisent à se hisser
+ * au niveau d'un administrateur : il suffit de s'attribuer un rôle plus puissant,
+ * ou d'ajouter des permissions à un rôle qu'on s'attribue ensuite. Le propriétaire
+ * détient toutes les permissions et n'est donc jamais gêné par ce contrôle.
+ */
+function requireGrantable(me: Membership, permissions: readonly Permission[]): void {
+  if (me.builtin === 'owner') return;
+  const excess = permissions.filter(permission => !me.permissions.has(permission));
+  if (excess.length) {
+    throw new HttpError(403, 'forbidden', 'Vous ne pouvez pas accorder une permission que vous n’avez pas');
+  }
+}
+
+/** Permissions portées par un rôle enregistré */
+function rolePermissions(role: { permissions: unknown }): Permission[] {
+  try {
+    const parsed = JSON.parse(String(role.permissions)) as unknown;
+    return Array.isArray(parsed) ? (parsed.filter(p => (PERMISSIONS as readonly string[]).includes(p as string)) as Permission[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 function parseRoleName(value: unknown): string {
   if (typeof value !== 'string' || !value.trim() || value.trim().length > 40) throw invalid('name');
   return value.trim();
@@ -249,13 +275,14 @@ export function sharingRoutes(ctx: RouteContext): PatternRoute[] {
     route('POST', '/api/v1/shared-vaults/:id/members', async (req, params) => {
       const { userId } = ctx.authenticate(req);
       ctx.limit(req, 'shared');
-      requireMember(ctx, params.id, userId, 'manage_members');
+      const me = requireMember(ctx, params.id, userId, 'manage_members');
       const body = await readJson(req, 4096);
       const targetId = parseId(body.userId, 'userId');
       const roleId = parseId(body.roleId, 'roleId');
       const wrappedKey = parseWrappedKey(body.wrappedKey);
       const role = roleInVault(params.id, roleId);
       if (role.builtin === 'owner') throw new HttpError(400, 'invalid_role', 'Transférez la propriété depuis la liste des membres');
+      requireGrantable(me, rolePermissions(role));
       const target = ctx.db.prepare('SELECT * FROM users WHERE id = ?').get(targetId) as Parameters<RouteContext['notify']>[1] | undefined;
       if (!target?.public_key) throw new HttpError(404, 'user_not_found', 'Compte introuvable');
       if (membership(ctx, params.id, targetId)) throw new HttpError(409, 'already_member', 'Cette personne fait déjà partie du coffre');
@@ -292,6 +319,9 @@ export function sharingRoutes(ctx: RouteContext): PatternRoute[] {
       }
 
       if (target.builtin === 'owner') throw new HttpError(403, 'forbidden', 'Le rôle du propriétaire ne peut pas être changé');
+      // Changer son propre rôle est une élévation de privilèges, jamais un besoin légitime
+      if (params.userId === userId) throw new HttpError(403, 'forbidden', 'Vous ne pouvez pas changer votre propre rôle');
+      requireGrantable(me, rolePermissions(role));
       ctx.db.prepare('UPDATE shared_members SET role_id = ? WHERE vault_id = ? AND user_id = ?').run(roleId, params.id, params.userId);
       return { status: 204 };
     }),
@@ -327,10 +357,11 @@ export function sharingRoutes(ctx: RouteContext): PatternRoute[] {
 
     route('POST', '/api/v1/shared-vaults/:id/roles', async (req, params) => {
       const { userId } = ctx.authenticate(req);
-      requireMember(ctx, params.id, userId, 'manage_roles');
+      const me = requireMember(ctx, params.id, userId, 'manage_roles');
       const body = await readJson(req, 4096);
       const name = parseRoleName(body.name);
       const permissions = parsePermissions(body.permissions, false);
+      requireGrantable(me, permissions);
       const count = ctx.db.prepare('SELECT COUNT(*) AS count FROM shared_roles WHERE vault_id = ?').get(params.id) as { count: number };
       const maxRoles = ctx.settings().limits.maxRolesPerSharedVault;
       if (count.count >= maxRoles) throw new HttpError(403, 'limit_reached', `${maxRoles} rôles maximum par coffre`);
@@ -341,12 +372,15 @@ export function sharingRoutes(ctx: RouteContext): PatternRoute[] {
 
     route('PATCH', '/api/v1/shared-vaults/:id/roles/:roleId', async (req, params) => {
       const { userId } = ctx.authenticate(req);
-      requireMember(ctx, params.id, userId, 'manage_roles');
+      const me = requireMember(ctx, params.id, userId, 'manage_roles');
       const role = roleInVault(params.id, params.roleId);
       if (role.builtin) throw new HttpError(400, 'builtin_role', 'Les rôles prédéfinis ne sont pas modifiables');
       const body = await readJson(req, 4096);
       const name = body.name === undefined ? undefined : parseRoleName(body.name);
       const permissions = body.permissions === undefined ? undefined : parsePermissions(body.permissions, false);
+      // Il faut deja detenir ce que porte le role, sinon on s'en sert comme d'un escabeau
+      requireGrantable(me, rolePermissions(role));
+      if (permissions !== undefined) requireGrantable(me, permissions);
       if (name !== undefined) ctx.db.prepare('UPDATE shared_roles SET name = ? WHERE id = ?').run(name, role.id);
       if (permissions !== undefined) ctx.db.prepare('UPDATE shared_roles SET permissions = ? WHERE id = ?').run(JSON.stringify(permissions), role.id);
       return { status: 204 };
@@ -369,7 +403,9 @@ export function sharingRoutes(ctx: RouteContext): PatternRoute[] {
      */
     route('POST', '/api/v1/shared-vaults/:id/rotate', async (req, params) => {
       const { userId } = ctx.authenticate(req);
+      // La route remplace le contenu chiffre du coffre : gerer les membres ne suffit pas
       requireMember(ctx, params.id, userId, 'manage_members');
+      requireMember(ctx, params.id, userId, 'write');
       const body = await readJson(req, ctx.maxBody());
       const baseRevision = body.baseRevision;
       if (!Number.isInteger(baseRevision)) throw invalid('baseRevision');
