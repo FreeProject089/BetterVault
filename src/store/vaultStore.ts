@@ -10,6 +10,18 @@ export const TAG_COLORS = ['#7773e8', '#a371f7', '#2ea043', '#d29922', '#f85149'
 type NewCredential = Omit<CredentialItem, 'id' | 'createdAt' | 'updatedAt'>;
 type NewTask = Omit<Task, 'id' | 'createdAt' | 'updatedAt'>;
 
+/**
+ * Forme imposée à tout identifiant présent dans le coffre.
+ *
+ * Les identifiants finissent dans des attributs HTML et des sélecteurs CSS. Ceux
+ * que l'application produit sont sûrs, mais un coffre partagé, un import ou un
+ * autre appareil peuvent en apporter d'arbitraires : on les remplace à l'entrée
+ * plutôt que d'espérer que chacun des points d'affichage pense à les échapper.
+ */
+const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+export const isSafeId = (value: unknown): value is string => typeof value === 'string' && SAFE_ID.test(value);
+
 export function randomId(prefix: string): string {
   const bytes = crypto.getRandomValues(new Uint8Array(9));
   return `${prefix}-${Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')}`;
@@ -143,6 +155,56 @@ export function normalizeVaultData(input: Partial<UnlockedVaultData> | null | un
 
   if (data.vaults.length === 0) data.vaults.push(createVault(DEFAULT_VAULT_NAME, 'personal', now));
   if (!data.vaults.some(v => v.id === data.activeVaultId)) data.activeVaultId = data.vaults[0].id;
+
+  // Les identifiants qui ne respectent pas la forme attendue sont remplacés, et
+  // toutes les références qui les désignaient suivent : rien n'est perdu.
+  const remap = new Map<string, string>();
+  const safe = (value: unknown, prefix: string): string => {
+    if (isSafeId(value)) return value;
+    const previous = typeof value === 'string' ? value : '';
+    const existing = remap.get(previous);
+    if (existing) return existing;
+    const replacement = randomId(prefix);
+    remap.set(previous, replacement);
+    return replacement;
+  };
+
+  for (const vault of data.vaults) vault.id = safe(vault.id, 'vault');
+  for (const folder of data.folders) folder.id = safe(folder.id, 'folder');
+  for (const tag of data.tagDefs) tag.id = safe(tag.id, 'tag');
+  for (const type of data.vaultTypes ?? []) type.id = safe(type.id, 'type');
+  for (const credential of data.credentials) {
+    credential.id = safe(credential.id, 'cred');
+    for (const field of credential.fields ?? []) field.id = safe(field.id, 'field');
+  }
+  for (const task of data.tasks) {
+    task.id = safe(task.id, 'task');
+    for (const sub of task.subtasks ?? []) sub.id = safe(sub.id, 'sub');
+  }
+
+  if (remap.size) {
+    const follow = (value: string | undefined): string | undefined =>
+      value === undefined ? undefined : (remap.get(value) ?? value);
+
+    data.activeVaultId = follow(data.activeVaultId) ?? data.activeVaultId;
+    for (const folder of data.folders) {
+      folder.vaultId = follow(folder.vaultId) ?? folder.vaultId;
+      if (folder.parentId) folder.parentId = follow(folder.parentId);
+    }
+    for (const credential of data.credentials) {
+      credential.vaultId = follow(credential.vaultId) ?? credential.vaultId;
+      if (credential.folderId) credential.folderId = follow(credential.folderId);
+    }
+    for (const task of data.tasks) {
+      task.vaultId = follow(task.vaultId) ?? task.vaultId;
+      if (task.linkedCredentialId) task.linkedCredentialId = follow(task.linkedCredentialId);
+      if (task.dependsOn) task.dependsOn = task.dependsOn.map(id => follow(id) ?? id);
+    }
+    for (const vault of data.vaults) {
+      if (vault.type) vault.type = follow(vault.type) ?? vault.type;
+    }
+    data.deleted = Object.fromEntries(Object.entries(data.deleted).map(([id, at]) => [follow(id) ?? id, at]));
+  }
 
   // Un dossier dont le parent a disparu (suppression sur un autre appareil) remonte à la racine,
   // et une boucle de parents rendrait l'arborescence infinie : les deux cas sont réparés ici.
