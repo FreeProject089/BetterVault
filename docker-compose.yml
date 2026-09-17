@@ -87,6 +87,20 @@ services:
       - caddy-data:/data
       - caddy-config:/config
 
+  # Collecteur d'emails pour les essais : docker compose --profile mail up -d
+  # Il capture tout ce que le serveur envoie au lieu de le livrer ; rien ne part sur Internet.
+  # Renseigner SMTP_HOST=mailpit, SMTP_PORT=1025 et SMTP_SECURITY=none dans le .env.
+  mailpit:
+    image: axllent/mailpit:latest
+    profiles: ["mail"]
+    restart: unless-stopped
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    ports:
+      # Interface de lecture des messages, depuis la machine hôte uniquement
+      - "127.0.0.1:8025:8025"
+
   # Stockage S3 auto-hébergé pour les sauvegardes : docker compose --profile backup up -d
   # Pour un S3 externe (AWS, Backblaze, Scaleway…), ne lancez pas ce profil et renseignez BACKUP_S3_ENDPOINT.
   minio:
