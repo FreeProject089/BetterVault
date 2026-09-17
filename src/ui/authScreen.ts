@@ -361,7 +361,8 @@ export function mountAuthScreen(
       const mode = form.querySelector<HTMLInputElement>('input[name="auth-mode"]:checked')?.value === 'cloud' ? 'cloud' : 'local';
       const initial = createEmptyVaultData();
       initial.vaults[0].name = tr('Personnel', 'Personal');
-      if (mode === 'cloud' && !form.querySelector<HTMLInputElement>('[data-accept-terms]')?.checked) {
+      const termsHidden = form.querySelector<HTMLElement>('[data-terms]')?.hidden ?? true;
+      if (mode === 'cloud' && !termsHidden && !form.querySelector<HTMLInputElement>('[data-accept-terms]')?.checked) {
         return fail(tr('Acceptez les conditions d’utilisation du serveur pour créer un compte synchronisé', 'Accept the server’s terms of use to create a synced account'));
       }
       task = async () => {
@@ -621,20 +622,52 @@ export function mountAuthScreen(
       finish(data);
     });
 
-    // Création d'un compte synchronisé : liens vers les documents du serveur choisi
+    /*
+     * Création d'un compte synchronisé : liens vers les documents du serveur choisi.
+     *
+     * Chaque serveur décide s'il publie des conditions — un serveur personnel n'a
+     * personne à informer et peut les désactiver. On le lui demande donc avant
+     * d'exiger quoi que ce soit : s'il n'en publie pas, la case disparaît. En cas
+     * d'échec de l'appel on garde la case, faute de pouvoir conclure.
+     */
     const termsRow = card.querySelector<HTMLElement>('[data-terms]');
     if (termsRow) {
       const serverInput = card.querySelector<HTMLInputElement>('#auth-server');
+      const acceptBox = termsRow.querySelector<HTMLInputElement>('[data-accept-terms]');
+      let sonde = 0;
+
       const updateTerms = () => {
         const cloud = card.querySelector<HTMLInputElement>('input[name="auth-mode"]:checked')?.value === 'cloud';
-        termsRow.hidden = !cloud;
         const base = (serverInput?.value ?? '').trim().replace(/\/+$/, '');
+        const joignable = /^https?:\/\//.test(base);
+        termsRow.hidden = !cloud;
         termsRow.querySelectorAll<HTMLAnchorElement>('[data-legal]').forEach(link => {
-          if (/^https?:\/\//.test(base)) link.href = `${base}/legal/${link.dataset.legal}?lang=${i18n.getLocale()}`;
+          if (joignable) link.href = `${base}/legal/${link.dataset.legal}?lang=${i18n.getLocale()}`;
           else link.removeAttribute('href');
         });
+        if (!cloud || !joignable) return;
+
+        const appel = ++sonde;
+        void fetch(`${base}/api/v1/legal`, { headers: { 'Accept-Language': i18n.getLocale() } })
+          .then(response => (response.ok ? response.json() : null))
+          .then((info: { enabled?: boolean } | null) => {
+            // Une réponse arrivée après une saisie plus récente ne décide plus de rien
+            if (appel !== sonde || !termsRow.isConnected) return;
+            const publie = info?.enabled !== false;
+            termsRow.hidden = !publie;
+            if (!publie && acceptBox) acceptBox.checked = false;
+          })
+          .catch(() => undefined);
       };
-      serverInput?.addEventListener('input', updateTerms);
+
+      // La sonde part quand la saisie se stabilise, pas à chaque frappe
+      let minuteur: ReturnType<typeof setTimeout> | undefined;
+      const updateBientot = () => {
+        clearTimeout(minuteur);
+        minuteur = setTimeout(updateTerms, 400);
+      };
+      serverInput?.addEventListener('input', updateBientot);
+      serverInput?.addEventListener('change', updateTerms);
       card.querySelectorAll<HTMLInputElement>('input[name="auth-mode"]').forEach(radio => radio.addEventListener('change', updateTerms));
       updateTerms();
     }

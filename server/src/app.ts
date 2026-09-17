@@ -724,11 +724,17 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
   const legalDir = options.legalDir ?? fileURLToPath(new URL('../legal', import.meta.url));
 
   Object.assign(routes, accountKeyRoutes(context), sessionRoutes(context), billingRoutes(context, fetchImpl), avatarRoutes(context), {
+    // Consultable sans session : l'application interroge ce serveur avant même
+    // de proposer la création d'un compte, pour savoir s'il y a des conditions à accepter.
     'GET /api/v1/legal': async (req: IncomingMessage): Promise<Reply> => {
       const locale = requestLocale(req);
+      if (!settings.legal.enabled) {
+        return { status: 200, body: { enabled: false, configured: true, operatorName: null, effectiveDate: null, documents: [] } };
+      }
       return {
         status: 200,
         body: {
+          enabled: true,
           configured: legalConfigured(settings.legal),
           operatorName: settings.legal.operatorName || null,
           effectiveDate: settings.legal.effectiveDate || null,
@@ -750,6 +756,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
             geoEnabled: geoAvailable(),
             emailEnabled: !!settings.smtp,
             registrationOpen: settings.registrationOpen,
+            legalEnabled: settings.legal.enabled,
             legalConfigured: legalConfigured(settings.legal),
             backupEncrypted: !!process.env.BACKUP_ENCRYPTION_KEY
           }
