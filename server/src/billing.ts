@@ -18,14 +18,25 @@ export type BoostKey = 'attachmentQuotaBytes' | 'maxAttachmentBytes' | 'maxVault
 
 export const BOOST_KEYS: BoostKey[] = ['attachmentQuotaBytes', 'maxAttachmentBytes', 'maxVaultBytes', 'maxVaults', 'maxCredentialsPerVault'];
 
+/**
+ * Un tarif d'une offre : une durée et son prix Stripe.
+ *
+ * Une offre en propose souvent deux (mensuel, annuel) ; le compte choisit au moment
+ * de payer. « payment » est un achat unique, qui ne se renouvelle donc jamais.
+ */
+export interface BillingPrice {
+  id: string;
+  /** Texte affiché, ex. « 2 € / mois » */
+  label: string;
+  stripePriceId: string;
+  mode: 'subscription' | 'payment';
+}
+
 export interface BillingPlan {
   id: string;
   name: string;
   description: string;
-  /** Texte affiché, ex. « 2 € / mois » */
-  priceLabel: string;
-  stripePriceId: string;
-  mode: 'subscription' | 'payment';
+  prices: BillingPrice[];
   boosts: Partial<Record<BoostKey, number>>;
 }
 
@@ -43,8 +54,30 @@ export function billingFromEnv(env: Record<string, string | undefined>): Billing
     enabled: env.BILLING_ENABLED === 'true',
     stripeSecretKey: env.STRIPE_SECRET_KEY ?? '',
     stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET ?? '',
-    plans: []
+    plans: plansFromEnv(env.BILLING_PLANS)
   };
+}
+
+/**
+ * Offres définies dans l'environnement, en JSON sur une ligne. Elles servent de
+ * valeurs de départ : la page d'administration les remplace dès qu'on y touche.
+ * Un JSON invalide arrête le serveur plutôt que de démarrer sans offres.
+ */
+export function plansFromEnv(raw: string | undefined): BillingPlan[] {
+  const text = raw?.trim();
+  if (!text) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error('BILLING_PLANS doit être un tableau JSON valide');
+  }
+  if (!Array.isArray(parsed)) throw new Error('BILLING_PLANS doit être un tableau JSON');
+  try {
+    return parsed.map((plan, index) => normalizePlan(plan, index));
+  } catch (err) {
+    throw new Error(`BILLING_PLANS : ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 export function parseBillingUpdate(input: unknown, current: BillingSettings): BillingSettings {
@@ -63,44 +96,90 @@ export function parseBillingUpdate(input: unknown, current: BillingSettings): Bi
     if (body.plans.length > 20) throw new Error('20 offres maximum');
     const ids = new Set<string>();
     next.plans = body.plans.map((raw, index) => {
-      const plan = raw as Partial<BillingPlan>;
-      const id = String(plan.id ?? '').trim();
-      if (!/^[a-z0-9-]{2,32}$/.test(id) || ids.has(id)) throw new Error(`Offre ${index + 1} : identifiant invalide ou en double`);
-      ids.add(id);
-      const name = String(plan.name ?? '').trim();
-      if (!name || name.length > 60) throw new Error(`Offre ${id} : nom requis (60 caractères max.)`);
-      const stripePriceId = String(plan.stripePriceId ?? '').trim();
-      if (!/^price_[A-Za-z0-9]+$/.test(stripePriceId)) throw new Error(`Offre ${id} : identifiant de prix Stripe invalide (price_…)`);
-      const boosts: BillingPlan['boosts'] = {};
-      for (const key of BOOST_KEYS) {
-        const value = (plan.boosts as Record<string, unknown> | undefined)?.[key];
-        if (value === undefined || value === null || value === 0) continue;
-        if (!Number.isInteger(value) || (value as number) < 0) throw new Error(`Offre ${id} : valeur « ${key} » invalide`);
-        boosts[key] = value as number;
-      }
-      return {
-        id,
-        name,
-        description: String(plan.description ?? '').trim().slice(0, 300),
-        priceLabel: String(plan.priceLabel ?? '').trim().slice(0, 40),
-        stripePriceId,
-        mode: plan.mode === 'payment' ? 'payment' : 'subscription',
-        boosts
-      };
+      const plan = normalizePlan(raw, index);
+      if (ids.has(plan.id)) throw new Error(`Offre ${index + 1} : identifiant en double`);
+      ids.add(plan.id);
+      return plan;
     });
   }
   return next;
+}
+
+/**
+ * Valide une offre, quelle que soit sa provenance.
+ *
+ * Accepte aussi l'ancienne forme à un seul tarif (`stripePriceId`, `priceLabel`, `mode`
+ * sur l'offre) : les réglages déjà enregistrés se relisent sans manipulation.
+ */
+export function normalizePlan(raw: unknown, index = 0): BillingPlan {
+  const plan = (raw ?? {}) as Partial<BillingPlan> & { stripePriceId?: string; priceLabel?: string; mode?: string };
+  const id = String(plan.id ?? '').trim();
+  if (!/^[a-z0-9-]{2,32}$/.test(id)) throw new Error(`Offre ${index + 1} : identifiant invalide`);
+
+  const name = String(plan.name ?? '').trim();
+  if (!name || name.length > 60) throw new Error(`Offre ${id} : nom requis (60 caractères max.)`);
+
+  const rawPrices = Array.isArray(plan.prices) && plan.prices.length
+    ? plan.prices
+    : [{ id: 'defaut', label: plan.priceLabel, stripePriceId: plan.stripePriceId, mode: plan.mode }];
+
+  if (rawPrices.length > 6) throw new Error(`Offre ${id} : 6 tarifs maximum`);
+  const priceIds = new Set<string>();
+  const prices: BillingPrice[] = rawPrices.map((rawPrice, priceIndex) => {
+    const price = (rawPrice ?? {}) as Partial<BillingPrice>;
+    const priceId = String(price.id ?? '').trim() || `tarif-${priceIndex + 1}`;
+    if (!/^[a-z0-9-]{2,32}$/.test(priceId)) throw new Error(`Offre ${id} : identifiant de tarif invalide`);
+    if (priceIds.has(priceId)) throw new Error(`Offre ${id} : tarif « ${priceId} » en double`);
+    priceIds.add(priceId);
+
+    const stripePriceId = String(price.stripePriceId ?? '').trim();
+    if (!/^price_[A-Za-z0-9]+$/.test(stripePriceId)) throw new Error(`Offre ${id} : identifiant de prix Stripe invalide (price_…)`);
+
+    return {
+      id: priceId,
+      label: String(price.label ?? '').trim().slice(0, 40),
+      stripePriceId,
+      mode: price.mode === 'payment' ? 'payment' : 'subscription'
+    };
+  });
+
+  const boosts: BillingPlan['boosts'] = {};
+  for (const key of BOOST_KEYS) {
+    const value = (plan.boosts as Record<string, unknown> | undefined)?.[key];
+    if (value === undefined || value === null || value === 0) continue;
+    if (!Number.isInteger(value) || (value as number) < 0) throw new Error(`Offre ${id} : valeur « ${key} » invalide`);
+    boosts[key] = value as number;
+  }
+
+  return { id, name, description: String(plan.description ?? '').trim().slice(0, 300), prices, boosts };
 }
 
 export function publicBilling(billing: BillingSettings): unknown {
   return { ...billing, stripeSecretKey: '', stripeWebhookSecret: '', hasSecretKey: !!billing.stripeSecretKey, hasWebhookSecret: !!billing.stripeWebhookSecret };
 }
 
+/**
+ * Offre telle que la voit un compte : sans les identifiants de prix Stripe.
+ *
+ * `prices` est tolérant : une offre construite sans passer par normalizePlan
+ * s'affiche alors sans tarif — donc non achetable — au lieu de faire échouer
+ * toute la page des offres.
+ */
+export function planForAccount(plan: BillingPlan): unknown {
+  return {
+    ...plan,
+    prices: (plan.prices ?? []).map(({ stripePriceId: _hidden, ...price }) => price)
+  };
+}
+
 interface SubscriptionRow {
   user_id: string;
   plan_id: string;
+  price_id: string | null;
   status: string;
   current_period_end: number | null;
+  /** 1 quand l'abonnement s'arrête à la fin de la période au lieu de se renouveler */
+  cancel_at_period_end: number;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
 }
@@ -167,9 +246,10 @@ export function billingRoutes(ctx: RouteContext, fetchImpl: typeof fetch): Recor
   };
 
   const upsert = ctx.db.prepare(`
-    INSERT INTO subscriptions (user_id, plan_id, status, current_period_end, stripe_customer_id, stripe_subscription_id, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(user_id) DO UPDATE SET plan_id = excluded.plan_id, status = excluded.status, current_period_end = excluded.current_period_end,
+    INSERT INTO subscriptions (user_id, plan_id, price_id, status, current_period_end, cancel_at_period_end, stripe_customer_id, stripe_subscription_id, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET plan_id = excluded.plan_id, price_id = excluded.price_id, status = excluded.status,
+      current_period_end = excluded.current_period_end, cancel_at_period_end = excluded.cancel_at_period_end,
       stripe_customer_id = excluded.stripe_customer_id, stripe_subscription_id = excluded.stripe_subscription_id, updated_at = excluded.updated_at`);
 
   const periodEnd = (subscription: Record<string, unknown>): number | null => {
@@ -183,13 +263,27 @@ export function billingRoutes(ctx: RouteContext, fetchImpl: typeof fetch): Recor
     'GET /api/v1/billing': async req => {
       const { userId } = ctx.authenticate(req);
       const settings = billing();
-      const row = ctx.db.prepare('SELECT plan_id, status, current_period_end FROM subscriptions WHERE user_id = ?').get(userId) as Pick<SubscriptionRow, 'plan_id' | 'status' | 'current_period_end'> | undefined;
+      const row = ctx.db.prepare('SELECT plan_id, price_id, status, current_period_end, cancel_at_period_end, stripe_subscription_id FROM subscriptions WHERE user_id = ?')
+        .get(userId) as Pick<SubscriptionRow, 'plan_id' | 'price_id' | 'status' | 'current_period_end' | 'cancel_at_period_end' | 'stripe_subscription_id'> | undefined;
+      const plan = row && settings.plans.find(p => p.id === row.plan_id);
+      const price = plan && row?.price_id ? plan.prices.find(pr => pr.id === row.price_id) : undefined;
       return {
         status: 200,
         body: {
           enabled: settings.enabled && !!settings.stripeSecretKey,
-          plans: settings.enabled ? settings.plans.map(({ stripePriceId: _price, ...plan }) => plan) : [],
-          subscription: row ? { planId: row.plan_id, status: row.status, currentPeriodEnd: row.current_period_end, active: !!activeSubscription(ctx.db, userId, ctx.now()) } : null,
+          plans: settings.enabled ? settings.plans.map(planForAccount) : [],
+          subscription: row ? {
+            planId: row.plan_id,
+            planName: plan?.name ?? row.plan_id,
+            priceId: row.price_id,
+            priceLabel: price?.label ?? '',
+            status: row.status,
+            currentPeriodEnd: row.current_period_end,
+            active: !!activeSubscription(ctx.db, userId, ctx.now()),
+            // Un achat unique ne se renouvelle pas : la question du renouvellement ne se pose que pour un abonnement
+            renewable: !!row.stripe_subscription_id && price?.mode !== 'payment',
+            autoRenew: row.cancel_at_period_end === 0
+          } : null,
           limits: ctx.limitsFor(userId)
         }
       };
@@ -199,17 +293,27 @@ export function billingRoutes(ctx: RouteContext, fetchImpl: typeof fetch): Recor
       const { userId } = ctx.authenticate(req);
       ctx.limit(req, 'billing');
       if (!billing().enabled) throw new HttpError(404, 'billing_disabled', 'Offres désactivées sur ce serveur');
-      const planId = String((await readJson(req, 1024)).planId ?? '');
-      const plan = billing().plans.find(p => p.id === planId);
+      const body = await readJson(req, 1024);
+      const plan = billing().plans.find(p => p.id === String(body.planId ?? ''));
       if (!plan) throw new HttpError(400, 'invalid_plan', 'Offre inconnue');
+
+      // Sans durée précisée, la première proposée par l'offre
+      const priceId = String(body.priceId ?? '').trim();
+      const price = priceId ? plan.prices.find(p => p.id === priceId) : plan.prices[0];
+      if (!price) throw new HttpError(400, 'invalid_price', 'Durée inconnue pour cette offre');
+
+      const metadata = { 'metadata[user_id]': userId, 'metadata[plan_id]': plan.id, 'metadata[price_id]': price.id };
       const session = await stripe<{ url: string }>('POST', 'checkout/sessions', {
-        mode: plan.mode,
-        'line_items[0][price]': plan.stripePriceId,
+        mode: price.mode,
+        'line_items[0][price]': price.stripePriceId,
         'line_items[0][quantity]': '1',
         client_reference_id: userId,
-        'metadata[user_id]': userId,
-        'metadata[plan_id]': plan.id,
-        ...(plan.mode === 'subscription' ? { 'subscription_data[metadata][user_id]': userId, 'subscription_data[metadata][plan_id]': plan.id } : {}),
+        ...metadata,
+        ...(price.mode === 'subscription' ? {
+          'subscription_data[metadata][user_id]': userId,
+          'subscription_data[metadata][plan_id]': plan.id,
+          'subscription_data[metadata][price_id]': price.id
+        } : {}),
         success_url: returnUrl('/?billing=success'),
         cancel_url: returnUrl('/?billing=cancel')
       });
@@ -223,6 +327,30 @@ export function billingRoutes(ctx: RouteContext, fetchImpl: typeof fetch): Recor
       if (!row?.stripe_customer_id) throw new HttpError(404, 'no_customer', 'Aucun abonnement à gérer');
       const portal = await stripe<{ url: string }>('POST', 'billing_portal/sessions', { customer: row.stripe_customer_id, return_url: returnUrl('/') });
       return { status: 200, body: { url: portal.url } };
+    },
+
+    /**
+     * Renouvellement automatique. Rien n'est supprimé : couper le renouvellement
+     * laisse l'abonnement courir jusqu'au bout de la période déjà payée.
+     */
+    'POST /api/v1/billing/auto-renew': async req => {
+      const { userId } = ctx.authenticate(req);
+      ctx.limit(req, 'billing');
+      const enabled = (await readJson(req, 1024)).enabled;
+      if (typeof enabled !== 'boolean') throw new HttpError(400, 'invalid_body', 'Valeur attendue : true ou false');
+
+      const row = ctx.db.prepare('SELECT stripe_subscription_id FROM subscriptions WHERE user_id = ?').get(userId) as { stripe_subscription_id: string | null } | undefined;
+      if (!row?.stripe_subscription_id) throw new HttpError(404, 'no_subscription', 'Aucun abonnement à renouveler');
+
+      const updated = await stripe<Record<string, unknown>>('POST', `subscriptions/${encodeURIComponent(row.stripe_subscription_id)}`, {
+        cancel_at_period_end: enabled ? 'false' : 'true'
+      });
+      const cancelAtPeriodEnd = updated.cancel_at_period_end === true ? 1 : 0;
+      ctx.db.prepare('UPDATE subscriptions SET cancel_at_period_end = ?, current_period_end = ?, updated_at = ? WHERE user_id = ?')
+        .run(cancelAtPeriodEnd, periodEnd(updated), ctx.now(), userId);
+      ctx.audit(enabled ? 'billing.auto_renew_on' : 'billing.auto_renew_off', {}, userId);
+
+      return { status: 200, body: { autoRenew: cancelAtPeriodEnd === 0, currentPeriodEnd: periodEnd(updated) } };
     },
 
     'POST /api/v1/billing/webhook': async req => {
@@ -248,14 +376,16 @@ export function billingRoutes(ctx: RouteContext, fetchImpl: typeof fetch): Recor
           if (typeof object.subscription === 'string') {
             end = periodEnd(await stripe<Record<string, unknown>>('GET', `subscriptions/${encodeURIComponent(object.subscription)}`));
           }
-          upsert.run(userId, planId, 'active', end, (object.customer as string | null) ?? null, (object.subscription as string | null) ?? null, ctx.now());
+          upsert.run(userId, planId, metadata.price_id ?? null, 'active', end, 0, (object.customer as string | null) ?? null, (object.subscription as string | null) ?? null, ctx.now());
           ctx.audit('billing.subscription_started', { plan: planId }, userId);
         }
       } else if (event.type === 'customer.subscription.updated' || event.type === 'customer.subscription.deleted') {
         const row = ctx.db.prepare('SELECT user_id FROM subscriptions WHERE stripe_subscription_id = ?').get(object.id as string) as { user_id: string } | undefined;
         if (row) {
           const status = event.type === 'customer.subscription.deleted' ? 'canceled' : String(object.status ?? 'active');
-          ctx.db.prepare('UPDATE subscriptions SET status = ?, current_period_end = ?, updated_at = ? WHERE user_id = ?').run(status, periodEnd(object), ctx.now(), row.user_id);
+          const cancelAtPeriodEnd = object.cancel_at_period_end === true ? 1 : 0;
+          ctx.db.prepare('UPDATE subscriptions SET status = ?, current_period_end = ?, cancel_at_period_end = ?, updated_at = ? WHERE user_id = ?')
+            .run(status, periodEnd(object), cancelAtPeriodEnd, ctx.now(), row.user_id);
           ctx.audit('billing.subscription_updated', { status }, row.user_id);
         }
       } else if (event.type === 'invoice.payment_failed' && typeof object.subscription === 'string') {

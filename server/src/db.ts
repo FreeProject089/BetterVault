@@ -152,6 +152,8 @@ export function openDatabase(path: string): DatabaseSync {
   `);
 
   // Colonnes ajoutées après la première version : les bases existantes sont complétées
+  addColumn(db, 'subscriptions', 'price_id TEXT');
+  addColumn(db, 'subscriptions', 'cancel_at_period_end INTEGER NOT NULL DEFAULT 0');
   addColumn(db, 'users', 'locale TEXT');
   addColumn(db, 'users', 'totp_secret TEXT');
   addColumn(db, 'users', 'totp_enabled INTEGER NOT NULL DEFAULT 0');

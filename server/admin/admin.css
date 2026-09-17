@@ -189,3 +189,8 @@ table.audit.compact td, table.audit.compact th { padding: 4px 6px; }
   input, select { padding: 10px; font-size: 16px; } /* 16 px : évite le zoom automatique d'iOS */
   input[type="checkbox"] { min-width: 18px; min-height: 18px; }
 }
+
+.price-row { align-items: flex-end; gap: 8px; margin-bottom: 8px; }
+.price-row > div { margin: 0; }
+.price-row label { margin-top: 0; }
+.price-row [data-remove-price] { flex: 0 0 auto; padding: 8px 12px; }

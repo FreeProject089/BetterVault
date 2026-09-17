@@ -8,7 +8,7 @@ import { createApp } from '../server/src/app.ts';
 import { settingsFromEnv, type ServerSettings } from '../server/src/config.ts';
 import { decryptBackup } from '../server/src/backup.ts';
 import { createGeoLookup, describeUserAgent, truncateIp } from '../server/src/geoip.ts';
-import { verifyStripeSignature } from '../server/src/billing.ts';
+import { normalizePlan, verifyStripeSignature } from '../server/src/billing.ts';
 import { fillTemplate } from '../server/src/legal.ts';
 import { AccountService, type KeyValueStorage } from '../src/account/accountService';
 import { WrongPasswordError } from '../src/account/accountCrypto';
@@ -35,7 +35,15 @@ const fakeStripe: typeof fetch = async (input, init) => {
   const url = String(input);
   stripeCalls.push({ url, body: String(init?.body ?? '') });
   if (url.endsWith('/checkout/sessions')) return Response.json({ url: 'https://checkout.stripe.com/c/pay/test' });
-  if (url.includes('/subscriptions/')) return Response.json({ id: 'sub_1', current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30 });
+  if (url.includes('/subscriptions/')) {
+    // Stripe renvoie l'abonnement mis à jour : le faux serveur reflète ce qui lui est envoyé
+    const sent = new URLSearchParams(String(init?.body ?? ''));
+    return Response.json({
+      id: url.split('/subscriptions/')[1],
+      cancel_at_period_end: sent.get('cancel_at_period_end') === 'true',
+      current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30
+    });
+  }
   return Response.json({ error: { message: 'inconnu' } }, { status: 404 });
 };
 
@@ -74,7 +82,16 @@ describe('Serveur : sessions, offres, documents légaux, tableau de bord', () =>
         enabled: true,
         stripeSecretKey: 'sk_test_123',
         stripeWebhookSecret: WEBHOOK_SECRET,
-        plans: [{ id: 'plus', name: 'Plus', description: '', priceLabel: '2 € / mois', stripePriceId: 'price_plus', mode: 'subscription', boosts: { attachmentQuotaBytes: 1024 * 1024 * 1024, maxVaults: 5 } }]
+        plans: [normalizePlan({
+          id: 'plus',
+          name: 'Plus',
+          description: '',
+          prices: [
+            { id: 'mensuel', label: '2 € / mois', stripePriceId: 'price_plus', mode: 'subscription' },
+            { id: 'annuel', label: '20 € / an', stripePriceId: 'price_plusAnnuel', mode: 'subscription' }
+          ],
+          boosts: { attachmentQuotaBytes: 1024 * 1024 * 1024, maxVaults: 5 }
+        })]
       },
       legal: { ...base.legal, operatorName: 'Association Exemple', contactEmail: 'contact@exemple.fr' }
     });
@@ -112,11 +129,17 @@ describe('Serveur : sessions, offres, documents légaux, tableau de bord', () =>
     expect(before.enabled).toBe(true);
     expect(before.plans[0]).not.toHaveProperty('stripePriceId');
 
+    // Sans durée précisée, la première de l'offre
     const { url } = await device.startCheckout('plus');
     expect(url).toContain('checkout.stripe.com');
     const call = stripeCalls.find(c => c.url.endsWith('/checkout/sessions'))!;
     expect(call.body).toContain('price_plus');
     expect(call.body).not.toContain(encodeURIComponent(email));
+
+    // La durée choisie décide du prix Stripe envoyé
+    stripeCalls.length = 0;
+    await device.startCheckout('plus', 'annuel');
+    expect(stripeCalls.find(c => c.url.endsWith('/checkout/sessions'))!.body).toContain('price_plusAnnuel');
 
     const userId = new URLSearchParams(call.body).get('client_reference_id')!;
     const event = JSON.stringify({ id: 'evt_1', type: 'checkout.session.completed', data: { object: { client_reference_id: userId, customer: 'cus_1', subscription: 'sub_1', metadata: { plan_id: 'plus' } } } });
@@ -131,9 +154,52 @@ describe('Serveur : sessions, offres, documents légaux, tableau de bord', () =>
     expect(await (await post(sign(event))).json()).toMatchObject({ duplicate: true });
 
     const after = await device.getBilling();
-    expect(after.subscription).toMatchObject({ planId: 'plus', active: true });
+    expect(after.subscription).toMatchObject({ planId: 'plus', planName: 'Plus', active: true, autoRenew: true, renewable: true });
     expect(after.limits.attachmentQuotaBytes).toBe(before.limits.attachmentQuotaBytes + 1024 * 1024 * 1024);
     expect(after.limits.maxVaults).toBe(before.limits.maxVaults + 5);
+  });
+
+  it('coupe et rétablit le renouvellement automatique sans rien supprimer', async () => {
+    const email = uniqueEmail('renouvellement');
+    const device = newService();
+    await device.createAccount({ email, password: PASSWORD, mode: 'cloud', serverUrl: ctx.url }, createEmptyVaultData());
+
+    // Sans abonnement, il n'y a rien à renouveler
+    await expect(device.setAutoRenew(false)).rejects.toThrow();
+
+    // Les appels du test précédent fausseraient la recherche ci-dessous
+    stripeCalls.length = 0;
+    await device.startCheckout('plus', 'mensuel');
+    const call = stripeCalls.find(c => c.url.endsWith('/checkout/sessions'))!;
+    const userId = new URLSearchParams(call.body).get('client_reference_id')!;
+    const event = JSON.stringify({
+      id: 'evt_renew',
+      type: 'checkout.session.completed',
+      data: { object: { client_reference_id: userId, customer: 'cus_2', subscription: 'sub_2', metadata: { plan_id: 'plus', price_id: 'mensuel' } } }
+    });
+    const t = Math.floor(Date.now() / 1000);
+    await fetch(`${ctx.url}/api/v1/billing/webhook`, {
+      method: 'POST',
+      headers: { 'Stripe-Signature': `t=${t},v1=${createHmac('sha256', WEBHOOK_SECRET).update(`${t}.${event}`).digest('hex')}`, 'Content-Type': 'application/json' },
+      body: event
+    });
+
+    const started = await device.getBilling();
+    expect(started.subscription).toMatchObject({ priceId: 'mensuel', priceLabel: '2 € / mois', autoRenew: true });
+
+    stripeCalls.length = 0;
+    const off = await device.setAutoRenew(false);
+    expect(off.autoRenew).toBe(false);
+    expect(stripeCalls.find(c => c.url.includes('/subscriptions/sub_2'))!.body).toContain('cancel_at_period_end=true');
+
+    // L'espace reste acquis jusqu'à l'échéance : couper le renouvellement ne retire rien
+    const paused = await device.getBilling();
+    expect(paused.subscription).toMatchObject({ autoRenew: false, active: true });
+    expect(paused.limits.maxVaults).toBe(started.limits.maxVaults);
+
+    const on = await device.setAutoRenew(true);
+    expect(on.autoRenew).toBe(true);
+    expect((await device.getBilling()).subscription).toMatchObject({ autoRenew: true });
   });
 
   it('vérifie la signature Stripe et refuse un horodatage trop ancien', () => {

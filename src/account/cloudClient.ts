@@ -91,15 +91,35 @@ export interface BillingPlanInfo {
   id: string;
   name: string;
   description: string;
-  priceLabel: string;
-  mode: 'subscription' | 'payment';
+  /** Au moins une durée ; plusieurs quand le serveur propose mensuel et annuel */
+  prices: BillingPriceInfo[];
   boosts: Record<string, number>;
+}
+
+/** Une durée proposée par une offre : le prix Stripe reste côté serveur */
+export interface BillingPriceInfo {
+  id: string;
+  label: string;
+  mode: 'subscription' | 'payment';
+}
+
+export interface BillingSubscriptionInfo {
+  planId: string;
+  planName: string;
+  priceId: string | null;
+  priceLabel: string;
+  status: string;
+  currentPeriodEnd: number | null;
+  active: boolean;
+  /** Faux pour un achat unique : il n'y a rien à renouveler */
+  renewable: boolean;
+  autoRenew: boolean;
 }
 
 export interface BillingInfo {
   enabled: boolean;
   plans: BillingPlanInfo[];
-  subscription: { planId: string; status: string; currentPeriodEnd: number | null; active: boolean } | null;
+  subscription: BillingSubscriptionInfo | null;
   limits: VaultLimits & Record<string, number>;
 }
 
@@ -265,8 +285,12 @@ export class CloudClient {
     return this.request('GET', '/api/v1/billing');
   }
 
-  checkout(planId: string): Promise<{ url: string }> {
-    return this.request('POST', '/api/v1/billing/checkout', { planId });
+  checkout(planId: string, priceId?: string): Promise<{ url: string }> {
+    return this.request('POST', '/api/v1/billing/checkout', { planId, ...(priceId ? { priceId } : {}) });
+  }
+
+  setAutoRenew(enabled: boolean): Promise<{ autoRenew: boolean; currentPeriodEnd: number | null }> {
+    return this.request('POST', '/api/v1/billing/auto-renew', { enabled });
   }
 
   billingPortal(): Promise<{ url: string }> {

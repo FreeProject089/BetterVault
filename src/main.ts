@@ -5425,33 +5425,97 @@ class AppController {
           maxVaults: `+${value} ${tr('coffres', 'vaults')}`,
           maxCredentialsPerVault: `+${value.toLocaleString(locale)} ${tr('identifiants par coffre', 'credentials per vault')}`
         } as Record<string, string>)[key] ?? '';
+        // État de l'abonnement en cours : ce qui est payé, jusqu'à quand, et ce qui se passe ensuite
+        const statusLabel = (status: string) => ({
+          active: tr('Actif', 'Active'),
+          trialing: tr('Période d’essai', 'Trial'),
+          past_due: tr('Paiement en retard', 'Past due'),
+          canceled: tr('Résilié', 'Canceled'),
+          unpaid: tr('Impayé', 'Unpaid')
+        } as Record<string, string>)[status] ?? status;
+
+        const endDate = sub?.currentPeriodEnd ? new Date(sub.currentPeriodEnd).toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+
+        const currentCard = sub ? `
+          <div class="subscription-card">
+            <div class="subscription-head">
+              <span class="plan-name">${this.escapeHtml(sub.planName)}</span>
+              <span class="status-pill ${sub.active ? 'on' : 'off'}">${statusLabel(sub.status)}</span>
+            </div>
+            <dl class="subscription-facts">
+              ${sub.priceLabel ? `<dt>${tr('Formule', 'Billing')}</dt><dd>${this.escapeHtml(sub.priceLabel)}</dd>` : ''}
+              ${endDate ? `<dt>${sub.autoRenew && sub.renewable ? tr('Prochain renouvellement', 'Renews on') : tr('Prend fin le', 'Ends on')}</dt><dd>${endDate}</dd>` : ''}
+            </dl>
+            ${sub.renewable ? `
+              <label class="switch-row">
+                <span>${tr('Renouvellement automatique', 'Auto-renewal')}
+                  <small>${sub.autoRenew
+                    ? tr('L’abonnement se reconduit tout seul à l’échéance.', 'The subscription renews itself at the end of the period.')
+                    : tr('L’abonnement s’arrêtera à l’échéance. Rien n’est perdu d’ici là.', 'The subscription will stop at the end of the period. Nothing is lost until then.')}</small>
+                </span>
+                <input type="checkbox" class="switch" data-auto-renew ${sub.autoRenew ? 'checked' : ''}>
+              </label>` : ''}
+            <div class="account-actions account-actions-end">
+              <button class="btn-primary btn-ghost btn-sm" data-billing-portal>${tr('Factures et moyen de paiement', 'Invoices and payment method')}</button>
+            </div>
+          </div>` : '';
+
         plansEl.innerHTML = `
+          ${currentCard}
           <div class="plan-list">
             ${billing.plans.map(plan => {
               const current = sub?.active && sub.planId === plan.id;
+              const several = plan.prices.length > 1;
               return `
                 <div class="plan-card ${current ? 'current' : ''}">
-                  <div class="plan-head"><span class="plan-name">${this.escapeHtml(plan.name)}</span><span class="plan-price">${this.escapeHtml(plan.priceLabel)}</span></div>
+                  <div class="plan-head"><span class="plan-name">${this.escapeHtml(plan.name)}</span></div>
                   ${plan.description ? `<p class="modal-text">${this.escapeHtml(plan.description)}</p>` : ''}
                   <ul class="plan-boosts">${Object.entries(plan.boosts).map(([k, v]) => `<li>${boostLabel(k, v)}</li>`).join('')}</ul>
-                  ${current
-                    ? `<span class="status-pill on">${tr('Offre actuelle', 'Current plan')}${sub?.currentPeriodEnd ? ` · ${tr('jusqu’au', 'until')} ${new Date(sub.currentPeriodEnd).toLocaleDateString(locale)}` : ''}</span>`
-                    : `<button class="btn-primary btn-accent btn-sm" data-checkout="${this.escapeHtml(plan.id)}">${tr('Choisir', 'Choose')}</button>`}
+                  <div class="plan-prices">
+                    ${plan.prices.map(price => {
+                      const chosen = current && sub?.priceId === price.id;
+                      const label = price.label || (price.mode === 'payment' ? tr('Achat unique', 'One-time') : tr('Abonnement', 'Subscription'));
+                      return chosen
+                        ? `<span class="status-pill on">${tr('En cours', 'Current')} · ${this.escapeHtml(label)}</span>`
+                        : `<button class="btn-primary ${several ? '' : 'btn-accent '}btn-sm" data-checkout="${this.escapeHtml(plan.id)}" data-price="${this.escapeHtml(price.id)}">
+                             ${several ? this.escapeHtml(label) : `${tr('Choisir', 'Choose')}${label ? ` · ${this.escapeHtml(label)}` : ''}`}
+                           </button>`;
+                    }).join('')}
+                  </div>
                 </div>`;
             }).join('')}
           </div>
-          ${sub ? `<div class="account-actions account-actions-end"><button class="btn-primary btn-ghost btn-sm" data-billing-portal>${tr('Gérer le paiement', 'Manage billing')}</button></div>` : ''}
           <p class="field-hint">${tr('Paiement sur Stripe. BetterVault ne voit pas vos coordonnées bancaires.', 'Payment on Stripe. BetterVault never sees your card details.')}</p>`;
+
         plansEl.querySelectorAll<HTMLButtonElement>('[data-checkout]').forEach(button => button.addEventListener('click', () => {
           void runBusy(button, '…', async () => {
             try {
-              const { url } = await accountService.startCheckout(button.dataset.checkout!);
+              const { url } = await accountService.startCheckout(button.dataset.checkout!, button.dataset.price);
               await openExternal(url);
             } catch (err) {
               this.showToast(accountErrorMessage(err), 'error');
             }
           });
         }));
+
+        plansEl.querySelector<HTMLInputElement>('[data-auto-renew]')?.addEventListener('change', async event => {
+          const toggle = event.currentTarget as HTMLInputElement;
+          const wanted = toggle.checked;
+          toggle.disabled = true;
+          try {
+            const { autoRenew } = await accountService.setAutoRenew(wanted);
+            this.showToast(autoRenew
+              ? tr('Renouvellement automatique activé', 'Auto-renewal turned on')
+              : tr('L’abonnement s’arrêtera à l’échéance', 'The subscription will stop at the end of the period'), 'success', 5000);
+            await loadBilling();
+          } catch (err) {
+            // L'interrupteur revient à son état réel : le serveur n'a rien changé
+            toggle.checked = !wanted;
+            toggle.disabled = false;
+            this.showToast(accountErrorMessage(err), 'error');
+          }
+        });
+
         plansEl.querySelector<HTMLButtonElement>('[data-billing-portal]')?.addEventListener('click', event => {
           void runBusy(event.currentTarget as HTMLButtonElement, '…', async () => {
             try {
