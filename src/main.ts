@@ -1376,7 +1376,7 @@ class AppController {
           ${task.description ? `
             <div class="field-group">
               <div class="section-divider" style="margin-bottom:8px;">Description</div>
-              <div class="field-box" style="white-space:pre-wrap;line-height:1.6;">${task.description}</div>
+              <div class="field-box" style="white-space:pre-wrap;line-height:1.6;">${this.escapeHtml(task.description)}</div>
             </div>
           ` : ''}
 
@@ -1403,7 +1403,7 @@ class AppController {
                 <div class="subtask-item">
                   <label class="subtask-left">
                     <input type="checkbox" class="subtask-checkbox" data-subtask-id="${s.id}" ${s.isDone ? 'checked' : ''}>
-                    <span class="subtask-title ${s.isDone ? 'done' : ''}">${s.title}</span>
+                    <span class="subtask-title ${s.isDone ? 'done' : ''}">${this.escapeHtml(s.title)}</span>
                   </label>
                   <button class="icon-btn btn-del-subtask" data-subtask-id="${s.id}" title="${this.tr('Supprimer', 'Delete')}" style="color:var(--text-muted);padding:2px 4px;">
                     ✕
@@ -1419,7 +1419,7 @@ class AppController {
 
           <div class="field-group">
             <div class="section-divider" style="margin-bottom:8px;">Notes</div>
-            <textarea class="note-editor" id="task-notes" placeholder="${this.tr('Notes sur cette tâche…', 'Notes about this task…')}">${task.notes || ''}</textarea>
+            <textarea class="note-editor" id="task-notes" placeholder="${this.tr('Notes sur cette tâche…', 'Notes about this task…')}">${this.escapeHtml(task.notes || '')}</textarea>
             <div style="display:flex;justify-content:flex-end;margin-top:6px;">
               <button class="btn-primary" id="btn-save-task-notes" style="font-size:11px;padding:5px 14px;">${this.tr('Enregistrer', 'Save')}</button>
             </div>
@@ -1611,9 +1611,9 @@ class AppController {
       <div class="field-group">
         <div class="field-label">${this.tr('Site web', 'Website')}</div>
         <div class="field-box">
-          <a href="${cred.website}" target="_blank" rel="noopener noreferrer"
+          <a href="${this.escapeHtml(this.safeHref(cred.website))}" target="_blank" rel="noopener noreferrer"
             style="color:var(--accent-blue);text-decoration:none;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;">
-            ${cred.website}
+            ${this.escapeHtml(cred.website)}
           </a>
           <div class="field-actions">
             <button class="icon-btn" title="${this.tr('Copier le lien', 'Copy link')}" id="btn-copy-url">
@@ -1697,7 +1697,7 @@ class AppController {
         <div class="field-group">
           <div class="field-label">${this.tr('Identifiant', 'Username')}</div>
           <div class="field-box">
-            <span class="field-val" id="text-username">${cred.username || '—'}</span>
+            <span class="field-val" id="text-username">${cred.username ? this.escapeHtml(cred.username) : '—'}</span>
             <div class="field-actions">
               <button class="icon-btn" title="${this.tr('Copier', 'Copy')}" id="btn-copy-username">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1747,7 +1747,7 @@ class AppController {
                   <span class="history-password">&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;</span>
                   <div style="display:flex;align-items:center;gap:8px;">
                     <span class="history-date">${new Date(h.changedAt).toLocaleDateString(i18n.intlLocale())}</span>
-                    <button class="icon-btn btn-copy-history" data-pwd="${h.password.replace(/"/g, '&quot;')}" title="${this.tr('Copier cet ancien mot de passe', 'Copy this previous password')}">
+                    <button class="icon-btn btn-copy-history" data-pwd="${this.escapeHtml(h.password)}" title="${this.tr('Copier cet ancien mot de passe', 'Copy this previous password')}">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                     </button>
                   </div>
@@ -1763,18 +1763,18 @@ class AppController {
           <div class="custom-fields-list" id="custom-fields-container">
             ${(cred.fields || []).map(f => `
               <div class="custom-field-row">
-                <div style="font-size:11px;color:var(--text-muted);font-weight:600;">${f.label}</div>
+                <div style="font-size:11px;color:var(--text-muted);font-weight:600;">${this.escapeHtml(f.label)}</div>
                 <div class="custom-field-box">
                   <span class="custom-field-val ${f.isMasked ? 'masked' : ''}" id="cf-val-${f.id}">
-                    ${f.isMasked ? '••••••••••••' : f.value}
+                    ${f.isMasked ? '••••••••••••' : this.escapeHtml(f.value)}
                   </span>
                   <div style="display:flex;gap:6px;">
                     ${f.isMasked ? `
-                      <button class="icon-btn btn-reveal-cf" data-cf-id="${f.id}" data-val="${f.value.replace(/"/g, '&quot;')}" title="${this.tr('Afficher', 'Show')}">
+                      <button class="icon-btn btn-reveal-cf" data-cf-id="${f.id}" data-val="${this.escapeHtml(f.value)}" title="${this.tr('Afficher', 'Show')}">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                       </button>
                     ` : ''}
-                    <button class="icon-btn btn-copy-cf" data-val="${f.value.replace(/"/g, '&quot;')}" title="${this.tr('Copier', 'Copy')}">
+                    <button class="icon-btn btn-copy-cf" data-val="${this.escapeHtml(f.value)}" title="${this.tr('Copier', 'Copy')}">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                     </button>
                     <button class="icon-btn btn-del-cf" data-cf-id="${f.id}" title="${this.tr('Supprimer', 'Delete')}" style="color:var(--text-muted);">
@@ -1812,7 +1812,7 @@ class AppController {
 
         <div class="field-group">
           <div class="section-divider" style="margin-bottom:8px;">Notes</div>
-          <textarea class="note-editor" id="inline-notes" placeholder="${this.tr('Codes de récupération, informations utiles…', 'Recovery codes, useful details…')}">${cred.notes || ''}</textarea>
+          <textarea class="note-editor" id="inline-notes" placeholder="${this.tr('Codes de récupération, informations utiles…', 'Recovery codes, useful details…')}">${this.escapeHtml(cred.notes || '')}</textarea>
           <div style="display:flex;justify-content:flex-end;margin-top:6px;">
             <button class="btn-primary" id="btn-save-notes" style="font-size:11px;padding:5px 14px;">${this.tr('Enregistrer', 'Save')}</button>
           </div>
@@ -3091,7 +3091,7 @@ class AppController {
 
     const credOptions = data.credentials
       .filter(c => c.vaultId === data.activeVaultId)
-      .map(c => `<option value="${c.id}" ${c.id === targetLinkedCredId ? 'selected' : ''}>${c.title}</option>`)
+      .map(c => `<option value="${c.id}" ${c.id === targetLinkedCredId ? 'selected' : ''}>${this.escapeHtml(c.title)}</option>`)
       .join('');
 
     const dependencyOptions = data.tasks
@@ -3118,7 +3118,7 @@ class AppController {
         <section data-step="essentiel" hidden>
         <div class="form-field">
           <label class="form-label" for="task-title">${this.tr('Titre', 'Title')}</label>
-          <input class="form-input" id="task-title" type="text" placeholder="${this.tr('Renouveler le mot de passe GitHub…', 'Renew the GitHub password…')}" value="${existing?.title || ''}" autocomplete="off" data-step-autofocus>
+          <input class="form-input" id="task-title" type="text" placeholder="${this.tr('Renouveler le mot de passe GitHub…', 'Renew the GitHub password…')}" value="${this.escapeHtml(existing?.title || '')}" autocomplete="off" data-step-autofocus>
         </div>
         <div class="form-field">
           <label class="form-label">${this.tr('Priorité', 'Priority')}</label>
@@ -6077,7 +6077,7 @@ class AppController {
             <div class="member-main">
               <div class="member-email">${this.escapeHtml(member.email)}${self ? ` <span class="field-hint">(${tr('vous', 'you')})</span>` : ''}</div>
               <div class="field-hint">${member.status === 'invited' ? `<span class="status-pill off">${tr('Invitation envoyée', 'Invitation sent')}</span>` : ''}
-                <button type="button" class="link-btn" data-fingerprint="${member.publicKey ?? ''}">${tr('Empreinte de clé', 'Key fingerprint')}</button></div>
+                <button type="button" class="link-btn" data-fingerprint="${this.escapeHtml(member.publicKey ?? '')}">${tr('Empreinte de clé', 'Key fingerprint')}</button></div>
             </div>
             ${editable
               ? `<select class="form-input member-role" data-role-select>${roleOptions(member.roleId, isOwner && member.status === 'active')}</select>
@@ -6653,6 +6653,24 @@ class AppController {
       }
       default:
         return fallback;
+    }
+  }
+
+  /**
+   * Adresse sûre pour un attribut href.
+   *
+   * Seuls http et https sont rendus cliquables : « javascript: » et « data: »
+   * ne contiennent aucun caractère à échapper et passeraient l'échappement.
+   */
+  private safeHref(raw: string): string {
+    const value = (raw ?? '').trim();
+    if (!value) return '';
+    const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(value) ? value : `https://${value}`;
+    try {
+      const url = new URL(withScheme);
+      return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : '';
+    } catch {
+      return '';
     }
   }
 
