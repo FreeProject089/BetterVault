@@ -12,7 +12,7 @@ import { renderSVG } from 'uqr';
 import { secretGridHtml } from './secretDisplay';
 import { translateError } from '../i18n/errorMessages';
 import { tabIcon } from './tabIcons';
-import { mountStepper, type StepDef } from './stepper';
+import { mountStepper, type StepDef, type StepperHandle } from './stepper';
 
 const isTauriRuntime = typeof (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined';
 
@@ -64,6 +64,10 @@ export function mountAuthScreen(
 ): { show(): void } {
   // Données à ouvrir une fois la clé de secours confirmée
   let pending: { data: UnlockedVaultData; key: string; intro: string; offerTotp?: boolean } | null = null;
+  /** Parcours de l'écran courant, pour y revenir quand le serveur réclame un code */
+  let recoverStepper: StepperHandle | null = null;
+  /** Vrai une fois le code demandé : sans cela l'étape de vérification n'aurait rien à montrer */
+  let codeDemande = false;
   // Mot de passe gardé en mémoire le temps de proposer la double authentification après la création
   let newAccountPassword: string | null = null;
   // L'invite biométrique s'ouvre d'elle-même une seule fois par affichage de l'écran
@@ -244,36 +248,61 @@ export function mountAuthScreen(
           </form>
           <button type="button" class="auth-link" data-screen="${backScreen}">${tr('Retour', 'Back')}</button>`;
       }
+      /*
+       * Réinitialisation d'un compte synchronisé, en quatre écrans courts.
+       *
+       * Le formulaire d'un seul tenant montrait tout d'emblée, y compris le champ
+       * de double authentification suivi d'un « seulement si elle est activée » :
+       * à charge du lecteur de savoir. Le serveur, lui, refuse de dire si un compte
+       * existe ou s'il a une double authentification — c'est ce qui empêche de
+       * deviner qui est inscrit. On ne demande donc ce code que lorsque le serveur
+       * le réclame, à la vérification : le champ reste absent pour les autres.
+       */
       return `
         ${brand()}
         <div>
           <h1 class="auth-title">${tr('Mot de passe oublié', 'Forgot password')}</h1>
           <p class="auth-sub">${tr('Compte synchronisé', 'Synced account')}</p>
         </div>
-        <form class="auth-form" data-form="recover-cloud" novalidate>
-          ${serverField(false, account?.serverUrl ?? DEFAULT_SERVER_URL)}
-          ${emailField(account?.email ?? '')}
-          <div class="account-actions">
-            <button type="button" class="btn-primary" data-action="send-code">${tr('Recevoir un code par email', 'Get a code by email')}</button>
-            <span class="field-hint" data-code-status style="align-self:center;"></span>
-          </div>
-          ${otpField('auth-email-code', tr('Code reçu par email', 'Code from the email'), '', true)}
-          <div class="form-field">
-            <label class="form-label" for="auth-recovery-key">${tr('Clé de secours', 'Recovery key')}</label>
-            <textarea class="form-input" id="auth-recovery-key" rows="3" spellcheck="false" autocomplete="off" style="font-family:var(--font-mono);resize:none;" placeholder="ABCD-EFGH-…"></textarea>
-            <span class="field-hint">${tr('Avec la clé, le coffre est conservé', 'With the key, the vault is kept')}</span>
-          </div>
-          ${otpField('auth-totp', tr('Code de l’application d’authentification', 'Authenticator app code'), tr('Seulement si la double authentification est activée', 'Only if two-factor authentication is on'))}
-          ${passwordField('auth-password', tr('Nouveau mot de passe principal', 'New master password'), 'new-password')}
-          ${strengthMeter()}
-          ${passwordField('auth-password-confirm', tr('Confirmer', 'Confirm'), 'new-password')}
-          <div data-no-key-warning>
-            <p class="auth-warning">${tr('Sans clé de secours, le coffre est remplacé par un coffre vide : les identifiants enregistrés sont perdus.', 'Without a recovery key, the vault is replaced with an empty one: saved credentials are lost.')}</p>
-            <label class="check-row" style="margin-top:8px;"><input type="checkbox" data-accept-reset> ${tr('Je comprends, réinitialiser quand même', 'I understand, reset anyway')}</label>
-          </div>
+        <div data-stepper-header></div>
+        <form class="auth-form" data-form="recover-cloud" data-stepper-body novalidate>
+          <section data-step="account" hidden>
+            ${serverField(false, account?.serverUrl ?? DEFAULT_SERVER_URL)}
+            ${emailField(account?.email ?? '')}
+            <div class="account-actions">
+              <button type="button" class="btn-primary btn-accent" data-action="send-code">${tr('Recevoir un code par email', 'Get a code by email')}</button>
+            </div>
+            <span class="field-hint" data-code-status></span>
+          </section>
+
+          <section data-step="code" hidden>
+            ${otpField('auth-email-code', tr('Code reçu par email', 'Code from the email'), tr('Valable 15 minutes', 'Valid for 15 minutes'), true)}
+            ${otpField('auth-totp', tr('Code de l’application d’authentification', 'Authenticator app code'), '', true)}
+            <p class="auth-hint" data-code-empty hidden>${tr('Ce serveur n’envoie pas d’emails. Passez à l’étape suivante : la clé de secours suffit.', 'This server doesn’t send emails. Move on: the recovery key is enough.')}</p>
+          </section>
+
+          <section data-step="key" hidden>
+            <div class="form-field">
+              <label class="form-label" for="auth-recovery-key">${tr('Clé de secours', 'Recovery key')}</label>
+              <textarea class="form-input" id="auth-recovery-key" rows="3" spellcheck="false" autocomplete="off" style="font-family:var(--font-mono);resize:none;" placeholder="ABCD-EFGH-…"></textarea>
+              <span class="field-hint">${tr('52 caractères, donnés à la création du compte. Avec elle, le coffre est conservé.', '52 characters, given when the account was created. With it, the vault is kept.')}</span>
+            </div>
+            <div data-no-key-warning>
+              <p class="auth-warning">${tr('Sans clé de secours, le coffre est remplacé par un coffre vide : les identifiants enregistrés sont perdus.', 'Without a recovery key, the vault is replaced with an empty one: saved credentials are lost.')}</p>
+              <label class="check-row" style="margin-top:8px;"><input type="checkbox" data-accept-reset> <span>${tr('Je comprends, réinitialiser quand même', 'I understand, reset anyway')}</span></label>
+            </div>
+          </section>
+
+          <section data-step="password" hidden>
+            ${passwordField('auth-password', tr('Nouveau mot de passe principal', 'New master password'), 'new-password')}
+            ${strengthMeter()}
+            ${passwordField('auth-password-confirm', tr('Confirmer', 'Confirm'), 'new-password')}
+          </section>
+
           <div class="auth-error" role="alert" hidden></div>
-          <button type="submit" class="btn-primary btn-accent auth-submit">${tr('Réinitialiser le mot de passe', 'Reset password')}</button>
+          <button type="submit" class="auth-hidden-submit" tabindex="-1" aria-hidden="true"></button>
         </form>
+        <div data-stepper-footer></div>
         <button type="button" class="auth-link" data-screen="${backScreen}">${tr('Retour', 'Back')}</button>`;
     },
 
@@ -414,6 +443,8 @@ export function mountAuthScreen(
       if (isTotpRequired(err)) {
         const field = form.querySelector<HTMLElement>('[data-field="auth-totp"]');
         if (field) field.hidden = false;
+        // Le compte a bien une double authentification : on revient la demander
+        if (kind === 'recover-cloud') recoverStepper?.go('code');
         fail(tr('Saisissez le code à 6 chiffres de votre application d’authentification', 'Enter the 6-digit code from your authenticator app'));
         form.querySelector<HTMLInputElement>('#auth-totp')?.focus();
       } else {
@@ -431,6 +462,9 @@ export function mountAuthScreen(
   const render = (screen: Screen) => {
     root.innerHTML = `<div class="auth-card">${templates[screen]()}</div>`;
     const card = root.firstElementChild as HTMLElement;
+    // L'écran précédent est parti avec son parcours et son état
+    recoverStepper = null;
+    codeDemande = false;
 
     card.querySelectorAll<HTMLElement>('[data-screen]').forEach(el => {
       el.addEventListener('click', () => render(el.dataset.screen as Screen));
@@ -519,27 +553,68 @@ export function mountAuthScreen(
         return undefined;
       };
 
-      const isCreate = form.dataset.form === 'create';
+      const kindOfForm = form.dataset.form;
+      const isCreate = kindOfForm === 'create';
+      const isRecover = kindOfForm === 'recover-cloud';
+
+      /** Le code email n'est exigé que si le serveur en envoie un, donc si le champ est visible */
+      const checkEmailCode = (): string | undefined => {
+        const champ = card.querySelector<HTMLElement>('[data-field="auth-email-code"]');
+        const saisie = field('auth-email-code');
+        if (!champ || champ.hidden || !saisie) return undefined;
+        if (/^\d{6}$/.test(saisie.value.trim())) return undefined;
+        saisie.focus();
+        return tr('Saisissez le code à 6 chiffres reçu par email', 'Enter the 6-digit code from the email');
+      };
+
+      /** Sans clé de secours le coffre est remplacé : le refus doit être explicite */
+      const checkRecoveryKey = (): string | undefined => {
+        const cle = card.querySelector<HTMLTextAreaElement>('#auth-recovery-key');
+        if (cle?.value.trim()) return undefined;
+        const accepte = card.querySelector<HTMLInputElement>('[data-accept-reset]');
+        if (accepte?.checked) return undefined;
+        cle?.focus();
+        return tr('Saisissez la clé de secours, ou cochez la case pour repartir d’un coffre vide',
+                  'Enter the recovery key, or tick the box to start from an empty vault');
+      };
+
       const steps: StepDef[] = isCreate
         ? [
             { id: 'storage', label: tr('Stockage', 'Storage'), validate: () => checkServer() ?? checkTerms() },
             { id: 'account', label: tr('Compte', 'Account'), validate: checkEmail },
             { id: 'password', label: tr('Mot de passe', 'Password'), validate: checkNewPassword }
           ]
-        : [
-            { id: 'server', label: tr('Serveur', 'Server'), validate: checkServer },
-            { id: 'account', label: tr('Compte', 'Account'), validate: checkSigninFields }
-          ];
+        : isRecover
+          ? [
+              {
+                id: 'account',
+                label: tr('Compte', 'Account'),
+                // Passer sans avoir demandé de code mènerait à une étape de vérification vide
+                validate: () => checkServer() ?? checkEmail() ?? (codeDemande ? undefined
+                  : tr('Demandez d’abord un code par email', 'Ask for a code by email first'))
+              },
+              { id: 'code', label: tr('Vérification', 'Verification'), validate: checkEmailCode },
+              { id: 'key', label: tr('Clé de secours', 'Recovery key'), validate: checkRecoveryKey },
+              { id: 'password', label: tr('Mot de passe', 'Password'), validate: checkNewPassword }
+            ]
+          : [
+              { id: 'server', label: tr('Serveur', 'Server'), validate: checkServer },
+              { id: 'account', label: tr('Compte', 'Account'), validate: checkSigninFields }
+            ];
 
-      mountStepper({
+      recoverStepper = mountStepper({
         body: stepperBody,
         header: stepperHeader,
         footer: stepperFooter,
         steps,
         tr,
-        finishLabel: isCreate ? tr('Créer le coffre', 'Create vault') : tr('Se connecter', 'Sign in'),
-        cancelLabel: isCreate ? tr('Se connecter', 'Sign in') : tr('Créer un compte', 'Create account'),
-        onCancel: () => render(isCreate ? 'signin' : 'create'),
+        finishLabel: isCreate ? tr('Créer le coffre', 'Create vault')
+          : isRecover ? tr('Réinitialiser le mot de passe', 'Reset password')
+          : tr('Se connecter', 'Sign in'),
+        cancelLabel: isCreate ? tr('Se connecter', 'Sign in')
+          : isRecover ? tr('Retour', 'Back')
+          : tr('Créer un compte', 'Create account'),
+        onCancel: () => render(isCreate ? 'signin' : isRecover ? (service.getAccount() ? 'unlock' : 'signin') : 'create'),
         onError: showError,
         onStepChange: () => { errorEl.hidden = true; },
         onFinish: () => form.requestSubmit()
@@ -585,10 +660,13 @@ export function mountAuthScreen(
         const { emailCodeRequired } = await service.requestRecoveryCode(server, email);
         const field = card.querySelector<HTMLElement>('[data-field="auth-email-code"]');
         if (field) field.hidden = !emailCodeRequired;
+        // L'étape de vérification doit dire quelque chose même quand elle n'a rien à demander
+        const vide = card.querySelector<HTMLElement>('[data-code-empty]');
+        if (vide) vide.hidden = emailCodeRequired;
+        codeDemande = true;
         status.textContent = emailCodeRequired
           ? tr('Si un compte existe pour cet email, un code vient d’être envoyé (valable 15 minutes).', 'If an account exists for this email, a code was just sent (valid 15 minutes).')
           : tr('Ce serveur n’envoie pas d’emails : la clé de secours ou la double authentification suffit.', 'This server doesn’t send emails: the recovery key or two-factor authentication is enough.');
-        if (emailCodeRequired) card.querySelector<HTMLInputElement>('#auth-email-code')?.focus();
       } catch (err) {
         status.textContent = '';
         errorEl.textContent = accountErrorMessage(err);

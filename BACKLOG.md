@@ -14,8 +14,8 @@ Lot 2 — suppression et export
 - [x] Raccourcis cohérents macOS / Windows / Linux, masqués sur téléphone
 
 Lot 3 — écran de réinitialisation et emails
-- [ ] Réinitialisation du mot de passe par étapes, champs inutiles masqués
-- [ ] Emails : mise en page soignée, anglais systématique
+- [x] Réinitialisation du mot de passe par étapes, champs inutiles masqués
+- [x] Emails : mise en page soignée, anglais systématique
 
 Lot 4 — 2FA
 - [ ] Import / export des codes 2FA (QR codes, JSON chiffré ou clair)
