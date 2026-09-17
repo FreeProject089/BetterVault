@@ -19,6 +19,14 @@ import {
 import { exportVaultAsJson, exportVaultAsCsv, downloadExportFile } from './import_export/importEngine';
 import { parseImportData, PasswordRequiredError, ImportSecrets } from './import_export/importRouter';
 import { encryptExport, MIN_EXPORT_PASSWORD_LENGTH } from './import_export/encryptedExport';
+import {
+  collectTwoFactor,
+  exportAsUriList,
+  exportAsJson as exportTwoFactorAsJson,
+  exportAsQrSheet,
+  parseTwoFactorImport,
+  withoutKnown
+} from './import_export/twoFactor';
 import { buildKdbx4 } from './import_export/keepass';
 import { exportCredentialsAsCxf } from './import_export/cxf';
 import { normalizeTotpInput, parseOtpAuthUri } from './crypto/otpauthUri';
@@ -102,6 +110,7 @@ const GEN_ICONS = {
   copy: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>',
   refresh: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>',
   eye: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>',
+  qr: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM18 18h3v3h-3zM14 21h3M21 14v3"/></svg>',
   trash: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>',
   eyeOff: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>'
 };
@@ -3897,6 +3906,7 @@ class AppController {
     const limits = accountService.getLimits();
     const tr = (fr: string, en: string) => this.tr(fr, en);
     const activeVaultName = data.vaults.find(v => v.id === data.activeVaultId)?.name ?? 'BetterVault';
+    const totpCount = creds.filter(c => c.totpSecret?.trim()).length;
 
     const brand = (slug: string, size = 22) => {
       const row = BRAND_ICONS.find(([s]) => s === slug);
@@ -3918,6 +3928,7 @@ class AppController {
       { id: 'apple', name: tr('Mots de passe Apple', 'Apple Passwords'), logo: brand('apple'), formats: 'CSV', accept: '.csv', steps: [tr('App Mots de passe : Fichier, puis Exporter', 'Passwords app: File, then Export')] },
       { id: 'passky', name: 'Passky', logo: GENERIC_FILE_ICON, formats: 'JSON', accept: '.json', steps: [tr('Passky : Paramètres, puis Exporter', 'Passky: Settings, then Export'), tr('Choisissez l’export non chiffré (JSON)', 'Choose the unencrypted export (JSON)')] },
       { id: 'cxf', name: 'FIDO CXF', logo: brand('fidoalliance'), formats: 'JSON', accept: '.json', steps: [tr('Fichier Credential Exchange Format, passkeys comprises', 'Credential Exchange Format file, passkeys included')] },
+      { id: 'twofactor', name: tr('Codes 2FA seuls', '2FA codes only'), logo: GEN_ICONS.qr, formats: 'otpauth:// · QR · JSON', accept: '.txt,.json,.png,.jpg,.jpeg,.webp', steps: [tr('Collez des URI otpauth://, ou déposez une capture de QR code', 'Paste otpauth:// URIs, or drop a screenshot of a QR code'), tr('Aegis, 2FAS, Bitwarden, KeePassXC exportent ce format', 'Aegis, 2FAS, Bitwarden and KeePassXC export this format')] },
       { id: 'other', name: tr('Autre fichier', 'Other file'), logo: GENERIC_FILE_ICON, formats: 'KDBX · 1PUX · JSON · CSV · XML', accept: '.json,.csv,.xml,.kdbx,.1pux', steps: [tr('Le format est reconnu automatiquement', 'The format is detected automatically')] }
     ];
 
@@ -3969,6 +3980,13 @@ class AppController {
               <div class="drop-zone-title">${tr('Déposez le fichier ici', 'Drop the file here')}</div>
               <div class="drop-zone-sub">${tr('ou cliquez pour le choisir · rien n’est envoyé, tout est lu sur cet appareil', 'or click to choose it · nothing is uploaded, the file is read on this device')}</div>
             </div>
+            <div class="form-field" data-totp-paste hidden>
+              <label class="form-label" for="import-totp-text">${tr('Coller des URI otpauth:// ou un JSON', 'Paste otpauth:// URIs or JSON')}</label>
+              <textarea class="form-input" id="import-totp-text" rows="5" spellcheck="false" autocomplete="off"
+                style="font-family:var(--font-mono);font-size:12px;resize:vertical;"
+                placeholder="otpauth://totp/GitHub:moi?secret=..."></textarea>
+              <span class="field-hint">${tr('Un secret par ligne. Une capture de QR code déposée ci-dessus fonctionne aussi.', 'One secret per line. A screenshot of a QR code dropped above works too.')}</span>
+            </div>
             <input type="file" id="import-file-input" hidden>
             <div id="import-secret-panel" class="form-section" hidden>
               <div class="form-field">
@@ -4012,6 +4030,14 @@ class AppController {
             ${exportItem('cxf', brand('fidoalliance'), 'FIDO CXF', tr('Format d’échange standard, passkeys comprises', 'Standard exchange format, passkeys included'))}
             ${exportItem('json', bvLogo, 'JSON BetterVault', tr('Tout le contenu du coffre, tâches comprises', 'Everything in the vault, tasks included'))}
             ${exportItem('csv', brand('bitwarden'), 'CSV', tr('Compatible Bitwarden, Chrome, Firefox et tableurs', 'Works with Bitwarden, Chrome, Firefox and spreadsheets'))}
+          </div>
+
+          <div class="ie-group-title">${tr('Codes 2FA seuls', '2FA codes only')}</div>
+          <p class="field-hint">${tr(`${totpCount} code${totpCount > 1 ? 's' : ''} dans ce coffre. Format otpauth://, lu par Aegis, 2FAS, Bitwarden, KeePassXC…`, `${totpCount} code${totpCount === 1 ? '' : 's'} in this vault. otpauth:// format, read by Aegis, 2FAS, Bitwarden, KeePassXC…`)}</p>
+          <div class="ie-export-list">
+            ${exportItem('totp-qr', GEN_ICONS.qr, tr('Planche de QR codes', 'Sheet of QR codes'), tr('À imprimer ou à rescanner depuis un téléphone', 'To print, or to rescan from a phone'))}
+            ${exportItem('totp-uri', GENERIC_FILE_ICON, tr('Liste otpauth:// (.txt)', 'otpauth:// list (.txt)'), tr('Une URI par ligne', 'One URI per line'))}
+            ${exportItem('totp-json', bvLogo, tr('JSON des codes 2FA', '2FA codes as JSON'), tr('Avec le nom et l’émetteur de chaque code', 'With each code’s name and issuer'))}
           </div>
 
           <div class="ie-group-title">${tr('Vers un autre gestionnaire', 'To another password manager')}</div>
@@ -4093,6 +4119,29 @@ class AppController {
           downloadExportFile(manager.build(creds), `bettervault-${manager.id}-${exportDate}.${manager.extension}`,
             manager.extension === 'json' ? 'application/json' : 'text/csv;charset=utf-8;');
         }
+        if (kind === 'totp-uri' || kind === 'totp-json' || kind === 'totp-qr') {
+          const entries = collectTwoFactor(creds);
+          if (!entries.length) {
+            this.showToast(tr('Aucun code 2FA dans ce coffre', 'No 2FA code in this vault'), 'error');
+            return;
+          }
+          if (kind === 'totp-uri') downloadExportFile(exportAsUriList(entries), `bettervault-2fa-${exportDate}.txt`, 'text/plain;charset=utf-8');
+          if (kind === 'totp-json') downloadExportFile(exportTwoFactorAsJson(entries), `bettervault-2fa-${exportDate}.json`, 'application/json');
+          if (kind === 'totp-qr') {
+            downloadExportFile(
+              exportAsQrSheet(entries, uri => renderSVG(uri, { border: 1 }), {
+                title: tr('Codes 2FA BetterVault', 'BetterVault 2FA codes'),
+                warning: tr('Chaque QR code donne le second facteur d’un compte. Traitez cette page comme un mot de passe : ne la laissez pas traîner, et détruisez-la après usage.',
+                            'Each QR code gives away one account’s second factor. Treat this page like a password: don’t leave it lying around, and destroy it after use.'),
+                empty: tr('Aucun code 2FA dans ce coffre.', 'No 2FA code in this vault.')
+              }),
+              `bettervault-2fa-${exportDate}.html`,
+              'text/html;charset=utf-8'
+            );
+          }
+          if (!isTauri()) this.showToast(tr('Fichier enregistré dans vos téléchargements', 'File saved to your downloads'), 'success');
+          return;
+        }
         if (kind === 'cxf') downloadExportFile(exportCredentialsAsCxf(creds), `bettervault-${exportDate}.cxf.json`, 'application/json');
         if (kind === 'json') downloadExportFile(exportVaultAsJson(creds, tasks), `bettervault-${exportDate}.json`, 'application/json');
         if (kind === 'csv') downloadExportFile(exportVaultAsCsv(creds), `bettervault-${exportDate}.csv`, 'text/csv;charset=utf-8;');
@@ -4140,6 +4189,53 @@ class AppController {
 
     let pendingFile: { bytes: Uint8Array; name: string } | null = null;
     let ready: { credentials: Partial<CredentialItem>[]; tasks: Partial<Task>[] } | null = null;
+    /** Vrai quand la source choisie est « Codes 2FA seuls » : la lecture ne passe pas par les formats habituels */
+    let sourceTotp = false;
+    const totpPaste = $<HTMLElement>('[data-totp-paste]');
+    const totpText = $<HTMLTextAreaElement>('#import-totp-text');
+
+    /**
+     * Transforme des secrets 2FA en identifiants à créer.
+     *
+     * Chaque code devient un identifiant à part, sans mot de passe : c'est ce que
+     * l'on veut quand on importe depuis une application d'authentification, où le
+     * compte n'existe que par son second facteur. Rattacher le code à un identifiant
+     * existant demanderait de deviner lequel, et se tromper mettrait le mauvais code
+     * sur le mauvais compte.
+     */
+    const lireCodes = (texte: string) => {
+      const { entries, rejected } = parseTwoFactorImport(texte);
+      const nouveaux = withoutKnown(entries, vaultStore.getData().credentials);
+      const doublons = entries.length - nouveaux.length;
+
+      if (!nouveaux.length) {
+        ready = null;
+        confirmBtn.disabled = true;
+        setStatus(`<div class="notice notice-warning">${entries.length
+          ? tr(`Ces ${entries.length} code(s) sont déjà dans le coffre.`, `These ${entries.length} code(s) are already in the vault.`)
+          : tr('Aucun code 2FA reconnu.', 'No 2FA code recognised.')}${rejected.length
+          ? ` ${tr(`${rejected.length} ligne(s) non reconnue(s).`, `${rejected.length} line(s) not recognised.`)}` : ''}</div>`);
+        return;
+      }
+
+      ready = {
+        credentials: nouveaux.map(entry => ({
+          title: entry.title,
+          username: entry.account || undefined,
+          totpSecret: entry.secret,
+          vaultId: vaultStore.getData().activeVaultId,
+          tags: []
+        })),
+        tasks: []
+      };
+      confirmBtn.disabled = false;
+      setStatus(`
+        <div class="notice notice-success"><strong>${tr('Prêt à importer', 'Ready to import')}</strong> · ${tr(`${nouveaux.length} code(s) 2FA`, `${nouveaux.length} 2FA code(s)`)}</div>
+        ${doublons ? `<div class="notice notice-warning" style="margin-top:8px;">${tr(`${doublons} code(s) déjà présent(s), ignoré(s).`, `${doublons} code(s) already present, skipped.`)}</div>` : ''}
+        ${rejected.length ? `<div class="notice notice-warning" style="margin-top:8px;">${tr(`${rejected.length} ligne(s) non reconnue(s) : ${this.escapeHtml(rejected.slice(0, 3).join(', '))}`, `${rejected.length} line(s) not recognised: ${this.escapeHtml(rejected.slice(0, 3).join(', '))}`)}</div>` : ''}`);
+    };
+
+    totpText?.addEventListener('input', () => lireCodes(totpText.value));
 
     const setStatus = (html: string) => { statusEl.innerHTML = html; };
 
@@ -4163,8 +4259,12 @@ class AppController {
         sourcesStep.hidden = true;
         fileStep.hidden = false;
         secretPanel.hidden = true;
+        sourceTotp = source.id === 'twofactor';
+        totpPaste.hidden = !sourceTotp;
+        if (totpText) totpText.value = '';
         setStatus('');
-        $<HTMLElement>('#drop-zone').focus();
+        if (sourceTotp) totpText?.focus();
+        else $<HTMLElement>('#drop-zone').focus();
       });
     });
     $<HTMLButtonElement>('[data-action="change-source"]').addEventListener('click', showSources);
@@ -4219,6 +4319,29 @@ class AppController {
     };
 
     const handleFile = async (file: File) => {
+      /*
+       * Les codes 2FA ne passent pas par les lecteurs de formats habituels : ce
+       * qu'on reçoit est soit du texte (URI ou JSON), soit l'image d'un QR code —
+       * une capture d'écran de la page qui l'affichait, le cas le plus courant.
+       */
+      if (sourceTotp) {
+        if (/^image\//.test(file.type) || /\.(png|jpe?g|webp|gif|avif)$/i.test(file.name)) {
+          const uri = await decodeQrFromFile(file);
+          if (!uri) {
+            setStatus(`<div class="notice notice-warning">${tr('Aucun QR code lisible dans cette image.', 'No readable QR code in this image.')}</div>`);
+            return;
+          }
+          if (totpText) totpText.value = totpText.value ? `${totpText.value.trimEnd()}
+${uri}` : uri;
+          lireCodes(totpText?.value ?? uri);
+          return;
+        }
+        const texte = await file.text();
+        if (totpText) totpText.value = texte;
+        lireCodes(texte);
+        return;
+      }
+
       pendingFile = { bytes: new Uint8Array(await file.arrayBuffer()), name: file.name };
       secretPanel.hidden = true;
       secretPwd.value = '';
