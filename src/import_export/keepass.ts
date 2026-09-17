@@ -254,9 +254,26 @@ export function buildCompositeKey(password: string, keyFile?: Uint8Array): Uint8
   return sha256(concatBytes(...parts));
 }
 
+/**
+ * Bornes des paramètres de dérivation lus DANS le fichier.
+ *
+ * Un .kdbx est un fichier reçu de l'extérieur : il annonce lui-même le coût de sa
+ * dérivation de clé. Sans borne, un fichier piégé fige l'onglet (tours AES) ou
+ * fait tomber le processus (mémoire Argon2). Les plafonds laissent passer très
+ * largement les valeurs des vrais KeePass — KeePassXC propose 60 000 tours par
+ * défaut, et une mémoire Argon2 de l'ordre de 64 Mio.
+ */
+const MAX_AES_KDF_ROUNDS = 50_000_000;
+const MAX_ARGON2_MEMORY_KIB = 1024 * 1024; // 1 Gio
+const MAX_ARGON2_ITERATIONS = 100;
+const MAX_ARGON2_LANES = 64;
+
 function aesKdf(key: Uint8Array, seed: Uint8Array, rounds: bigint): Uint8Array {
-  let data = key.slice();
   const n = Number(rounds);
+  if (!Number.isInteger(n) || n < 1 || n > MAX_AES_KDF_ROUNDS) {
+    throw new KdbxError('Nombre de tours AES-KDF hors limites dans le fichier');
+  }
+  let data = key.slice();
   for (let i = 0; i < n; i++) {
     data = ecb(seed, { disablePadding: true }).encrypt(data);
   }
@@ -275,7 +292,9 @@ async function transformKey(header: KdbxHeader, compositeKey: Uint8Array): Promi
   const kdfId = toHex(uuid);
 
   if (kdfId === KDF_AES_KDBX3 || kdfId === KDF_AES_KDBX4) {
-    return aesKdf(compositeKey, params.get('S') as Uint8Array, BigInt(params.get('R') as bigint));
+    const rounds = params.get('R');
+    if (typeof rounds !== 'bigint' && typeof rounds !== 'number') throw new KdbxError('Paramètres AES-KDF manquants');
+    return aesKdf(compositeKey, params.get('S') as Uint8Array, BigInt(rounds));
   }
 
   if (kdfId === KDF_ARGON2D || kdfId === KDF_ARGON2ID) {
@@ -288,6 +307,11 @@ async function transformKey(header: KdbxHeader, compositeKey: Uint8Array): Promi
       dkLen: 32,
       asyncTick: 25
     };
+    const borne = Number.isInteger(options.t) && options.t >= 1 && options.t <= MAX_ARGON2_ITERATIONS
+      && Number.isInteger(options.m) && options.m >= 8 && options.m <= MAX_ARGON2_MEMORY_KIB
+      && Number.isInteger(options.p) && options.p >= 1 && options.p <= MAX_ARGON2_LANES
+      && options.m >= 8 * options.p;
+    if (!borne) throw new KdbxError('Paramètres Argon2 hors limites dans le fichier');
     return kdfId === KDF_ARGON2D
       ? argon2dAsync(compositeKey, salt, options)
       : argon2idAsync(compositeKey, salt, options);

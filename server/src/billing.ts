@@ -361,16 +361,33 @@ export function billingRoutes(ctx: RouteContext, fetchImpl: typeof fetch): Recor
         throw new HttpError(400, 'invalid_signature', 'Signature Stripe invalide');
       }
       const event = JSON.parse(payload.toString('utf8')) as { id: string; type: string; data: { object: Record<string, unknown> } };
-      // Idempotence : Stripe peut renvoyer le même événement
-      const inserted = ctx.db.prepare('INSERT OR IGNORE INTO billing_events (id, received_at) VALUES (?, ?)').run(event.id, ctx.now());
-      if (Number(inserted.changes) === 0) return { status: 200, body: { received: true, duplicate: true } };
+      // Idempotence : Stripe peut renvoyer le même événement. On vérifie d'abord,
+      // et on ne marque l'événement comme traité qu'une fois le travail fait : une
+      // panne passagère au milieu doit laisser le rejeu de Stripe réussir.
+      const known = ctx.db.prepare('SELECT 1 FROM billing_events WHERE id = ?').get(event.id);
+      if (known) return { status: 200, body: { received: true, duplicate: true } };
 
       const object = event.data.object;
       const metadata = (object.metadata ?? {}) as Record<string, string>;
 
-      if (event.type === 'checkout.session.completed') {
+      if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
         const userId = (object.client_reference_id as string | null) ?? metadata.user_id;
         const planId = metadata.plan_id;
+
+        /*
+         * Stripe émet « completed » dès la validation du formulaire, y compris pour
+         * un moyen de paiement à notification différée (prélèvement SEPA, virement,
+         * ACH, Bacs, boleto). Dans ce cas l'argent n'est pas encaissé : payment_status
+         * vaut « unpaid » et l'abonnement est « incomplete ». Activer là reviendrait à
+         * offrir l'espace à qui valide sans provision. On attend
+         * « async_payment_succeeded », que Stripe envoie une fois l'argent arrivé.
+         */
+        const paye = object.payment_status === 'paid' || object.payment_status === 'no_payment_required';
+        if (!paye) {
+          ctx.db.prepare('INSERT OR IGNORE INTO billing_events (id, received_at) VALUES (?, ?)').run(event.id, ctx.now());
+          return { status: 200, body: { received: true, pending: true } };
+        }
+
         if (userId && planId && ctx.db.prepare('SELECT 1 FROM users WHERE id = ?').get(userId)) {
           let end: number | null = null;
           if (typeof object.subscription === 'string') {
@@ -391,6 +408,8 @@ export function billingRoutes(ctx: RouteContext, fetchImpl: typeof fetch): Recor
       } else if (event.type === 'invoice.payment_failed' && typeof object.subscription === 'string') {
         ctx.db.prepare("UPDATE subscriptions SET status = 'past_due', updated_at = ? WHERE stripe_subscription_id = ?").run(ctx.now(), object.subscription);
       }
+
+      ctx.db.prepare('INSERT OR IGNORE INTO billing_events (id, received_at) VALUES (?, ?)').run(event.id, ctx.now());
       return { status: 200, body: { received: true } };
     }
   };

@@ -59,10 +59,13 @@ function associatedData(file: Pick<EncryptedExportFile, 'format' | 'version' | '
 
 function assertSafeParams(params: Argon2Params): void {
   const { t, m, p } = params;
+  // Le produit est borné, pas seulement chaque valeur : 64 passes sur 2 Gio
+  // passaient le contrôle précédent et suffisaient à faire tomber l'onglet.
   const valid = [t, m, p].every(Number.isInteger)
-    && t >= 1 && t <= 64
+    && t >= 1 && t <= 16
     && p >= 1 && p <= 16
-    && m >= 8 * p && m <= 1 << 21; // 2 GiB max : évite un déni de service via un fichier piégé
+    && m >= 8 * p && m <= 1 << 19   // 512 Mio par passe
+    && t * m <= 1 << 21;            // budget total, ex. 4 passes sur 512 Mio
   if (!valid) throw new Error('Paramètres Argon2id invalides dans le fichier chiffré');
 }
 

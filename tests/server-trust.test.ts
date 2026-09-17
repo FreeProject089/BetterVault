@@ -142,7 +142,7 @@ describe('Serveur : sessions, offres, documents légaux, tableau de bord', () =>
     expect(stripeCalls.find(c => c.url.endsWith('/checkout/sessions'))!.body).toContain('price_plusAnnuel');
 
     const userId = new URLSearchParams(call.body).get('client_reference_id')!;
-    const event = JSON.stringify({ id: 'evt_1', type: 'checkout.session.completed', data: { object: { client_reference_id: userId, customer: 'cus_1', subscription: 'sub_1', metadata: { plan_id: 'plus' } } } });
+    const event = JSON.stringify({ id: 'evt_1', type: 'checkout.session.completed', data: { object: { client_reference_id: userId, customer: 'cus_1', subscription: 'sub_1', payment_status: 'paid', metadata: { plan_id: 'plus' } } } });
     const sign = (payload: string, secret = WEBHOOK_SECRET) => {
       const t = Math.floor(Date.now() / 1000);
       return `t=${t},v1=${createHmac('sha256', secret).update(`${t}.${payload}`).digest('hex')}`;
@@ -175,7 +175,7 @@ describe('Serveur : sessions, offres, documents légaux, tableau de bord', () =>
     const event = JSON.stringify({
       id: 'evt_renew',
       type: 'checkout.session.completed',
-      data: { object: { client_reference_id: userId, customer: 'cus_2', subscription: 'sub_2', metadata: { plan_id: 'plus', price_id: 'mensuel' } } }
+      data: { object: { client_reference_id: userId, customer: 'cus_2', subscription: 'sub_2', payment_status: 'paid', metadata: { plan_id: 'plus', price_id: 'mensuel' } } }
     });
     const t = Math.floor(Date.now() / 1000);
     await fetch(`${ctx.url}/api/v1/billing/webhook`, {
@@ -200,6 +200,55 @@ describe('Serveur : sessions, offres, documents légaux, tableau de bord', () =>
     const on = await device.setAutoRenew(true);
     expect(on.autoRenew).toBe(true);
     expect((await device.getBilling()).subscription).toMatchObject({ autoRenew: true });
+  });
+
+  it('n’accorde rien tant que le paiement différé n’est pas encaissé', async () => {
+    const email = uniqueEmail('differe');
+    const device = newService();
+    await device.createAccount({ email, password: PASSWORD, mode: 'cloud', serverUrl: ctx.url }, createEmptyVaultData());
+    const avant = await device.getBilling();
+
+    stripeCalls.length = 0;
+    await device.startCheckout('plus', 'mensuel');
+    const userId = new URLSearchParams(stripeCalls.find(c => c.url.endsWith('/checkout/sessions'))!.body).get('client_reference_id')!;
+
+    const envoyer = (id: string, corps: Record<string, unknown>) => {
+      const event = JSON.stringify({ id, type: 'checkout.session.completed', data: { object: corps } });
+      const t = Math.floor(Date.now() / 1000);
+      return fetch(`${ctx.url}/api/v1/billing/webhook`, {
+        method: 'POST',
+        headers: { 'Stripe-Signature': `t=${t},v1=${createHmac('sha256', WEBHOOK_SECRET).update(`${t}.${event}`).digest('hex')}`, 'Content-Type': 'application/json' },
+        body: event
+      });
+    };
+
+    // Prélèvement SEPA validé sans provision : Stripe envoie « completed », mais impayé
+    const attente = await envoyer('evt_differe', {
+      client_reference_id: userId, customer: 'cus_3', subscription: 'sub_3',
+      payment_status: 'unpaid', metadata: { plan_id: 'plus', price_id: 'mensuel' }
+    });
+    expect(await attente.json()).toMatchObject({ pending: true });
+
+    const pendant = await device.getBilling();
+    expect(pendant.subscription).toBeNull();
+    expect(pendant.limits.maxVaults).toBe(avant.limits.maxVaults);
+
+    // Une fois l'argent encaissé, Stripe renvoie l'événement de succès différé
+    const event = JSON.stringify({
+      id: 'evt_differe_ok',
+      type: 'checkout.session.async_payment_succeeded',
+      data: { object: { client_reference_id: userId, customer: 'cus_3', subscription: 'sub_3', payment_status: 'paid', metadata: { plan_id: 'plus', price_id: 'mensuel' } } }
+    });
+    const t = Math.floor(Date.now() / 1000);
+    await fetch(`${ctx.url}/api/v1/billing/webhook`, {
+      method: 'POST',
+      headers: { 'Stripe-Signature': `t=${t},v1=${createHmac('sha256', WEBHOOK_SECRET).update(`${t}.${event}`).digest('hex')}`, 'Content-Type': 'application/json' },
+      body: event
+    });
+
+    const apres = await device.getBilling();
+    expect(apres.subscription).toMatchObject({ planId: 'plus', active: true });
+    expect(apres.limits.maxVaults).toBe(avant.limits.maxVaults + 5);
   });
 
   it('vérifie la signature Stripe et refuse un horodatage trop ancien', () => {
