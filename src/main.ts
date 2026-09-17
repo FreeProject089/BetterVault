@@ -102,6 +102,7 @@ const GEN_ICONS = {
   copy: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>',
   refresh: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>',
   eye: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>',
+  trash: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>',
   eyeOff: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>'
 };
 
@@ -698,7 +699,15 @@ class AppController {
       li.tabIndex = 0;
       const badge = vault.shared
         ? `<span class="vault-type-badge shared" title="${this.escapeHtml(this.tr(`Partagé par ${vault.shared.ownerEmail}`, `Shared by ${vault.shared.ownerEmail}`))}">${SHARED_ICON}${this.escapeHtml(this.roleLabel(vault.shared.role))}</span>`
-        : `<span class="vault-type-badge ${vault.type}">${typeLabels[vault.type] ?? vault.type}</span>`;
+        // Un coffre partagé apporte le type défini sur l'appareil qui l'a créé : cet
+        // identifiant n'existe pas forcément ici. Faute de nom, on affiche « Coffre »
+        // plutôt que l'identifiant brut, qui ne dit rien et déborde de la barre.
+        : (() => {
+            const connu = Object.prototype.hasOwnProperty.call(typeLabels, vault.type);
+            const label = connu ? typeLabels[vault.type] : this.tr('Coffre', 'Vault');
+            const classe = ['personal', 'work', 'team'].includes(vault.type) ? ` ${vault.type}` : '';
+            return `<span class="vault-type-badge${classe}">${this.escapeHtml(label)}</span>`;
+          })();
       li.innerHTML = `
         <span class="nav-item-left">
           <span class="nav-vault-icon">${vault.icon ? renderItemIcon(vault.icon, 15) : VAULT_ICON}</span>
@@ -5224,7 +5233,7 @@ class AppController {
             ? tr(`Recadrée et réduite sur cet appareil (${kb} Ko max. sur ce serveur). Visible par vous uniquement.`, `Cropped and resized on this device (${kb} KB max on this server). Visible to you only.`)
             : tr('Gardée sur cet appareil uniquement.', 'Kept on this device only.')}</span>` : ''}
           ${policy.remoteUrls ? `
-            <div class="form-row" style="grid-template-columns:minmax(0,1fr) auto;">
+            <div class="form-row row-wrap">
               <input class="form-input" type="url" data-avatar-url placeholder="https://…/photo.png" autocomplete="off" spellcheck="false">
               <button type="button" class="btn-primary" data-avatar-link>${tr('Utiliser ce lien', 'Use this link')}</button>
             </div>
@@ -5796,19 +5805,23 @@ class AppController {
           <div data-icon-panel hidden></div>
           <div class="form-field">
             <label class="form-label" for="vault-type">${i18n.t.vault.vaultTypeLabel}</label>
-            <select class="form-input" id="vault-type" ${permissions.has('write') ? '' : 'disabled'}>
-              ${typeOption('personal', i18n.t.common.personal)}
-              ${typeOption('work', i18n.t.common.work)}
-              ${typeOption('team', i18n.t.common.team)}
-              ${vaultStore.getVaultTypes().map(custom => `<option value="${this.escapeHtml(custom.id)}" ${existing?.type === custom.id ? 'selected' : ''}>${this.escapeHtml(custom.name)}</option>`).join('')}
-              <option value="__new__">${tr('＋ Nouveau type…', '＋ New type…')}</option>
-            </select>
+<!-- Un &lt;select&gt; natif n'accueille pas de bouton dans sa liste : la corbeille
+                 se place à côté et vise le type choisi, ce qui évite de répéter la liste
+                 des types sous le champ. -->
+            <div class="select-with-action">
+              <select class="form-input" id="vault-type" ${permissions.has('write') ? '' : 'disabled'}>
+                ${typeOption('personal', i18n.t.common.personal)}
+                ${typeOption('work', i18n.t.common.work)}
+                ${typeOption('team', i18n.t.common.team)}
+                ${vaultStore.getVaultTypes().map(custom => `<option value="${this.escapeHtml(custom.id)}" ${existing?.type === custom.id ? 'selected' : ''}>${this.escapeHtml(custom.name)}</option>`).join('')}
+                <option value="__new__">${tr('＋ Nouveau type…', '＋ New type…')}</option>
+              </select>
+              <button type="button" class="icon-btn" data-delete-selected-type hidden title="${tr('Supprimer ce type', 'Delete this type')}" aria-label="${tr('Supprimer ce type', 'Delete this type')}">${GEN_ICONS.trash}</button>
+            </div>
             <div class="form-row" data-new-type hidden style="grid-template-columns:minmax(0,1fr) auto;margin-top:8px;">
               <input class="form-input" id="vault-type-name" maxlength="40" placeholder="${tr('Nom du type (Famille, Association…)', 'Type name (Family, Club…)')}" autocomplete="off">
               <button type="button" class="btn-primary btn-ghost" data-cancel-type>${tr('Annuler', 'Cancel')}</button>
             </div>
-            ${vaultStore.getVaultTypes().length ? `<div class="type-manage" data-type-manage>${vaultStore.getVaultTypes().map(custom => `
-              <span class="type-chip">${this.escapeHtml(custom.name)}<button type="button" class="icon-btn" data-delete-type="${this.escapeHtml(custom.id)}" aria-label="${tr('Supprimer le type', 'Delete type')} ${this.escapeHtml(custom.name)}">${GEN_ICONS.close}</button></span>`).join('')}</div>` : ''}
           </div>
 
           ${!existing && cloud ? `
@@ -5918,21 +5931,33 @@ class AppController {
     const typeSelect = $<HTMLSelectElement>('#vault-type')!;
     const newTypeRow = box.querySelector('[data-new-type]') as HTMLElement;
     const newTypeInput = $<HTMLInputElement>('#vault-type-name');
+    const deleteTypeButton = box.querySelector<HTMLButtonElement>('[data-delete-selected-type]');
     let previousType = typeSelect.value;
+
+    // La corbeille ne concerne que les types créés ici : les trois types fournis restent
+    const paintTypeActions = () => {
+      const custom = vaultStore.getVaultTypes().some(t => t.id === typeSelect.value);
+      if (deleteTypeButton) deleteTypeButton.hidden = !custom || !permissions.has('write');
+    };
+
     typeSelect.addEventListener('change', () => {
       const creating = typeSelect.value === '__new__';
       newTypeRow.hidden = !creating;
       if (creating) newTypeInput?.focus();
       else previousType = typeSelect.value;
+      paintTypeActions();
     });
     box.querySelector('[data-cancel-type]')?.addEventListener('click', () => {
       typeSelect.value = previousType;
       newTypeRow.hidden = true;
       if (newTypeInput) newTypeInput.value = '';
+      paintTypeActions();
     });
-    box.querySelector('[data-type-manage]')?.addEventListener('click', async e => {
-      const typeId = (e.target as HTMLElement).closest<HTMLElement>('[data-delete-type]')?.dataset.deleteType;
-      if (!typeId) return;
+    paintTypeActions();
+
+    deleteTypeButton?.addEventListener('click', async () => {
+      const typeId = typeSelect.value;
+      if (!vaultStore.getVaultTypes().some(t => t.id === typeId)) return;
       const custom = vaultStore.getVaultTypes().find(t => t.id === typeId);
       const used = vaultStore.getData().vaults.filter(v => v.type === typeId).length;
       const confirmed = await this.confirmDialog({
@@ -6002,13 +6027,15 @@ class AppController {
 
     $<HTMLButtonElement>('[data-action="share-existing"]')?.addEventListener('click', async event => {
       if (!existing) return;
+      // « currentTarget » n'est renseigné que pendant la distribution de l'événement :
+      // après la première attente il vaut null. On garde le bouton tout de suite.
+      const button = event.currentTarget as HTMLButtonElement;
       const confirmed = await this.confirmDialog({
         title: tr('Transformer en coffre partagé ?', 'Turn into a shared vault?'),
         message: tr('Le contenu est déplacé dans un coffre partagé. Vous pourrez ensuite inviter des membres.', 'The content moves to a shared vault. You can then invite members.'),
         confirmLabel: tr('Transformer', 'Convert')
       });
       if (!confirmed) return;
-      const button = event.currentTarget as HTMLButtonElement;
       button.disabled = true;
       try {
         const id = await sharedVaults.shareExisting(vaultStore.getData(), existing.id);
