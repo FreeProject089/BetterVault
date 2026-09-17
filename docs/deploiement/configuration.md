@@ -35,6 +35,12 @@ Les emails servent aux codes de réinitialisation du mot de passe et aux alertes
 | `SMTP_FROM` | Expéditeur, par exemple `BetterVault <no-reply@exemple.fr>` | `SMTP_USER` |
 | `SMTP_ALLOW_INVALID_CERT` | `true` pour un serveur interne au certificat auto-signé | `false` |
 
+!!! tip "Essayer les emails sans serveur SMTP"
+    Un collecteur local est fourni : `docker compose --profile mail up -d`, puis
+    `SMTP_HOST=mailpit`, `SMTP_PORT=1025`, `SMTP_SECURITY=none`. Les messages s'affichent sur
+    <http://127.0.0.1:8025> et ne quittent jamais la machine — pratique pour vérifier le code de
+    réinitialisation et les alertes de sécurité.
+
 La page d'administration propose un bouton d'email de test.
 
 ## Limites des coffres
