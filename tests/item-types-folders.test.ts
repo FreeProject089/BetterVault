@@ -271,3 +271,68 @@ describe('Pièces jointes gardées dans le coffre', () => {
     expect(formatLimit(512 * 1024, 'en')).toBe('512 KB');
   });
 });
+
+describe('Offres payantes', () => {
+  it('lit les offres depuis l’environnement', async () => {
+    const { plansFromEnv } = await import('../server/src/billing.ts');
+
+    expect(plansFromEnv(undefined)).toEqual([]);
+    expect(plansFromEnv('  ')).toEqual([]);
+
+    const plans = plansFromEnv(JSON.stringify([{
+      id: 'plus',
+      name: 'Espace +',
+      prices: [
+        { id: 'mensuel', label: '2 € / mois', stripePriceId: 'price_abc' },
+        { id: 'annuel', label: '20 € / an', stripePriceId: 'price_def' }
+      ],
+      boosts: { attachmentQuotaBytes: 1073741824 }
+    }]));
+
+    expect(plans).toHaveLength(1);
+    expect(plans[0].prices.map(p => p.id)).toEqual(['mensuel', 'annuel']);
+    expect(plans[0].prices[0].mode).toBe('subscription');
+    expect(plans[0].boosts.attachmentQuotaBytes).toBe(1073741824);
+  });
+
+  it('arrête le serveur plutôt que de démarrer sur une configuration illisible', async () => {
+    const { plansFromEnv } = await import('../server/src/billing.ts');
+
+    expect(() => plansFromEnv('pas du json')).toThrow('tableau JSON valide');
+    expect(() => plansFromEnv('{"id":"plus"}')).toThrow('tableau JSON');
+    expect(() => plansFromEnv('[{"id":"plus","name":"X","prices":[{"id":"mensuel","stripePriceId":"pas-un-prix"}]}]'))
+      .toThrow(/prix Stripe invalide/);
+  });
+
+  it('relit une offre enregistrée avant les durées', async () => {
+    const { normalizePlan } = await import('../server/src/billing.ts');
+
+    // Ancienne forme : un seul tarif porté par l'offre elle-même
+    const plan = normalizePlan({
+      id: 'plus', name: 'Plus', priceLabel: '2 € / mois',
+      stripePriceId: 'price_abc', mode: 'subscription',
+      boosts: { maxVaults: 5 }
+    });
+
+    expect(plan.prices).toHaveLength(1);
+    expect(plan.prices[0]).toMatchObject({ id: 'defaut', label: '2 € / mois', stripePriceId: 'price_abc', mode: 'subscription' });
+    expect(plan.boosts.maxVaults).toBe(5);
+  });
+
+  it('refuse deux tarifs de même identifiant', async () => {
+    const { normalizePlan } = await import('../server/src/billing.ts');
+    expect(() => normalizePlan({
+      id: 'plus', name: 'Plus',
+      prices: [
+        { id: 'mensuel', stripePriceId: 'price_abc' },
+        { id: 'mensuel', stripePriceId: 'price_def' }
+      ]
+    })).toThrow(/en double/);
+  });
+
+  it('cache les identifiants de prix Stripe à l’application', async () => {
+    const { normalizePlan, planForAccount } = await import('../server/src/billing.ts');
+    const plan = normalizePlan({ id: 'plus', name: 'Plus', prices: [{ id: 'mensuel', stripePriceId: 'price_secret' }] });
+    expect(JSON.stringify(planForAccount(plan))).not.toContain('price_secret');
+  });
+});

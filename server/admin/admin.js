@@ -83,6 +83,9 @@ const TEXT = {
   plans: ['Offres', 'Plans'],
   addPlan: ['Ajouter une offre', 'Add a plan'],
   noPlans: ['Aucune offre. Créez un prix dans Stripe, puis ajoutez-le ici.', 'No plans. Create a price in Stripe, then add it here.'],
+  durations: ['Durées proposées', 'Available durations'],
+  addDuration: ['Ajouter une durée', 'Add a duration'],
+  durationsHint: ['Une durée par tarif Stripe : mensuel, annuel… Le compte choisit au moment de payer.', 'One duration per Stripe price: monthly, yearly… The account picks one at checkout.'],
   legalTitle: ['Identité de l’hébergeur', 'Operator identity'],
   legalHint: ['Ces informations complètent les modèles publiés sur /legal (conditions, confidentialité, DPA, mesures de sécurité, sous-traitants). Relisez-les : vous restez responsable de leur contenu.', 'This information fills the templates published at /legal (terms, privacy, DPA, security measures, subprocessors). Review them: you remain responsible for their content.'],
   auditTitle: ['Journal de sécurité', 'Security log'],
@@ -499,6 +502,28 @@ const BOOSTS = [
   ['maxCredentialsPerVault', fr ? 'Identifiants par coffre en plus' : 'Extra credentials per vault', 1]
 ];
 
+/** Une durée d'une offre : son identifiant, son prix affiché et le prix Stripe correspondant */
+function priceRow(price = {}) {
+  const row = document.createElement('div');
+  row.className = 'price-row row';
+  row.innerHTML = `
+    <div class="small"><label>${fr ? 'Identifiant' : 'ID'}</label><input data-price="id" value="${escapeHtml(price.id)}" placeholder="mensuel" pattern="[a-z0-9-]{2,32}"></div>
+    <div class="small"><label>${fr ? 'Prix affiché' : 'Price label'}</label><input data-price="label" value="${escapeHtml(price.label)}" placeholder="2 € / mois" maxlength="40"></div>
+    <div><label>${fr ? 'Prix Stripe' : 'Stripe price'}</label><input data-price="stripePriceId" value="${escapeHtml(price.stripePriceId)}" placeholder="price_…"></div>
+    <div class="small"><label>${fr ? 'Paiement' : 'Billing'}</label><select data-price="mode">
+      <option value="subscription">${fr ? 'Renouvelé' : 'Recurring'}</option>
+      <option value="payment" ${price.mode === 'payment' ? 'selected' : ''}>${fr ? 'Une fois' : 'One-time'}</option>
+    </select></div>
+    <button type="button" class="btn ghost" data-remove-price aria-label="${fr ? 'Retirer cette durée' : 'Remove this duration'}">✕</button>`;
+  row.querySelector('[data-remove-price]').addEventListener('click', () => {
+    const list = row.parentElement;
+    row.remove();
+    // Une offre sans durée ne peut pas être achetée : on en garde toujours une
+    if (!list.querySelector('.price-row')) list.appendChild(priceRow());
+  });
+  return row;
+}
+
 function planRow(plan = {}) {
   const row = document.createElement('div');
   row.className = 'plan';
@@ -506,15 +531,28 @@ function planRow(plan = {}) {
     <div class="row">
       <div class="small"><label>${fr ? 'Identifiant' : 'ID'}</label><input data-plan="id" value="${escapeHtml(plan.id)}" placeholder="plus" pattern="[a-z0-9-]{2,32}"></div>
       <div><label>${fr ? 'Nom' : 'Name'}</label><input data-plan="name" value="${escapeHtml(plan.name)}" maxlength="60"></div>
-      <div class="small"><label>${fr ? 'Prix affiché' : 'Price label'}</label><input data-plan="priceLabel" value="${escapeHtml(plan.priceLabel)}" placeholder="2 € / mois"></div>
-    </div>
-    <div class="row">
-      <div><label>${fr ? 'Prix Stripe' : 'Stripe price'}</label><input data-plan="stripePriceId" value="${escapeHtml(plan.stripePriceId)}" placeholder="price_…"></div>
-      <div class="small"><label>${fr ? 'Paiement' : 'Billing'}</label><select data-plan="mode"><option value="subscription">${fr ? 'Abonnement' : 'Subscription'}</option><option value="payment" ${plan.mode === 'payment' ? 'selected' : ''}>${fr ? 'Une fois' : 'One-time'}</option></select></div>
     </div>
     <label>${fr ? 'Description' : 'Description'}</label><input data-plan="description" value="${escapeHtml(plan.description)}" maxlength="300">
+
+    <div class="panel-head" style="margin-top:14px;">
+      <label style="margin:0;">${t('durations')}</label>
+      <button type="button" class="btn ghost" data-add-price>${t('addDuration')}</button>
+    </div>
+    <p class="hint" style="margin-top:0;">${t('durationsHint')}</p>
+    <div data-prices></div>
+
     <div class="limits">${BOOSTS.map(([key, label, unit]) => `<div><label>${label}</label><input type="number" min="0" data-boost="${key}" data-unit="${unit}" value="${plan.boosts?.[key] ? plan.boosts[key] / unit : ''}"></div>`).join('')}</div>
     <div class="row test"><button type="button" class="btn ghost" data-remove>${fr ? 'Retirer cette offre' : 'Remove this plan'}</button></div>`;
+
+  const prices = row.querySelector('[data-prices]');
+  // Relit aussi l'ancienne forme à un seul tarif, enregistrée avant les durées
+  const existing = plan.prices?.length
+    ? plan.prices
+    : (plan.stripePriceId ? [{ id: 'defaut', label: plan.priceLabel, stripePriceId: plan.stripePriceId, mode: plan.mode }] : []);
+  for (const price of existing) prices.appendChild(priceRow(price));
+  if (!existing.length) prices.appendChild(priceRow());
+
+  row.querySelector('[data-add-price]').addEventListener('click', () => prices.appendChild(priceRow()));
   row.querySelector('[data-remove]').addEventListener('click', () => {
     row.remove();
     renderEmptyPlans();
@@ -552,7 +590,11 @@ function readBilling() {
       row.querySelectorAll('[data-boost]').forEach(input => {
         if (input.value) boosts[input.dataset.boost] = Math.round(Number(input.value) * Number(input.dataset.unit));
       });
-      return { id: field('id'), name: field('name'), priceLabel: field('priceLabel'), stripePriceId: field('stripePriceId'), mode: field('mode'), description: field('description'), boosts };
+      const prices = [...row.querySelectorAll('.price-row')].map(priceEl => {
+        const value = name => priceEl.querySelector(`[data-price="${name}"]`).value.trim();
+        return { id: value('id'), label: value('label'), stripePriceId: value('stripePriceId'), mode: value('mode') };
+      });
+      return { id: field('id'), name: field('name'), description: field('description'), prices, boosts };
     })
   };
 }

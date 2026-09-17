@@ -878,9 +878,15 @@ export class AccountService {
     return this.withSessionRetry(() => client.billing());
   }
 
-  startCheckout(planId: string): Promise<{ url: string }> {
+  startCheckout(planId: string, priceId?: string): Promise<{ url: string }> {
     const client = this.cloudClient();
-    return this.withSessionRetry(() => client.checkout(planId));
+    return this.withSessionRetry(() => client.checkout(planId, priceId));
+  }
+
+  /** Renouvellement automatique de l'abonnement en cours */
+  setAutoRenew(enabled: boolean): Promise<{ autoRenew: boolean; currentPeriodEnd: number | null }> {
+    const client = this.cloudClient();
+    return this.withSessionRetry(() => client.setAutoRenew(enabled));
   }
 
   openBillingPortal(): Promise<{ url: string }> {
