@@ -26,6 +26,8 @@ Variables propres à `docker compose` (fichier `.env` à la racine) :
 
 Les emails servent aux codes de réinitialisation du mot de passe et aux alertes de sécurité. Sans `SMTP_HOST`, aucun email n'est envoyé.
 
+Ils partent **en anglais**, quelle que soit la langue de l'application, et en deux versions : une mise en page et une en texte brut, que les clients qui refusent le HTML affichent à la place. Un email traverse des serveurs, des filtres anti-spam et parfois une boîte partagée : il est lu par des gens et des machines qui ne partagent pas forcément la langue du destinataire.
+
 | Variable | Rôle | Défaut |
 | --- | --- | --- |
 | `SMTP_HOST` | Serveur SMTP | aucun |

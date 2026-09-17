@@ -23,7 +23,10 @@ export interface SmtpConfig {
 export interface MailMessage {
   to: string;
   subject: string;
+  /** Version texte, toujours présente : certains clients n'affichent que celle-là */
   text: string;
+  /** Version mise en forme, facultative */
+  html?: string;
 }
 
 export interface Mailer {
@@ -140,20 +143,55 @@ const encodeHeader = (value: string) => (/^[\x20-\x7e]*$/.test(value) ? value : 
 
 const addressOf = (value: string) => /<([^>]+)>/.exec(value)?.[1] ?? value.trim();
 
+const encodeBody = (value: string) =>
+  Buffer.from(value.replace(/\r?\n/g, '\r\n')).toString('base64').replace(/.{76}/g, '$&\r\n');
+
+/**
+ * Construit le message, en deux versions quand une mise en forme est fournie.
+ *
+ * « multipart/alternative » présente le même contenu deux fois et laisse le client
+ * choisir. La version texte vient en premier, comme le veut la norme : le client
+ * retient la dernière qu'il sait afficher, et les lecteurs qui refusent le HTML —
+ * ou le mode texte d'un client moderne — gardent un message lisible.
+ */
 export function buildMessage(from: string, message: MailMessage, now = new Date()): string {
-  const body = Buffer.from(message.text.replace(/\r?\n/g, '\r\n')).toString('base64').replace(/.{76}/g, '$&\r\n');
   const domain = addressOf(from).split('@')[1] ?? 'bettervault.local';
-  return [
+  const entete = [
     `From: ${from}`,
     `To: ${message.to}`,
     `Subject: ${encodeHeader(message.subject)}`,
     `Date: ${now.toUTCString()}`,
     `Message-ID: <${randomUUID()}@${domain}>`,
-    'MIME-Version: 1.0',
+    'MIME-Version: 1.0'
+  ];
+
+  if (!message.html) {
+    return [
+      ...entete,
+      'Content-Type: text/plain; charset=utf-8',
+      'Content-Transfer-Encoding: base64',
+      '',
+      encodeBody(message.text)
+    ].join('\r\n');
+  }
+
+  const frontiere = `bettervault-${randomUUID()}`;
+  return [
+    ...entete,
+    `Content-Type: multipart/alternative; boundary="${frontiere}"`,
+    '',
+    `--${frontiere}`,
     'Content-Type: text/plain; charset=utf-8',
     'Content-Transfer-Encoding: base64',
     '',
-    body
+    encodeBody(message.text),
+    `--${frontiere}`,
+    'Content-Type: text/html; charset=utf-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    encodeBody(message.html),
+    `--${frontiere}--`,
+    ''
   ].join('\r\n');
 }
 
