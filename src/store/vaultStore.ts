@@ -446,6 +446,73 @@ export class VaultStore {
     this.commit();
   }
 
+  /* ── Effacement choisi ─────────────────────────────────────────────── */
+
+  /**
+   * Efface d'un coup les catégories demandées, dans les coffres indiqués.
+   *
+   * Chaque identifiant retiré est inscrit dans « deleted » : sans cela l'autre
+   * appareil, qui possède encore l'élément, le renverrait à la synchronisation
+   * suivante et l'effacement serait défait sans que personne ne comprenne pourquoi.
+   */
+  eraseData(choix: {
+    vaultIds: string[];
+    credentials?: boolean;
+    tasks?: boolean;
+    folders?: boolean;
+    tags?: boolean;
+  }): { credentials: number; tasks: number; folders: number; tags: number } {
+    const now = Date.now();
+    const cible = new Set(choix.vaultIds);
+    const bilan = { credentials: 0, tasks: 0, folders: 0, tags: 0 };
+
+    if (choix.credentials) {
+      const partants = this.data.credentials.filter(c => cible.has(c.vaultId));
+      bilan.credentials = partants.length;
+      for (const c of partants) this.markDeleted(c.id, now);
+      const partis = new Set(partants.map(c => c.id));
+      this.data.credentials = this.data.credentials.filter(c => !partis.has(c.id));
+      // Une tâche qui pointait vers un identifiant effacé perd son lien, pas son existence
+      this.data.tasks = this.data.tasks.map(t =>
+        t.linkedCredentialId && partis.has(t.linkedCredentialId) ? { ...t, linkedCredentialId: undefined, updatedAt: now } : t);
+    }
+
+    if (choix.tasks) {
+      const partants = this.data.tasks.filter(t => cible.has(t.vaultId));
+      bilan.tasks = partants.length;
+      for (const t of partants) this.markDeleted(t.id, now);
+      const partis = new Set(partants.map(t => t.id));
+      this.data.tasks = this.data.tasks.filter(t => !partis.has(t.id));
+      // Une dépendance vers une tâche effacée ne mène nulle part : on la retire
+      this.data.tasks = this.data.tasks.map(t => t.dependsOn?.some(id => partis.has(id))
+        ? { ...t, dependsOn: t.dependsOn.filter(id => !partis.has(id)), updatedAt: now }
+        : t);
+    }
+
+    if (choix.folders) {
+      const partants = this.data.folders.filter(f => cible.has(f.vaultId));
+      bilan.folders = partants.length;
+      const partis = new Set(partants.map(f => f.id));
+      this.data.folders = this.data.folders.filter(f => !partis.has(f.id));
+      // Ce qui reste et pointait vers un dossier effacé remonte à la racine
+      this.data.credentials = this.data.credentials.map(c =>
+        c.folderId && partis.has(c.folderId) ? { ...c, folderId: undefined, updatedAt: now } : c);
+    }
+
+    if (choix.tags) {
+      // Un tag n'appartient à aucun coffre : on ne retire que ceux qui ne servent plus
+      const encoreUtilises = new Set([...this.data.credentials, ...this.data.tasks]
+        .flatMap(item => item.tags.map(t => t.toLowerCase())));
+      const partants = this.data.tagDefs.filter(t => !encoreUtilises.has(t.name.toLowerCase()));
+      bilan.tags = partants.length;
+      const partis = new Set(partants.map(t => t.id));
+      this.data.tagDefs = this.data.tagDefs.filter(t => !partis.has(t.id));
+    }
+
+    this.commit();
+    return bilan;
+  }
+
   /* ── Tâches ────────────────────────────────────────────────────────── */
 
   addTask(task: NewTask): string {

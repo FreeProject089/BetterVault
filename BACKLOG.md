@@ -9,9 +9,9 @@ Lot 1 — bugs confirmés
 - [x] Marges de la modale Compte
 
 Lot 2 — suppression et export
-- [ ] Onglet Données : exporter (chiffré ou non) puis supprimer, au choix
-- [ ] Maj enfoncé = passer la double validation (coffres, 2FA, identifiants)
-- [ ] Raccourcis cohérents macOS / Windows / Linux, masqués sur téléphone
+- [x] Onglet Données : exporter (chiffré ou non) puis supprimer, au choix
+- [x] Maj enfoncé = passer la double validation (coffres, 2FA, identifiants)
+- [x] Raccourcis cohérents macOS / Windows / Linux, masqués sur téléphone
 
 Lot 3 — écran de réinitialisation et emails
 - [ ] Réinitialisation du mot de passe par étapes, champs inutiles masqués

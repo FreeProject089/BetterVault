@@ -323,6 +323,19 @@ body {
   box-shadow: 0 0 0 1px var(--accent-blue);
 }
 
+/*
+ * Rappels clavier : on les retire quand le pointeur est grossier et qu'il n'y a pas
+ * de survol — un téléphone ou une tablette. La fenêtre de l'extension, étroite mais
+ * posée sur un ordinateur, les garde.
+ */
+@media (pointer: coarse) and (hover: none) {
+  .search-shortcut,
+  .dialog-hint,
+  .modal-footer-hint {
+    display: none;
+  }
+}
+
 .search-shortcut {
   position: absolute;
   right: 8px;
