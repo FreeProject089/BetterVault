@@ -29,6 +29,11 @@ export interface EmailContext {
   to: string;
   locale: Locale;
   publicUrl: string;
+  /**
+   * Lien « ce n'était pas moi », à usage unique. Absent quand le serveur n'a pas
+   * d'adresse publique configurée : il n'y aurait nulle part où pointer.
+   */
+  notMeUrl?: string;
 }
 
 const escapeHtml = (value: string) =>
@@ -42,16 +47,37 @@ const BORDURE = '#d8dee4';
 const ACCENT = '#5754c7';
 const FOND = '#f6f8fa';
 
-/** Le logo en SVG ne passerait pas : beaucoup de clients le bloquent. Un rond suffit. */
-const marque = () => `
+/*
+ * En-tête de marque.
+ *
+ * Le logo est un PNG servi par le serveur : le SVG est retiré par la plupart des
+ * clients de messagerie, et une image en data: l'est aussi par Gmail. On utilise la
+ * variante prévue pour fond sombre, posée sur un carré sombre — c'est son usage.
+ *
+ * Le nom reste du texte à côté de l'image, et non dans l'image : les clients
+ * bloquent les images par défaut, et l'en-tête doit se lire quand même.
+ * Sans adresse publique configurée, il n'y a pas d'URL valide : le carré se réduit
+ * alors à l'initiale, toujours lisible.
+ */
+const marque = (publicUrl: string) => {
+  const base = publicUrl.replace(/\/+$/, '');
+  const pastille = base
+    ? `<img src="${escapeHtml(base)}/brand/logo-on-dark.png" width="20" height="20" alt="BetterVault"
+         style="display:block;width:20px;height:20px;border:0;">`
+    : `<span style="font:700 14px/20px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#ffffff;">B</span>`;
+  return `
   <table role="presentation" cellpadding="0" cellspacing="0" border="0">
     <tr>
       <td style="padding-right:10px;">
-        <div style="width:28px;height:28px;line-height:28px;border-radius:8px;background-color:${ACCENT};color:#ffffff;font:700 15px/28px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;text-align:center;">B</div>
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="30" height="30"
+          style="width:30px;height:30px;background-color:#18181b;border-radius:9px;">
+          <tr><td align="center" valign="middle" style="width:30px;height:30px;text-align:center;">${pastille}</td></tr>
+        </table>
       </td>
-      <td style="font:600 16px/28px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${ENCRE};">BetterVault</td>
+      <td style="font:600 16px/30px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${ENCRE};">BetterVault</td>
     </tr>
   </table>`;
+};
 
 /** Bloc de code : gros, espacé, sélectionnable d'un geste */
 const blocCode = (code: string) => `
@@ -77,12 +103,31 @@ const faits = (lignes: Array<[string, string]>) => `
 const paragraphe = (texte: string) =>
   `<p style="margin:0 0 14px;font:400 15px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${ENCRE};">${texte}</p>`;
 
-/** Ce qu'il faut faire si l'on n'est pas à l'origine de l'événement */
-const alerte = (texte: string) => `
+/**
+ * Ce qu'il faut faire si l'on n'est pas à l'origine de l'événement.
+ *
+ * Le conseil seul ne suffisait pas : lire « changez votre mot de passe » dans un
+ * email suppose de savoir où aller, et d'y arriver avant celui qui vient d'entrer.
+ * Le bouton ferme toutes les sessions en un clic, sans avoir à se connecter — c'est
+ * le geste utile, et le seul que le lien autorise.
+ */
+const alerte = (texte: string, notMeUrl?: string) => `
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:18px 0 4px;">
     <tr>
       <td style="padding:12px 14px;background-color:#fff8c5;border:1px solid #d4a72c;border-radius:8px;
-        font:400 13.5px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#4d2d00;">${texte}</td>
+        font:400 13.5px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#4d2d00;">
+        ${texte}
+        ${notMeUrl ? `
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;">
+          <tr>
+            <td align="center" style="background-color:#cf222e;border-radius:8px;">
+              <a href="${escapeHtml(notMeUrl)}" style="display:inline-block;padding:10px 18px;color:#ffffff;text-decoration:none;
+                font:600 14px/1.2 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">This wasn’t me</a>
+            </td>
+          </tr>
+        </table>
+        <div style="margin-top:7px;font-size:12px;color:#6b4a00;">Signs every device out of your account. Works once.</div>` : ''}
+      </td>
     </tr>
   </table>`;
 
@@ -105,7 +150,7 @@ function page(titre: string, corps: string, publicUrl: string): string {
       <td align="center" style="padding:28px 14px;">
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:520px;background-color:#ffffff;border:1px solid ${BORDURE};border-radius:14px;">
           <tr>
-            <td style="padding:22px 26px 0;">${marque()}</td>
+            <td style="padding:22px 26px 0;">${marque(publicUrl)}</td>
           </tr>
           <tr>
             <td style="padding:18px 26px 24px;">
@@ -134,7 +179,12 @@ const piedTexte = (publicUrl: string) =>
 const message = (ctx: EmailContext, subject: string, texte: string, corpsHtml: string): MailMessage => ({
   to: ctx.to,
   subject,
-  text: texte + piedTexte(ctx.publicUrl),
+  // Le lien figure aussi en texte : c'est la version que certains clients affichent
+  text: texte + (ctx.notMeUrl ? `
+
+This wasn't me — sign every device out of the account:
+${ctx.notMeUrl}
+(works once)` : '') + piedTexte(ctx.publicUrl),
   html: page(subject, corpsHtml, ctx.publicUrl)
 });
 
@@ -149,7 +199,7 @@ export const emails = {
       paragraphe('Use this code to continue resetting your master password.')
         + blocCode(code)
         + paragraphe(`<span style="color:${DISCRET};">It expires in ${minutes} minutes.</span>`)
-        + alerte('If you did not ask to reset your password, ignore this email. Nothing changes without this code.')
+        + alerte('If you did not ask to reset your password, ignore this email — nothing changes without this code. You can also cancel it right away.', ctx.notMeUrl)
     );
   },
 
@@ -160,7 +210,7 @@ export const emails = {
       `A sign-in happened on ${formatDate(when)}.\nIP address: ${address}\nDevice: ${device || 'unknown'}\n\nIf this wasn't you, change your master password and turn on two-factor authentication.`,
       paragraphe('Someone signed in to your account.')
         + faits([['When', formatDate(when)], ['IP address', address], ['Device', device || 'unknown']])
-        + alerte('If this wasn’t you, change your master password and turn on two-factor authentication.')
+        + alerte('If this wasn’t you, act now.', ctx.notMeUrl)
     );
   },
 
@@ -173,7 +223,7 @@ export const emails = {
       paragraphe(`Your account’s master password was changed${how}.`)
         + faits([['When', formatDate(when)]])
         + paragraphe(`<span style="color:${DISCRET};">Other devices will need to sign in again.</span>`)
-        + alerte('If this wasn’t you, contact the administrator of your server.')
+        + alerte('If this wasn’t you, act now.', ctx.notMeUrl)
     );
   },
 
@@ -185,7 +235,7 @@ export const emails = {
       paragraphe('Your account was reset without a recovery key.')
         + faits([['When', formatDate(when)]])
         + paragraphe('The previous vault was replaced with an empty one. Its contents cannot be recovered.')
-        + alerte('If this wasn’t you, contact the administrator of your server.')
+        + alerte('If this wasn’t you, act now — then contact the administrator of your server.', ctx.notMeUrl)
     );
   },
 
@@ -197,7 +247,7 @@ export const emails = {
       `Two-factor authentication was turned ${etat} for your account on ${formatDate(when)}.`,
       paragraphe(`Two-factor authentication was turned <strong>${etat}</strong> for your account.`)
         + faits([['When', formatDate(when)]])
-        + alerte('If this wasn’t you, change your master password right away.')
+        + alerte('If this wasn’t you, act now, then change your master password.', ctx.notMeUrl)
     );
   },
 
@@ -209,7 +259,7 @@ export const emails = {
       paragraphe('A new recovery key was created for your account.')
         + faits([['When', formatDate(when)]])
         + paragraphe('The previous key no longer works. Keep the new one outside BetterVault.')
-        + alerte('If this wasn’t you, contact the administrator of your server.')
+        + alerte('If this wasn’t you, act now — then contact the administrator of your server.', ctx.notMeUrl)
     );
   },
 
