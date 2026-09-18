@@ -146,6 +146,11 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       void api(req, res);
       return;
     }
+    // Les pages « ce n'était pas moi » sont rendues par l'API, pas par l'application
+    if (pathname.startsWith('/security/')) {
+      void api(req, res);
+      return;
+    }
     if (pathname === '/admin' || pathname.startsWith('/admin/')) {
       serveStatic(adminDir, pathname.slice('/admin'.length) || '/', res);
       return;

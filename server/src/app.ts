@@ -27,6 +27,7 @@ import { databaseSnapshot, encryptBackup, type BackupService, type BackupSetting
 import { sessionRoutes } from './sessions.ts';
 import { billingRoutes, createLimitsResolver } from './billing.ts';
 import { LEGAL_DOCUMENTS, legalConfigured, legalTitle, renderLegalPage } from './legal.ts';
+import { renderNotMePage, renderNotMeDone, renderNotMeExpired } from './securityAlert.ts';
 import { analytics, createAudit, type Metrics } from './metrics.ts';
 import { describeUserAgent, truncateIp, type GeoLookup } from './geoip.ts';
 import { route } from './context.ts';
@@ -168,6 +169,10 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     insertRecoveryToken: db.prepare('INSERT INTO recovery_tokens (token_hash, user_id, with_recovery_key, expires_at) VALUES (?, ?, ?, ?)'),
     recoveryToken: db.prepare('SELECT user_id, with_recovery_key, expires_at FROM recovery_tokens WHERE token_hash = ?'),
     deleteRecoveryTokens: db.prepare('DELETE FROM recovery_tokens WHERE user_id = ?'),
+    insertSecurityAlert: db.prepare('INSERT INTO security_alerts (token_hash, user_id, kind, created_at, expires_at) VALUES (?, ?, ?, ?, ?)'),
+    securityAlertByHash: db.prepare('SELECT * FROM security_alerts WHERE token_hash = ?'),
+    useSecurityAlert: db.prepare('UPDATE security_alerts SET used_at = ? WHERE token_hash = ? AND used_at IS NULL'),
+    purgeSecurityAlerts: db.prepare('DELETE FROM security_alerts WHERE expires_at <= ?'),
     countUsers: db.prepare('SELECT COUNT(*) AS count FROM users'),
     vaultBytes: db.prepare('SELECT COALESCE(SUM(LENGTH(blob)), 0) AS bytes FROM vaults'),
     twoFactorUsers: db.prepare('SELECT COUNT(*) AS count FROM users WHERE totp_enabled = 1')
@@ -277,10 +282,39 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
 
   const locale = (user: UserRow): Locale => (user.locale === 'fr' || user.locale === 'en' ? user.locale : 'en');
 
+  const ALERT_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+  /**
+   * Lien « ce n'était pas moi » joint à un email de sécurité.
+   *
+   * Il faut du temps pour lire un email : sept jours, contre dix minutes pour un
+   * jeton de récupération. Le lien ne sert qu'une fois, et il n'ouvre qu'une
+   * action — fermer les sessions — donc l'exposition reste faible.
+   *
+   * Sans adresse publique configurée, il n'y a nulle part où pointer : l'email
+   * part alors sans bouton, avec le conseil écrit seulement.
+   */
+  const alertLink = (user: UserRow, kind: string): string | undefined => {
+    if (!settings.publicUrl) return undefined;
+    const token = randomBytes(32).toString('base64url');
+    sql.purgeSecurityAlerts.run(now());
+    sql.insertSecurityAlert.run(sha256(token), user.id, kind, now(), now() + ALERT_TOKEN_TTL_MS);
+    return `${settings.publicUrl.replace(/\/+$/, '')}/security/not-me/${token}`;
+  };
+
   /** Envoi en arrière-plan : une panne du serveur SMTP ne bloque jamais l'utilisateur */
-  const notify = (build: (ctx: { to: string; locale: Locale; publicUrl: string }) => MailMessage, user: UserRow) => {
+  const notify = (
+    build: (ctx: { to: string; locale: Locale; publicUrl: string; notMeUrl?: string }) => MailMessage,
+    user: UserRow,
+    alertKind?: string
+  ) => {
     if (!settings.smtp) return;
-    const message = build({ to: user.email, locale: locale(user), publicUrl: settings.publicUrl });
+    const message = build({
+      to: user.email,
+      locale: locale(user),
+      publicUrl: settings.publicUrl,
+      notMeUrl: alertKind ? alertLink(user, alertKind) : undefined
+    });
     mailerFactory(settings.smtp).send(message).catch(err => console.error(`Email non envoyé à ${user.email} :`, err instanceof Error ? err.message : err));
   };
 
@@ -378,7 +412,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       if (body.notify !== false) {
         const client = describeClient(req);
         const place = [client.city, client.country].filter(Boolean).join(', ');
-        notify(ctx => emails.newLogin(ctx, now(), `${client.ipPrefix}${place ? ` (${place})` : ''}`, client.device), user);
+        notify(ctx => emails.newLogin(ctx, now(), `${client.ipPrefix}${place ? ` (${place})` : ''}`, client.device), user, 'new_login');
       }
       return {
         status: 200,
@@ -456,7 +490,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       sql.updateCredentials.run(verifier.toString('base64'), authSalt.toString('base64'), JSON.stringify(kdf), salt, JSON.stringify(wrappedVaultKey), userId);
       // Les autres appareils devront se reconnecter avec le nouveau mot de passe
       sql.deleteOtherSessions.run(userId, tokenHash);
-      notify(ctx => emails.passwordChanged(ctx, now(), false), user);
+      notify(ctx => emails.passwordChanged(ctx, now(), false), user, 'password_changed');
       audit('account.password_changed', {}, userId);
       return { status: 204 };
     },
@@ -473,7 +507,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       const [verifier, salt, wrapped] = await recoveryColumns(recovery);
       sql.updateRecovery.run(verifier, salt, wrapped, userId);
       sql.deleteRecoveryTokens.run(userId);
-      notify(ctx => emails.recoveryKeyChanged(ctx, now()), user);
+      notify(ctx => emails.recoveryKeyChanged(ctx, now()), user, 'recovery_key_changed');
       return { status: 204 };
     },
 
@@ -499,7 +533,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       const step = code ? verifyTotp(user.totp_secret, code, now(), 0) : null;
       if (step === null) throw new HttpError(400, 'totp_invalid', 'Code incorrect. Vérifiez l’heure de votre téléphone.');
       sql.enableTotp.run(step, userId);
-      notify(ctx => emails.twoFactor(ctx, now(), true), user);
+      notify(ctx => emails.twoFactor(ctx, now(), true), user, 'totp_enabled');
       audit('account.2fa_enabled', {}, userId);
       return { status: 204 };
     },
@@ -514,7 +548,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       if (!(await verifyAuthHash(user, authHash))) throw new HttpError(403, 'invalid_credentials', 'Mot de passe principal incorrect');
       if (user.totp_enabled && !consumeTotp(user, code)) throw new HttpError(400, 'totp_invalid', 'Code incorrect ou déjà utilisé');
       sql.disableTotp.run(userId);
-      if (user.totp_enabled) notify(ctx => emails.twoFactor(ctx, now(), false), user);
+      if (user.totp_enabled) notify(ctx => emails.twoFactor(ctx, now(), false), user, 'totp_disabled');
       audit('account.2fa_disabled', {}, userId);
       return { status: 204 };
     },
@@ -541,7 +575,13 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       if (user && settings.smtp) {
         const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
         sql.upsertEmailCode.run(user.id, emailCodeHash(user.id, code), now() + EMAIL_CODE_TTL_MS);
-        const ctx = { to: user.email, locale: pickLocale(body.locale, req.headers['accept-language']), publicUrl: settings.publicUrl };
+        // Qui n'a rien demandé doit pouvoir annuler la réinitialisation, pas seulement ignorer l'email
+        const ctx = {
+          to: user.email,
+          locale: pickLocale(body.locale, req.headers['accept-language']),
+          publicUrl: settings.publicUrl,
+          notMeUrl: alertLink(user, 'reset_requested')
+        };
         mailerFactory(settings.smtp).send(emails.resetCode(ctx, code, EMAIL_CODE_TTL_MS / 60_000))
           .catch(err => console.error(`Code de réinitialisation non envoyé à ${user.email} :`, err instanceof Error ? err.message : err));
       }
@@ -642,7 +682,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         throw err;
       }
 
-      notify(ctx => (vault ? emails.vaultReset(ctx, now()) : emails.passwordChanged(ctx, now(), true)), user);
+      notify(ctx => (vault ? emails.vaultReset(ctx, now()) : emails.passwordChanged(ctx, now(), true)), user, 'recovery');
       audit(vault ? 'account.reset_without_key' : 'account.recovered_with_key', {}, user.id);
       return { status: 200, body: { token: createSession(user.id, req), revision: readVault(user.id).revision } };
     },
@@ -813,9 +853,54 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     return { status: 200, raw: Buffer.from(html), contentType: 'text/html; charset=utf-8' };
   };
 
+  /*
+   * « Ce n'était pas moi ».
+   *
+   * Le jeton du lien est la seule preuve, et c'est assez : il n'a été envoyé qu'à
+   * l'adresse du compte, il ne sert qu'une fois, et la seule action qu'il ouvre est
+   * de fermer des sessions. Un tiers qui l'obtiendrait ne pourrait que déconnecter
+   * des appareils — désagréable, jamais dangereux.
+   *
+   * La lecture (GET) ne fait rien : elle montre une page et demande confirmation.
+   * Les clients de messagerie et les anti-spam suivent les liens des emails pour
+   * les inspecter ; agir dès le GET reviendrait à déconnecter tout le monde à chaque
+   * analyse automatique.
+   */
+  const alertByToken = (token: string) => {
+    const row = sql.securityAlertByHash.get(sha256(token)) as
+      { token_hash: string; user_id: string; kind: string; expires_at: number; used_at: number | null } | undefined;
+    if (!row || row.used_at !== null || row.expires_at <= now()) return null;
+    return row;
+  };
+
+  const htmlReply = (html: string, status = 200): Reply => ({
+    status,
+    raw: Buffer.from(html),
+    contentType: 'text/html; charset=utf-8'
+  });
+
   const patternRoutes: PatternRoute[] = [
     ...sharingRoutes(context),
     ...attachmentRoutes(context),
+    route('GET', '/security/not-me/:token', async (_req, params) => {
+      const alert = alertByToken(params.token);
+      return alert ? htmlReply(renderNotMePage(alert.kind, params.token)) : htmlReply(renderNotMeExpired(), 410);
+    }),
+    route('POST', '/security/not-me/:token', async (req, params) => {
+      limit(req, 'recovery');
+      const alert = alertByToken(params.token);
+      if (!alert) return htmlReply(renderNotMeExpired(), 410);
+
+      // Le jeton est consommé d'abord : deux clics simultanés ne doivent pas agir deux fois
+      const consumed = sql.useSecurityAlert.run(now(), alert.token_hash);
+      if (Number(consumed.changes) === 0) return htmlReply(renderNotMeExpired(), 410);
+
+      sql.deleteAllSessions.run(alert.user_id);
+      sql.deleteEmailCode.run(alert.user_id);
+      sql.deleteRecoveryTokens.run(alert.user_id);
+      audit('account.sessions_revoked_by_alert', { kind: alert.kind }, alert.user_id);
+      return htmlReply(renderNotMeDone());
+    }),
     route('GET', '/legal', async req => legalPage('privacy', req)),
     route('GET', '/legal/:slug', async (req, params) => legalPage(params.slug, req))
   ];

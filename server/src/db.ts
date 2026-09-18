@@ -58,6 +58,25 @@ export function openDatabase(path: string): DatabaseSync {
       expires_at INTEGER NOT NULL
     );
 
+    /*
+     * Jeton « ce n'était pas moi » joint aux emails de sécurité.
+     *
+     * Il n'ouvre qu'une seule action, toujours la même : fermer toutes les sessions
+     * et annuler une réinitialisation en cours. Rien qui donne accès au coffre, rien
+     * qui change un mot de passe. Au pire, celui qui l'obtient déconnecte des
+     * appareils — c'est précisément ce que demande la personne qui clique.
+     */
+    CREATE TABLE IF NOT EXISTS security_alerts (
+      token_hash TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      used_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS security_alerts_user ON security_alerts(user_id);
+
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
