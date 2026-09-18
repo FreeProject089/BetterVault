@@ -21,6 +21,8 @@ export interface Reply {
   /** Réponse binaire (pièce jointe) */
   raw?: Buffer;
   contentType?: string;
+  /** En-têtes supplémentaires (taille totale d'un fichier servi par tranches) */
+  headers?: Record<string, string>;
 }
 
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;

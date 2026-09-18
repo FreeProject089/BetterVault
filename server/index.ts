@@ -1,3 +1,4 @@
+import { clusterFromEnv } from './src/cluster.ts';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
@@ -85,6 +86,7 @@ function adminTokenHash(): string | null {
 
 const api = createApp({
   db,
+  cluster: clusterFromEnv(process.env),
   serverSecret: secret,
   corsOrigins,
   trustProxy: process.env.TRUST_PROXY === 'true',

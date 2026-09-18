@@ -478,10 +478,30 @@ export class AccountService {
           changedByRemote = true;
         }
 
+        /*
+         * Versions écartées par la grappe : le serveur ne sait pas fusionner un coffre
+         * qu'il ne lit pas, c'est donc l'appareil qui le fait. La fusion rend le coffre
+         * « à renvoyer », et l'envoi les acquitte. Une version indéchiffrable (autre clé,
+         * donnée abîmée) est acquittée sans être fusionnée plutôt que de bloquer la synchro.
+         */
+        const mergedConflicts: string[] = [];
+        for (const conflict of remote.conflicts ?? []) {
+          try {
+            data = mergeVaultData(data, await decryptVaultData<UnlockedVaultData>(vaultKey, conflict.blob));
+          } catch {
+            // ignorée, mais acquittée
+          }
+          mergedConflicts.push(conflict.hash);
+        }
+        if (mergedConflicts.length) {
+          dirty = true;
+          changedByRemote = true;
+        }
+
         for (let attempt = 0; dirty && attempt < 5; attempt++) {
           blob = await encryptVaultJson(vaultKey, JSON.stringify(data));
           try {
-            revision = (await cloud.putVault(revision, blob)).revision;
+            revision = (await cloud.putVault(revision, blob, mergedConflicts)).revision;
             dirty = false;
           } catch (err) {
             const conflict = err instanceof CloudError && err.status === 409

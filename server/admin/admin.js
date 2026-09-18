@@ -68,6 +68,8 @@ const TEXT = {
   storageTitle: ['Stockage', 'Storage'],
   performance: ['Performances', 'Performance'],
   securityChecks: ['Contrôles de sécurité', 'Security checks'],
+  clusterTitle: ['Grappe de serveurs', 'Server cluster'],
+  clusterSync: ['Synchroniser', 'Sync now'],
   downloadTitle: ['Copie chiffrée de la base', 'Encrypted database copy'],
   downloadHint: ['Base complète compressée puis chiffrée (AES-256-GCM, clé dérivée par scrypt). Les coffres restent illisibles sans les mots de passe des utilisateurs. Restauration : node server/tools/decrypt-backup.ts.', 'Full database, compressed then encrypted (AES-256-GCM, scrypt-derived key). Vaults stay unreadable without users’ passwords. Restore with: node server/tools/decrypt-backup.ts.'],
   passphrase: ['Phrase de chiffrement (12 caractères minimum)', 'Encryption passphrase (12 characters minimum)'],
@@ -464,7 +466,46 @@ async function loadOverview() {
     [!security.registrationOpen, fr ? 'Inscriptions fermées (serveur privé)' : 'Registration closed (private server)']
   ];
   $('checks').innerHTML = checks.map(([ok, label]) => `<li class="${ok ? 'ok' : 'todo'}">${label}</li>`).join('');
+  lastCluster = data.cluster;
+  renderCluster(data.cluster);
 }
+
+/* ── Grappe : un nœud en retard ou en erreur doit se voir d'un coup d'œil ── */
+function renderCluster(cluster) {
+  const card = $('cluster-card');
+  card.hidden = !cluster;
+  if (!cluster) return;
+  const when = t => (t ? new Date(t).toLocaleString(fr ? 'fr-FR' : 'en-GB') : '—');
+  const rows = cluster.peers.map(peer => {
+    const lag = peer.head === null ? '?' : Math.max(0, peer.head - peer.cursor);
+    const ok = !peer.lastError;
+    return `<li class="${ok ? 'ok' : 'todo'}">
+      <strong>${escapeHtml(peer.id)}</strong> · ${escapeHtml(peer.url)}<br>
+      <span class="hint">${ok
+        ? `${fr ? 'Dernière synchro' : 'Last sync'} : ${when(peer.lastOkAt)} · ${fr ? 'retard' : 'lag'} : ${lag}`
+        : `${fr ? 'Erreur' : 'Error'} : ${escapeHtml(peer.lastError)} (${when(peer.lastErrorAt)})`}</span>
+      ${peer.conflicts ? `<br><span class="hint">${peer.conflicts} ${fr ? 'compte(s) en double non répliqué(s)' : 'duplicate account(s) not replicated'}</span>` : ''}
+    </li>`;
+  }).join('');
+  $('cluster-body').innerHTML = `
+    <p class="hint">${fr ? 'Ce nœud' : 'This node'} : <strong>${escapeHtml(cluster.nodeId)}</strong>
+      · ${cluster.pendingConflicts} ${fr ? 'version(s) concurrente(s) en attente de fusion par les appareils' : 'concurrent version(s) waiting to be merged by devices'}</p>
+    <ul class="checks">${rows || `<li class="todo">${fr ? 'Aucun autre nœud déclaré (CLUSTER_PEERS)' : 'No other node declared (CLUSTER_PEERS)'}</li>`}</ul>`;
+}
+
+$('cluster-sync').addEventListener('click', async event => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const { peers } = await api('POST', 'cluster/sync');
+    renderCluster({ ...lastCluster, peers });
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+let lastCluster = null;
 
 $('refresh-overview').addEventListener('click', () => void loadOverview());
 

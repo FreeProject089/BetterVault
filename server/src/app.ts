@@ -28,6 +28,7 @@ import { sessionRoutes } from './sessions.ts';
 import { billingRoutes, createLimitsResolver } from './billing.ts';
 import { LEGAL_DOCUMENTS, legalConfigured, legalTitle, renderLegalPage } from './legal.ts';
 import { renderNotMePage, renderNotMeDone, renderNotMeExpired } from './securityAlert.ts';
+import { clusterRoutes, createClusterSync, installClusterSchema, type ClusterConfig, type ClusterSync } from './cluster.ts';
 import { analytics, createAudit, type Metrics } from './metrics.ts';
 import { describeUserAgent, truncateIp, type GeoLookup } from './geoip.ts';
 import { route } from './context.ts';
@@ -72,6 +73,10 @@ export interface AppOptions {
   legalDir?: string;
   /** Appels HTTP sortants (Stripe) ; remplaçable dans les tests */
   fetchImpl?: typeof fetch;
+  /** Grappe de serveurs du même opérateur ; absente, le serveur fonctionne seul */
+  cluster?: ClusterConfig | null;
+  /** Lance la réplication périodique (désactivé dans les tests, qui la déclenchent à la main) */
+  clusterAutoStart?: boolean;
   now?: () => number;
 }
 
@@ -101,7 +106,7 @@ const EMAIL_CODE_TTL_MS = 15 * 60 * 1000;
 const RECOVERY_TOKEN_TTL_MS = 10 * 60 * 1000;
 const MAX_EMAIL_CODE_ATTEMPTS = 5;
 
-export function createApp(options: AppOptions): ((req: IncomingMessage, res: ServerResponse) => Promise<void>) & { close(): void } {
+export function createApp(options: AppOptions): ((req: IncomingMessage, res: ServerResponse) => Promise<void>) & { close(): void; cluster: ClusterSync | null } {
   const { db, serverSecret } = options;
   if (serverSecret.length < 32) throw new Error('Le secret serveur doit contenir au moins 32 caractères');
 
@@ -128,6 +133,12 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       console.error('Réglages enregistrés ignorés :', err);
     }
   }
+
+  const clusterConfig = options.cluster ?? null;
+  if (clusterConfig) installClusterSchema(db, clusterConfig.nodeId);
+  const cluster: ClusterSync | null = clusterConfig
+    ? createClusterSync({ db, config: clusterConfig, filesDir: options.filesDir ?? null, fetchImpl: options.fetchImpl, now })
+    : null;
 
   const limitsFor = createLimitsResolver(db, () => settings, now);
   const geoAvailable = () => (options.geo ? options.geo.available?.() ?? true : false);
@@ -273,10 +284,22 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     return [verifier.toString('base64'), salt.toString('base64'), JSON.stringify(recovery.wrappedVaultKey)];
   };
 
+  /*
+   * Versions du coffre écartées par la grappe quand deux nœuds ont été modifiés en
+   * parallèle. Le serveur ne sait pas les fusionner — il ne lit pas le coffre — donc
+   * il les rend à l'application, qui les fusionne et les acquitte à l'écriture suivante.
+   */
+  const vaultConflicts = (userId: string): Array<{ hash: string; blob: EncryptedBlob }> => {
+    if (!clusterConfig) return [];
+    return (db.prepare('SELECT hash, blob FROM vault_conflicts WHERE user_id = ? ORDER BY received_at').all(userId) as Array<{ hash: string; blob: string }>)
+      .map(row => ({ hash: row.hash, blob: JSON.parse(row.blob) as EncryptedBlob }));
+  };
+
   const readVault = (userId: string) => {
     const row = sql.vaultByUser.get(userId) as { revision: number; blob: string; updated_at: number } | undefined;
+    const conflicts = vaultConflicts(userId);
     return row
-      ? { revision: row.revision, blob: JSON.parse(row.blob) as EncryptedBlob, updatedAt: row.updated_at }
+      ? { revision: row.revision, blob: JSON.parse(row.blob) as EncryptedBlob, updatedAt: row.updated_at, ...(conflicts.length ? { conflicts } : {}) }
       : { revision: 0, blob: null, updatedAt: null };
   };
 
@@ -368,6 +391,8 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       const recovery = parseRecovery(body.recovery);
 
       if (sql.userByEmail.get(email)) throw new HttpError(409, 'email_taken', 'Un compte existe déjà pour cet email');
+      // Sans cette vérification, la même adresse pourrait désigner deux comptes sur deux nœuds
+      if (cluster && await cluster.emailTaken(email)) throw new HttpError(409, 'email_taken', 'Un compte existe déjà pour cet email');
 
       const userId = randomUUID();
       const authSalt = randomBytes(16);
@@ -452,6 +477,13 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       const result = sql.updateVault.run((baseRevision as number) + 1, JSON.stringify(blob), updatedAt, userId, baseRevision as number);
       if (Number(result.changes) === 0) {
         throw new HttpError(409, 'conflict', 'Le coffre a été modifié sur un autre appareil', readVault(userId));
+      }
+      // Versions concurrentes que l'application vient de fusionner dans ce qu'elle écrit
+      if (clusterConfig && Array.isArray(body.mergedConflicts)) {
+        const clear = db.prepare('DELETE FROM vault_conflicts WHERE user_id = ? AND hash = ?');
+        for (const hash of (body.mergedConflicts as unknown[]).slice(0, 100)) {
+          if (typeof hash === 'string' && hash.length <= 64) clear.run(userId, hash);
+        }
       }
       return { status: 200, body: { revision: (baseRevision as number) + 1, updatedAt } };
     },
@@ -799,9 +831,21 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
             legalEnabled: settings.legal.enabled,
             legalConfigured: legalConfigured(settings.legal),
             backupEncrypted: !!process.env.BACKUP_ENCRYPTION_KEY
-          }
+          },
+          // État de la réplication : un nœud en retard ou en erreur doit se voir tout de suite
+          cluster: clusterConfig ? {
+            nodeId: clusterConfig.nodeId,
+            peers: cluster?.status() ?? [],
+            pendingConflicts: (db.prepare('SELECT COUNT(*) AS n FROM vault_conflicts').get() as { n: number }).n
+          } : null
         }
       };
+    },
+    'POST /api/v1/admin/cluster/sync': async (req: IncomingMessage): Promise<Reply> => {
+      requireAdmin(req);
+      if (!cluster) throw new HttpError(404, 'cluster_disabled', 'Ce serveur ne fait pas partie d’une grappe');
+      await cluster.syncNow();
+      return { status: 200, body: { peers: cluster.status() } };
     },
     'GET /api/v1/admin/audit': async (req: IncomingMessage): Promise<Reply> => {
       requireAdmin(req);
@@ -880,6 +924,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
   });
 
   const patternRoutes: PatternRoute[] = [
+    ...(clusterConfig ? clusterRoutes({ db, config: clusterConfig, filesDir: options.filesDir ?? null, now }) : []),
     ...sharingRoutes(context),
     ...attachmentRoutes(context),
     route('GET', '/security/not-me/:token', async (_req, params) => {
@@ -964,7 +1009,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         reply = await matched.run(req, matched.params);
       }
       if (reply.raw) {
-        res.writeHead(reply.status, { 'Content-Type': reply.contentType ?? 'application/octet-stream', 'Content-Length': reply.raw.length }).end(reply.raw);
+        res.writeHead(reply.status, { ...reply.headers, 'Content-Type': reply.contentType ?? 'application/octet-stream', 'Content-Length': reply.raw.length }).end(reply.raw);
       } else {
         send(res, reply.status, reply.body);
       }
@@ -979,5 +1024,12 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     }
   };
 
-  return Object.assign(handler, { close: () => backup?.stop() });
+  if (cluster && options.clusterAutoStart !== false) cluster.start();
+  return Object.assign(handler, {
+    close: () => {
+      backup?.stop();
+      cluster?.stop();
+    },
+    cluster
+  });
 }
