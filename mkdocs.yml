@@ -65,6 +65,7 @@ nav:
       - Configuration et sauvegardes: deploiement/configuration.md
       - Sauvegardes S3 et RGPD: deploiement/sauvegardes.md
       - Sessions et lieu: deploiement/sessions-lieu.md
+      - Plusieurs serveurs (grappe): deploiement/grappe.md
       - Supervision: deploiement/supervision.md
       - Documents légaux: deploiement/documents-legaux.md
       - Espace payant (Stripe): deploiement/offres-stripe.md

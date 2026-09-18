@@ -20,6 +20,11 @@ export interface CloudVault {
   revision: number;
   blob: EncryptedBlob | null;
   updatedAt: number | null;
+  /**
+   * Versions écartées par la grappe de serveurs quand deux nœuds ont été modifiés en
+   * parallèle. L'application les fusionne puis les acquitte à l'écriture suivante.
+   */
+  conflicts?: Array<{ hash: string; blob: EncryptedBlob }>;
 }
 
 export interface CloudSession {
@@ -350,8 +355,8 @@ export class CloudClient {
     return this.request('GET', '/api/v1/vault');
   }
 
-  putVault(baseRevision: number, blob: EncryptedBlob): Promise<{ revision: number; updatedAt: number }> {
-    return this.request('PUT', '/api/v1/vault', { baseRevision, blob });
+  putVault(baseRevision: number, blob: EncryptedBlob, mergedConflicts: string[] = []): Promise<{ revision: number; updatedAt: number }> {
+    return this.request('PUT', '/api/v1/vault', { baseRevision, blob, ...(mergedConflicts.length ? { mergedConflicts } : {}) });
   }
 
   async changePassword(payload: { currentAuthHash: string; newAuthHash: string; kdf: Argon2Params; salt: string; wrappedVaultKey: EncryptedBlob }): Promise<void> {

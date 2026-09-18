@@ -61,6 +61,13 @@
             <h2 data-i18n="securityChecks">Contrôles de sécurité</h2>
             <ul class="checks" id="checks"></ul>
           </section>
+          <section class="card" id="cluster-card" hidden>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+              <h2 data-i18n="clusterTitle">Grappe de serveurs</h2>
+              <button type="button" class="secondary" id="cluster-sync" data-i18n="clusterSync">Synchroniser</button>
+            </div>
+            <div id="cluster-body"></div>
+          </section>
           <section class="card">
             <h2 data-i18n="downloadTitle">Copie chiffrée de la base</h2>
             <p class="hint" data-i18n="downloadHint">Base complète compressée puis chiffrée (AES-256-GCM, clé dérivée par scrypt). Les coffres restent illisibles sans les mots de passe des utilisateurs. Restauration : node server/tools/decrypt-backup.ts.</p>
