@@ -51,6 +51,8 @@ const EXACT: Record<string, string> = {
   'Nombre de tours AES-KDF hors limites dans le fichier': 'AES-KDF round count out of bounds in the file',
   'Le serveur annonce des paramètres de sécurité trop faibles': 'The server advertises security parameters that are too weak',
   'Ce secret exige une vérification biométrique': 'This secret requires a biometric check',
+  'Compte introuvable sur cet appareil': 'Account not found on this device',
+  'Identifiant de profil invalide': 'Invalid profile identifier',
   'Archive .1pux invalide : export.data dépasse la taille autorisée': 'Invalid .1pux archive: export.data exceeds the allowed size',
   'Compte hors de l’espace protégé par la biométrie': 'Account outside the biometrics-protected namespace',
   'Pièce jointe altérée ou clé incorrecte': 'Altered attachment or wrong key',

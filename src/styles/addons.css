@@ -3855,3 +3855,62 @@ body.dragging-item .folder-breadcrumb button { outline: 1px dashed var(--border-
 /* Plusieurs durées possibles : les boutons se placent côte à côte puis passent à la ligne */
 .plan-prices { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
 .plan-prices .btn-primary { flex: 1 1 auto; justify-content: center; }
+
+/* ── Comptes de l'appareil ───────────────────────────────────────────── */
+.profile-list { display: flex; flex-direction: column; gap: 4px; }
+
+.profile-row-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.profile-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  text-align: left;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font: inherit;
+}
+
+.profile-pick:hover { border-color: var(--accent); }
+.profile-row-item.current .profile-pick { cursor: default; border-color: var(--accent); }
+
+.profile-avatar {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: 13px;
+  color: #7773e8;
+  background: rgba(119, 115, 232, 0.16);
+}
+
+.profile-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.profile-email { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-server { font-size: 11.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.profile-badge {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  font-size: 11px;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+}
+
+.profile-add { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; margin-top: 4px; }
+
+.auth-profiles { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }

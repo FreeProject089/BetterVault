@@ -13,6 +13,7 @@ import { secretGridHtml } from './secretDisplay';
 import { translateError } from '../i18n/errorMessages';
 import { tabIcon } from './tabIcons';
 import { mountStepper, type StepDef, type StepperHandle } from './stepper';
+import { profileRowsHtml, wireProfileRows, type ProfileActions } from './accountSwitcher';
 
 const isTauriRuntime = typeof (globalThis as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined';
 
@@ -60,7 +61,7 @@ export function mountAuthScreen(
   root: HTMLElement,
   service: AccountService,
   onUnlocked: (data: UnlockedVaultData) => void,
-  options: { deviceStore?: DeviceSecretStore | null } = {}
+  options: { deviceStore?: DeviceSecretStore | null; profiles?: ProfileActions } = {}
 ): { show(): void } {
   // Données à ouvrir une fois la clé de secours confirmée
   let pending: { data: UnlockedVaultData; key: string; intro: string; offerTotp?: boolean } | null = null;
@@ -120,6 +121,14 @@ export function mountAuthScreen(
       <button type="button" class="tab-btn ${active === 'signin' ? 'active' : ''}" role="tab" aria-selected="${active === 'signin'}" data-screen="signin">${tabIcon('signin')}<span>${tr('Se connecter', 'Sign in')}</span></button>
     </div>`;
 
+  /* Les autres comptes de l'appareil : on ne liste pas celui qu'on est en train d'ouvrir */
+  const otherProfilesActions = (): ProfileActions | null => {
+    const profiles = options.profiles;
+    if (!profiles) return null;
+    return { ...profiles, list: () => profiles.list().filter(p => p.id !== profiles.activeId()) };
+  };
+  const otherProfiles = () => (otherProfilesActions()?.list().length ?? 0) > 0;
+
   const templates: Record<Screen, () => string> = {
     unlock: () => {
       const account = service.getAccount();
@@ -139,9 +148,15 @@ export function mountAuthScreen(
               ${tr(`Utiliser ${options.deviceStore.label}`, `Use ${options.deviceStore.label}`)}
             </button>` : ''}
         </form>
+        ${otherProfiles() ? `
+          <div class="auth-profiles">
+            <div class="form-label">${tr('Autres comptes sur cet appareil', 'Other accounts on this device')}</div>
+            <div class="profile-list" data-profile-list>${profileRowsHtml(otherProfilesActions()!, tr)}</div>
+          </div>` : ''}
         <div style="display:flex;justify-content:center;gap:16px;flex-wrap:wrap;">
           <button type="button" class="auth-link" data-screen="recover">${tr('Mot de passe oublié ?', 'Forgot password?')}</button>
-          <button type="button" class="auth-link" data-screen="confirm-signout">${tr('Utiliser un autre compte', 'Use another account')}</button>
+          ${options.profiles ? `<button type="button" class="auth-link" data-action="add-profile">${tr('Ajouter un compte', 'Add an account')}</button>` : ''}
+          <button type="button" class="auth-link" data-screen="confirm-signout">${tr('Retirer de cet appareil', 'Remove from this device')}</button>
         </div>`;
     },
 
@@ -465,6 +480,21 @@ export function mountAuthScreen(
     // L'écran précédent est parti avec son parcours et son état
     recoverStepper = null;
     codeDemande = false;
+
+    /*
+     * Depuis la création ou la connexion d'un compte ajouté, on doit pouvoir revenir
+     * à un compte existant d'un clic, sans passer par un écran de plus.
+     */
+    if ((screen === 'create' || screen === 'signin') && otherProfiles()) {
+      const bloc = document.createElement('div');
+      bloc.className = 'auth-profiles';
+      bloc.innerHTML = `<div class="form-label">${tr('Ou revenir à un compte de cet appareil', 'Or go back to an account on this device')}</div>
+        <div class="profile-list" data-profile-list>${profileRowsHtml(otherProfilesActions()!, tr)}</div>`;
+      card.append(bloc);
+    }
+    const listeComptes = card.querySelector<HTMLElement>('[data-profile-list]');
+    if (listeComptes && options.profiles) wireProfileRows(listeComptes, options.profiles, async () => false);
+    card.querySelector('[data-action="add-profile"]')?.addEventListener('click', () => options.profiles?.addNew());
 
     card.querySelectorAll<HTMLElement>('[data-screen]').forEach(el => {
       el.addEventListener('click', () => render(el.dataset.screen as Screen));

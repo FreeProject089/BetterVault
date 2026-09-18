@@ -64,6 +64,9 @@ import { resizeAvatar } from './ui/avatarImage';
 import { translateError } from './i18n/errorMessages';
 import { tabIcon } from './ui/tabIcons';
 import { mountStepper, type StepDef } from './ui/stepper';
+import { ProfileStore } from './account/profiles';
+import { profileRowsHtml, wireProfileRows, type ProfileActions } from './ui/accountSwitcher';
+import { ACCOUNT_STORAGE_KEYS } from './account/accountService';
 import {
   cardBrand, formatCardNumber, isLuhnValid, isFileType, itemTypeOf, looksLikePrivateKey,
   ITEM_TYPES, ITEM_TYPE_INFO, type ItemType
@@ -149,6 +152,38 @@ const GENERIC_FILE_ICON = '<svg width="22" height="22" viewBox="0 0 24 24" fill=
 
 // Créé au démarrage, une fois le stockage de l'appareil chargé (voir la fin du fichier)
 let accountService: AccountService;
+/** Comptes présents sur l'appareil ; le service de compte ne voit que celui qui est actif */
+let profileStore: ProfileStore;
+
+/**
+ * Actions de changement de compte.
+ *
+ * Changer recharge la page plutôt que de remplacer le service à chaud : les clés du
+ * compte quitté ne vivent qu'en mémoire, et seul un rechargement garantit qu'il n'en
+ * reste rien. La session de l'extension, elle, est rangée hors de la page ; on la
+ * vide aussi pour que le nouveau compte ne tente pas de s'ouvrir avec la clé de l'autre.
+ */
+async function reloadWithoutSession(): Promise<void> {
+  try {
+    await extensionSessionStore()?.clear();
+  } finally {
+    window.location.reload();
+  }
+}
+
+const profileActions: ProfileActions = {
+  list: () => profileStore.list(),
+  activeId: () => profileStore.activeId(),
+  switchTo: id => {
+    profileStore.activate(id);
+    void reloadWithoutSession();
+  },
+  addNew: () => {
+    profileStore.createEmpty();
+    void reloadWithoutSession();
+  },
+  forget: id => profileStore.forget(id, ACCOUNT_STORAGE_KEYS)
+};
 let sharedVaults: SharedVaultManager;
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -4406,7 +4441,7 @@ ${uri}` : uri;
 
   /* ── Compte : déverrouillage, verrouillage, synchronisation ─────────── */
   private initAccount(): void {
-    this.authScreen = mountAuthScreen(document.getElementById('auth-screen') as HTMLElement, accountService, data => this.showApp(data), { deviceStore: this.deviceStore });
+    this.authScreen = mountAuthScreen(document.getElementById('auth-screen') as HTMLElement, accountService, data => this.showApp(data), { deviceStore: this.deviceStore, profiles: profileActions });
 
     sharedVaults.onSaveError((vaultId, err) => {
       this.showToast(err instanceof SharedReadOnlyError ? err.message : `${this.tr('Coffre partagé non enregistré', 'Shared vault not saved')} : ${accountErrorMessage(err)}`, 'error', 5000);
@@ -4426,6 +4461,7 @@ ${uri}` : uri;
     accountService.onSyncStateChange(() => this.renderSyncStatus());
 
     document.getElementById('btn-lock-app')?.addEventListener('click', () => this.lockApp());
+    document.getElementById('btn-switch-account')?.addEventListener('click', () => this.openAccountSwitcher());
     document.getElementById('btn-sync-status')?.addEventListener('click', () => this.openAccountModal());
     window.addEventListener('online', () => {
       if (accountService.isUnlocked()) void accountService.syncNow();
@@ -6161,6 +6197,40 @@ ${uri}` : uri;
     });
   }
 
+  /**
+   * Fenêtre « Comptes » : un clic pour l'ouvrir, un clic pour changer.
+   *
+   * Chaque compte est un couple adresse + serveur ; changer de serveur, c'est donc
+   * choisir le compte ouvert sur cet autre serveur. Le compte quitté se verrouille :
+   * ses clés partent avec la page rechargée, et il demandera son mot de passe au retour.
+   */
+  private openAccountSwitcher(): void {
+    const tr = this.tr.bind(this);
+    const box = this.openModal(`
+      <div class="modal-header">
+        <div class="modal-title">${tr('Comptes', 'Accounts')}</div>
+        <button class="modal-close" type="button">${GEN_ICONS.close}</button>
+      </div>
+      <div class="modal-body">
+        <div class="profile-list" data-profile-list>${profileRowsHtml(profileActions, tr, { forgettable: true })}</div>
+        <button type="button" class="btn-primary profile-add" data-profile-add>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <span>${tr('Ajouter un compte', 'Add an account')}</span>
+        </button>
+        <p class="field-hint">${tr('Un compte par serveur : passer d’un serveur à l’autre, c’est choisir le compte ouvert sur celui-ci. Le compte quitté se verrouille.', 'One account per server: switching servers means picking the account opened there. The account you leave gets locked.')}</p>
+      </div>
+    `);
+    box.classList.add('modal-sm');
+    wireProfileRows(box.querySelector('[data-profile-list]') as HTMLElement, profileActions, email => this.confirmDialog({
+      title: tr('Oublier ce compte ?', 'Forget this account?'),
+      message: tr(`« ${email} » disparaît de cet appareil. Un compte synchronisé reste sur son serveur ; un coffre local non exporté est perdu.`,
+                  `"${email}" disappears from this device. A synced account stays on its server; an unexported local vault is lost.`),
+      confirmLabel: tr('Oublier', 'Forget'),
+      danger: true
+    }));
+    box.querySelector('[data-profile-add]')?.addEventListener('click', () => profileActions.addNew());
+  }
+
   private openVaultModal(vaultId?: string): void {
     const data = vaultStore.getData();
     const existing = vaultId ? data.vaults.find(v => v.id === vaultId) : undefined;
@@ -7534,7 +7604,9 @@ setApiLocale(() => i18n.getLocale());
 createDeviceStorage().then(storage => {
   const surface = extensionSurface();
   if (surface) document.body.classList.add(`ext-${surface}`);
-  accountService = new AccountService({ storage, sessionStore: extensionSessionStore() });
+  profileStore = new ProfileStore(storage);
+  profileStore.touch();
+  accountService = new AccountService({ storage: profileStore.storageFor(), sessionStore: extensionSessionStore() });
   sharedVaults = new SharedVaultManager(accountService);
   new AppController();
 }).catch(err => {

@@ -47,6 +47,9 @@ const STORAGE_KEYS = {
   session: 'bettervault.session.v1'
 } as const;
 
+/** Tout ce qu'un compte range sur l'appareil : sert à l'oublier entièrement */
+export const ACCOUNT_STORAGE_KEYS: readonly string[] = Object.values(STORAGE_KEYS);
+
 export type AccountMode = 'local' | 'cloud';
 
 /** Photo d'un compte local : gardée sur l'appareil, déjà réduite à 256 px */
