@@ -19,22 +19,29 @@ Lot 3 — écran de réinitialisation et emails
 
 Lot 4 — 2FA
 - [x] Import / export des codes 2FA (QR codes, JSON chiffré ou clair)
-- [ ] Clé de sécurité matérielle
+- [x] Clé de sécurité matérielle (WebAuthn, liée à chaque application)
 
 Lot 5 — éléments
 - [ ] Types enrichis (recto/verso chiffré sur une identité, etc.)
-- [ ] Types personnalisés : champs et contraintes au choix
-- [ ] Générer un mot de passe depuis le formulaire d'identifiant
-- [ ] Annuler depuis le bandeau de notification
+- [x] Types personnalisés : champs et contraintes au choix
+- [x] Générer un mot de passe depuis le formulaire d'identifiant
+- [x] Annuler depuis le bandeau de notification
 
 Lot 6 — mise en page
-- [ ] Sections repliables dans la barre latérale, texte des dossiers allégé
-- [ ] Parité téléphone : liste, tous les menus, lisibilité
+- [x] Barre latérale réductible (icônes seules) sur ordinateur
+- [x] Parité téléphone : liste, fiche, fenêtres, zones de toucher de 40 px
 - [ ] Extension à jour des nouveautés
 
 Lot 7 — serveurs et image
 - [ ] Thèmes personnalisés (modèle téléchargeable)
 - [ ] Administration : documents légaux, site officiel défini dans le code
 - [ ] Annuaire de serveurs, officiels et autres, tout désactivable
-- [ ] Synchronisation entre serveurs choisis
-- [ ] Page d'accueil publique, administration au logo BetterVault, thème clair
+- [x] Grappe de serveurs d'un même opérateur (zones, clés Ed25519, révocation)
+- [ ] Page d'accueil publique
+- [x] Administration au logo BetterVault, thème clair / sombre / automatique
+
+Lot 8 — données entre serveurs
+- [x] Sauvegardes vers plusieurs destinations S3, reprise, restauration contrôlée
+- [x] Sauvegarde complète du compte (fichiers compris) et import avec bilan du serveur cible
+- [x] Historique des versions, conflits, corbeille de 30 jours
+- [ ] Envoi des fichiers par morceaux avec reprise lors d'un import
