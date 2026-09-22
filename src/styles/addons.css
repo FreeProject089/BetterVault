@@ -3996,3 +3996,16 @@ body.dragging-item .folder-breadcrumb button { outline: 1px dashed var(--border-
   .sidebar-collapsed .sidebar-footer > div,
   .sidebar-collapsed .sidebar-footer > div > div { flex-direction: column; gap: 6px !important; }
 }
+
+/* Téléphone : zones de toucher d'au moins 40 px dans le menu et les filtres */
+@media (max-width: 900px) {
+  .sidebar-footer .btn-lang-toggle,
+  .sidebar-footer .sync-status { min-height: 40px; min-width: 40px; }
+  .filter-chip { min-height: 36px; }
+}
+@media (max-width: 900px) {
+  .icon-btn,
+  .modal-close,
+  [id^="btn-detail-back"] { min-height: 40px; min-width: 40px; display: inline-flex; align-items: center; justify-content: center; }
+  .btn-primary { min-height: 36px; }
+}
