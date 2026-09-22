@@ -22,7 +22,7 @@ Lot 4 — 2FA
 - [x] Clé de sécurité matérielle (WebAuthn, liée à chaque application)
 
 Lot 5 — éléments
-- [ ] Types enrichis (recto/verso chiffré sur une identité, etc.)
+- [x] Types enrichis : recto / verso chiffré sur une pièce d'identité
 - [x] Types personnalisés : champs et contraintes au choix
 - [x] Générer un mot de passe depuis le formulaire d'identifiant
 - [x] Annuler depuis le bandeau de notification
@@ -33,7 +33,7 @@ Lot 6 — mise en page
 - [ ] Extension à jour des nouveautés
 
 Lot 7 — serveurs et image
-- [ ] Thèmes personnalisés (modèle téléchargeable)
+- [x] Thèmes personnalisés : 3 thèmes intégrés, import d'un fichier, modèle téléchargeable
 - [ ] Administration : documents légaux, site officiel défini dans le code
 - [ ] Annuaire de serveurs, officiels et autres, tout désactivable
 - [x] Grappe de serveurs d'un même opérateur (zones, clés Ed25519, révocation)

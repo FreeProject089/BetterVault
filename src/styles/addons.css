@@ -4022,3 +4022,9 @@ body.dragging-item .folder-breadcrumb button { outline: 1px dashed var(--border-
 .id-scan-title { font-size: 12px; font-weight: 600; }
 .id-scan-state { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .id-scan-buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+/* Thèmes intégrés proposés dans la fenêtre du compte */
+.theme-presets { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 10px; }
+.theme-preset { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 6px 12px 6px 6px; border-radius: 999px; border: 1px solid var(--border-subtle); background: var(--p-bg); color: var(--p-fg); font-size: 12px; cursor: pointer; }
+.theme-preset:hover, .theme-preset:focus-visible { border-color: var(--p-accent); }
+.theme-swatch { width: 22px; height: 22px; border-radius: 50%; background: linear-gradient(135deg, var(--p-accent) 50%, var(--p-fg) 50%); }

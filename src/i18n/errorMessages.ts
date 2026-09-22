@@ -5,6 +5,10 @@
 
 const EXACT: Record<string, string> = {
   'Adresse du serveur invalide': 'Invalid server address',
+  'Fichier trop volumineux pour un thème': 'File too large for a theme',
+  'Ce fichier n’est pas un thème BetterVault': 'This file is not a BetterVault theme',
+  'Le thème n’a pas de nom': 'The theme has no name',
+  'Texte trop peu lisible sur le fond (contraste inférieur à 4,5:1)': 'Text too hard to read on the background (contrast below 4.5:1)',
   'Ajoutez au moins un champ': 'Add at least one field',
   'Un type porte déjà ce nom': 'A type already has this name',
   'Clé non utilisée : saisissez plutôt un code de votre application d’authentification': 'Key not used: enter a code from your authenticator app instead',

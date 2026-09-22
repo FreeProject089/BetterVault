@@ -35,6 +35,7 @@ import { ProfileStore } from './account/profiles';
 import { securityKeysSectionHtml, wireSecurityKeys } from './ui/securityKeysPanel';
 import { openImportExportModal } from './ui/importExportModal';
 import { GEN_ICONS } from './ui/icons';
+import { loadSavedTheme, parseTheme, PRESET_THEMES, saveTheme, ThemeError, themeTemplate, applyTheme } from './ui/themes';
 import { mountTemplateEditor, readTemplateValues, templateCardsHtml, templateFieldsHtml } from './ui/itemTemplatesUi';
 import { checkTemplateValues, mergeTemplateFields } from './store/itemTemplates';
 import { renderVersioning, wireVersioning, renderTrash, type VersionsContext } from './ui/versionsPanel';
@@ -270,9 +271,13 @@ class AppController {
     if (saved === 'light') {
       document.documentElement.setAttribute('data-theme', 'light');
     }
+    // Un thème personnalisé l'emporte sur le simple clair / sombre
+    applyTheme(loadSavedTheme());
     this.updateThemeIcons();
 
     document.getElementById('btn-theme-toggle')?.addEventListener('click', () => {
+      // Basculer clair / sombre revient aux thèmes intégrés
+      if (loadSavedTheme()) saveTheme(null);
       const current = document.documentElement.getAttribute('data-theme');
       const next = current === 'light' ? 'dark' : 'light';
       if (next === 'light') {
@@ -4765,6 +4770,20 @@ class AppController {
             <button class="btn-primary btn-ghost" data-action="signout">${tr('Se déconnecter de cet appareil', 'Sign out of this device')}</button>
           </div>
         </section>
+        <section class="account-section">
+          <h3 class="account-section-title">${tr('Apparence', 'Appearance')}</h3>
+          <p class="modal-text">${tr('Thème actuel', 'Current theme')} : <strong data-theme-name></strong></p>
+          <div class="theme-presets">
+            ${PRESET_THEMES.map((t, i) => `<button type="button" class="theme-preset" data-theme-preset="${i}" style="--p-bg:${t.colors['bg-primary']};--p-fg:${t.colors['text-primary']};--p-accent:${t.colors.accent}"><span class="theme-swatch"></span>${this.escapeHtml(t.name)}</button>`).join('')}
+          </div>
+          <div class="account-actions">
+            <button type="button" class="btn-primary" data-action="theme-import">${tr('Importer un thème', 'Import a theme')}</button>
+            <button type="button" class="btn-primary btn-ghost" data-action="theme-template">${tr('Télécharger le modèle', 'Download the template')}</button>
+            <button type="button" class="btn-primary btn-ghost" data-action="theme-reset">${tr('Thème par défaut', 'Default theme')}</button>
+          </div>
+          <input type="file" accept="application/json,.json" hidden data-theme-file>
+          <div class="form-error" data-theme-error hidden></div>
+        </section>
         </div>
 
         <div data-tab-panel="security" hidden>
@@ -4973,6 +4992,44 @@ class AppController {
           showError('connect', err);
         }
       });
+    });
+
+    // Apparence : thèmes intégrés, thème importé, modèle à modifier
+    const themeName = $('[data-theme-name]');
+    const themeError = $('[data-theme-error]');
+    const paintThemeName = () => {
+      if (themeName) themeName.textContent = loadSavedTheme()?.name ?? tr('BetterVault (clair ou sombre)', 'BetterVault (light or dark)');
+    };
+    const useTheme = (theme: ReturnType<typeof loadSavedTheme>) => {
+      saveTheme(theme);
+      this.updateThemeIcons();
+      paintThemeName();
+      if (themeError) themeError.hidden = true;
+    };
+    paintThemeName();
+    box.querySelectorAll<HTMLButtonElement>('[data-theme-preset]').forEach(button => button.addEventListener('click', () => {
+      useTheme(PRESET_THEMES[Number(button.dataset.themePreset)]);
+    }));
+    action('theme-reset')?.addEventListener('click', () => useTheme(null));
+    action('theme-template')?.addEventListener('click', () => {
+      downloadExportFile(themeTemplate(), 'bettervault-theme.json', 'application/json');
+    });
+    const themeFile = $<HTMLInputElement>('[data-theme-file]');
+    action('theme-import')?.addEventListener('click', () => themeFile?.click());
+    themeFile?.addEventListener('change', async () => {
+      const file = themeFile.files?.[0];
+      themeFile.value = '';
+      if (!file) return;
+      try {
+        if (file.size > 16_384) throw new ThemeError('Fichier trop volumineux pour un thème');
+        useTheme(parseTheme(JSON.parse(await file.text())));
+        this.showToast(tr('Thème appliqué', 'Theme applied'), 'success');
+      } catch (err) {
+        if (themeError) {
+          themeError.textContent = err instanceof ThemeError ? translateError(err.message, i18n.getLocale()) : tr('Fichier illisible', 'Unreadable file');
+          themeError.hidden = false;
+        }
+      }
     });
 
     const keysRoot = $<HTMLElement>('[data-security-keys]');
