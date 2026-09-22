@@ -28,7 +28,8 @@ import { sessionRoutes } from './sessions.ts';
 import { billingRoutes, createLimitsResolver } from './billing.ts';
 import { LEGAL_DOCUMENTS, legalConfigured, legalTitle, renderLegalPage } from './legal.ts';
 import { renderNotMePage, renderNotMeDone, renderNotMeExpired } from './securityAlert.ts';
-import { clusterRoutes, createClusterSync, installClusterSchema, type ClusterConfig, type ClusterSync } from './cluster.ts';
+import { clusterRoutes, createClusterSync, installClusterSchema, type ClusterSync } from './cluster.ts';
+import { createClusterTrust } from './clusterTrust.ts';
 import { createAdminAuth, type AdminPermission } from './adminAuth.ts';
 import { analytics, createAudit, type Metrics } from './metrics.ts';
 import { describeUserAgent, truncateIp, type GeoLookup } from './geoip.ts';
@@ -74,10 +75,10 @@ export interface AppOptions {
   legalDir?: string;
   /** Appels HTTP sortants (Stripe) ; remplaçable dans les tests */
   fetchImpl?: typeof fetch;
-  /** Grappe de serveurs du même opérateur ; absente, le serveur fonctionne seul */
-  cluster?: ClusterConfig | null;
   /** Lance la réplication périodique (désactivé dans les tests, qui la déclenchent à la main) */
   clusterAutoStart?: boolean;
+  /** Fréquence de la réplication entre nœuds */
+  clusterIntervalMs?: number;
   now?: () => number;
 }
 
@@ -107,7 +108,7 @@ const EMAIL_CODE_TTL_MS = 15 * 60 * 1000;
 const RECOVERY_TOKEN_TTL_MS = 10 * 60 * 1000;
 const MAX_EMAIL_CODE_ATTEMPTS = 5;
 
-export function createApp(options: AppOptions): ((req: IncomingMessage, res: ServerResponse) => Promise<void>) & { close(): void; cluster: ClusterSync | null } {
+export function createApp(options: AppOptions): ((req: IncomingMessage, res: ServerResponse) => Promise<void>) & { close(): void; cluster: ClusterSync } {
   const { db, serverSecret } = options;
   if (serverSecret.length < 32) throw new Error('Le secret serveur doit contenir au moins 32 caractères');
 
@@ -135,11 +136,28 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     }
   }
 
-  const clusterConfig = options.cluster ?? null;
-  if (clusterConfig) installClusterSchema(db, clusterConfig.nodeId);
-  const cluster: ClusterSync | null = clusterConfig
-    ? createClusterSync({ db, config: clusterConfig, filesDir: options.filesDir ?? null, fetchImpl: options.fetchImpl, now })
-    : null;
+  /*
+   * Grappe : l'identité du nœud existe toujours ; la réplication ne s'active qu'une
+   * fois le nœud membre d'une grappe (créée ou rejointe depuis l'administration).
+   */
+  const trust = createClusterTrust({
+    db,
+    serverSecret,
+    now,
+    fetchImpl: options.fetchImpl,
+    audit: (type, detail) => audit(type, detail),
+    onMember: (nodeId, zone) => installClusterSchema(db, nodeId, zone)
+  });
+  if (trust.isMember()) installClusterSchema(db, trust.selfId, trust.zone());
+  const clusterReady = () => !!db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'vault_conflicts'").get();
+  const cluster: ClusterSync = createClusterSync({
+    db,
+    auth: trust,
+    filesDir: options.filesDir ?? null,
+    fetchImpl: options.fetchImpl,
+    now,
+    intervalMs: options.clusterIntervalMs
+  });
 
   const limitsFor = createLimitsResolver(db, () => settings, now);
   const geoAvailable = () => (options.geo ? options.geo.available?.() ?? true : false);
@@ -291,7 +309,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
    * il les rend à l'application, qui les fusionne et les acquitte à l'écriture suivante.
    */
   const vaultConflicts = (userId: string): Array<{ hash: string; blob: EncryptedBlob }> => {
-    if (!clusterConfig) return [];
+    if (!clusterReady()) return [];
     return (db.prepare('SELECT hash, blob FROM vault_conflicts WHERE user_id = ? ORDER BY received_at').all(userId) as Array<{ hash: string; blob: string }>)
       .map(row => ({ hash: row.hash, blob: JSON.parse(row.blob) as EncryptedBlob }));
   };
@@ -401,7 +419,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
 
       if (sql.userByEmail.get(email)) throw new HttpError(409, 'email_taken', 'Un compte existe déjà pour cet email');
       // Sans cette vérification, la même adresse pourrait désigner deux comptes sur deux nœuds
-      if (cluster && await cluster.emailTaken(email)) throw new HttpError(409, 'email_taken', 'Un compte existe déjà pour cet email');
+      if (trust.isMember() && await cluster.emailTaken(email)) throw new HttpError(409, 'email_taken', 'Un compte existe déjà pour cet email');
 
       const userId = randomUUID();
       const authSalt = randomBytes(16);
@@ -414,6 +432,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         sql.insertUser.run(userId, email, verifier.toString('base64'), authSalt.toString('base64'), JSON.stringify(kdf), salt, JSON.stringify(wrappedVaultKey), createdAt,
           pickLocale(body.locale, req.headers['accept-language']), recoveryVerifier, recoverySalt, recoveryWrapped);
         sql.insertVault.run(userId, 1, JSON.stringify(vault), createdAt);
+        if (trust.isMember()) db.prepare('UPDATE users SET home_zone = ? WHERE id = ?').run(trust.zone(), userId);
         db.exec('COMMIT');
       } catch (err) {
         db.exec('ROLLBACK');
@@ -488,7 +507,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         throw new HttpError(409, 'conflict', 'Le coffre a été modifié sur un autre appareil', readVault(userId));
       }
       // Versions concurrentes que l'application vient de fusionner dans ce qu'elle écrit
-      if (clusterConfig && Array.isArray(body.mergedConflicts)) {
+      if (clusterReady() && Array.isArray(body.mergedConflicts)) {
         const clear = db.prepare('DELETE FROM vault_conflicts WHERE user_id = ? AND hash = ?');
         for (const hash of (body.mergedConflicts as unknown[]).slice(0, 100)) {
           if (typeof hash === 'string' && hash.length <= 64) clear.run(userId, hash);
@@ -842,19 +861,15 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
             backupEncrypted: !!process.env.BACKUP_ENCRYPTION_KEY
           },
           // État de la réplication : un nœud en retard ou en erreur doit se voir tout de suite
-          cluster: clusterConfig ? {
-            nodeId: clusterConfig.nodeId,
-            peers: cluster?.status() ?? [],
-            pendingConflicts: (db.prepare('SELECT COUNT(*) AS n FROM vault_conflicts').get() as { n: number }).n
-          } : null
+          cluster: clusterView()
         }
       };
     },
     'POST /api/v1/admin/cluster/sync': async (req: IncomingMessage): Promise<Reply> => {
       requireAdmin(req, 'operate');
-      if (!cluster) throw new HttpError(404, 'cluster_disabled', 'Ce serveur ne fait pas partie d’une grappe');
+      if (!trust.isMember()) throw new HttpError(404, 'cluster_disabled', 'Ce serveur ne fait pas partie d’une grappe');
       await cluster.syncNow();
-      return { status: 200, body: { peers: cluster.status() } };
+      return { status: 200, body: clusterView() };
     },
     'GET /api/v1/admin/audit': async (req: IncomingMessage): Promise<Reply> => {
       requireAdmin(req);
@@ -932,8 +947,71 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     contentType: 'text/html; charset=utf-8'
   });
 
+  /* ── Grappe dans l'administration ─────────────────────────────────────── */
+
+  /** Un nœud est « hors ligne » quand sa dernière réplication réussie date de plus de trois cycles */
+  const clusterView = () => {
+    const snapshot = trust.snapshot();
+    const interval = options.clusterIntervalMs ?? 30_000;
+    const peers = new Map(cluster.status().map(p => [p.id, p]));
+    return {
+      ...snapshot,
+      cluster: snapshot.cluster ? {
+        ...snapshot.cluster,
+        nodes: snapshot.cluster.nodes.map(node => {
+          const peer = peers.get(node.id);
+          const lag = peer && peer.head !== null ? Math.max(0, peer.head - peer.cursor) : null;
+          const health = node.self ? 'self'
+            : node.status !== 'active' ? node.status
+            : node.zone !== snapshot.self.zone ? 'other-zone'
+            : !peer?.lastOkAt ? (peer?.lastError ? 'error' : 'unknown')
+            : peer.lastError ? 'error'
+            : now() - peer.lastOkAt > 3 * interval ? 'offline' : 'ok';
+          return { ...node, health, lag, lastOkAt: peer?.lastOkAt ?? null, lastError: peer?.lastError ?? null, lastErrorAt: peer?.lastErrorAt ?? null };
+        })
+      } : null,
+      pendingConflicts: clusterReady() ? (db.prepare('SELECT COUNT(*) AS n FROM vault_conflicts').get() as { n: number }).n : 0
+    };
+  };
+
+  function clusterAdminRoutes(): PatternRoute[] {
+    const act = (method: string, path: string, run: (req: IncomingMessage, params: Record<string, string>, body: Record<string, unknown>) => Promise<unknown> | unknown, type: string) =>
+      route(method, path, async (req, params) => {
+        const admin = requireAdmin(req, 'manage', true);
+        const body = method === 'GET' || method === 'DELETE' ? {} : await readJson(req, 64 * 1024);
+        const result = await run(req, params, body);
+        audit(type, { admin: admin.id, ...(params.id ? { node: params.id } : {}) });
+        return result === undefined ? { status: 200, body: clusterView() } : { status: 200, body: result };
+      });
+    return [
+      route('GET', '/api/v1/admin/cluster', async req => {
+        requireAdmin(req, 'view');
+        return { status: 200, body: clusterView() };
+      }),
+      act('POST', '/api/v1/admin/cluster', async (_r, _p, body) => { await trust.actions.create(body); }, 'cluster.created'),
+      act('POST', '/api/v1/admin/cluster/invites', () => trust.actions.invite(), 'cluster.invite_created'),
+      act('POST', '/api/v1/admin/cluster/join', async (_r, _p, body) => { await trust.actions.join(body); }, 'cluster.join_sent'),
+      act('POST', '/api/v1/admin/cluster/requests/:id/approve', async (_r, p) => { await trust.actions.approve(p.id); }, 'cluster.node_approved'),
+      act('POST', '/api/v1/admin/cluster/requests/:id/reject', (_r, p) => { trust.actions.reject(p.id); }, 'cluster.node_rejected'),
+      act('PATCH', '/api/v1/admin/cluster/nodes/:id', async (_r, p, body) => { await trust.actions.update(p.id, body); }, 'cluster.node_updated'),
+      act('POST', '/api/v1/admin/cluster/nodes/:id/revoke', async (_r, p, body) => {
+        await trust.actions.revoke(p.id, typeof body.replacedBy === 'string' ? body.replacedBy : undefined);
+      }, 'cluster.node_revoked'),
+      act('DELETE', '/api/v1/admin/cluster/nodes/:id', async (_r, p) => { await trust.actions.remove(p.id); }, 'cluster.node_removed'),
+      act('POST', '/api/v1/admin/cluster/node-key/rotate', () => trust.actions.rotateNodeKey(), 'cluster.node_key_rotated'),
+      act('POST', '/api/v1/admin/cluster/root-key/rotate', () => trust.actions.rotateRootKey(), 'cluster.root_key_rotated'),
+      act('POST', '/api/v1/admin/cluster/root-key/export', (_r, _p, body) => trust.actions.exportRoot(String(body.passphrase ?? '')), 'cluster.root_key_exported'),
+      act('POST', '/api/v1/admin/cluster/root-key/import', async (_r, _p, body) => {
+        await trust.actions.importRoot((body.backup ?? {}) as Record<string, unknown>, String(body.passphrase ?? ''));
+      }, 'cluster.root_key_imported'),
+      act('POST', '/api/v1/admin/cluster/leave', () => { trust.actions.leave(); }, 'cluster.left')
+    ];
+  }
+
   const patternRoutes: PatternRoute[] = [
-    ...(clusterConfig ? clusterRoutes({ db, config: clusterConfig, filesDir: options.filesDir ?? null, now }) : []),
+    ...trust.nodeRoutes,
+    ...clusterRoutes({ db, auth: trust, filesDir: options.filesDir ?? null }),
+    ...clusterAdminRoutes(),
     route('PATCH', '/api/v1/admin/accounts/:id', async (req, params) => adminAuth.updateAccount(req, params.id, 'PATCH')),
     route('DELETE', '/api/v1/admin/accounts/:id', async (req, params) => adminAuth.updateAccount(req, params.id, 'DELETE')),
     ...sharingRoutes(context),
@@ -1035,11 +1113,11 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     }
   };
 
-  if (cluster && options.clusterAutoStart !== false) cluster.start();
+  if (options.clusterAutoStart !== false) cluster.start();
   return Object.assign(handler, {
     close: () => {
       backup?.stop();
-      cluster?.stop();
+      cluster.stop();
     },
     cluster
   });

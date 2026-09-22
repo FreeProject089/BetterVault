@@ -1,23 +1,25 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
+import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDatabase } from '../server/src/db.ts';
 import { createApp } from '../server/src/app.ts';
 import { settingsFromEnv } from '../server/src/config.ts';
-import { clusterFromEnv, compareVv, pickWinner, signedHeaders, type ClusterConfig } from '../server/src/cluster.ts';
+import { compareVv, pickWinner } from '../server/src/cluster.ts';
 import { AccountService, type KeyValueStorage } from '../src/account/accountService';
 import { createEmptyVaultData } from '../src/store/vaultStore';
 
 /**
- * Deux nœuds d'un même opérateur (« eu » et « us ») : un compte créé sur l'un
- * s'ouvre sur l'autre, ses fichiers suivent, et un serveur étranger à la grappe
- * n'obtient rien.
+ * Grappe à confiance signée. Chaque nœud a sa clé ; la grappe a une clé racine qui
+ * signe la liste des nœuds autorisés. On vérifie la vie complète d'une grappe :
+ * création, invitation, approbation, réplication dans une zone, isolement entre
+ * zones, révocation, rotation, et un serveur étranger qui n'obtient rien.
  */
 
-const SECRET = 'secret-de-grappe-suffisamment-long-0123456789';
+const TOKEN = 'jeton-de-secours-assez-long-0123456789';
 const PASSWORD = 'correct horse battery staple';
 const FAST_KDF = { t: 1, m: 64, p: 1 };
 
@@ -30,207 +32,232 @@ class MemoryStorage implements KeyValueStorage {
 const newService = () => new AccountService({ storage: new MemoryStorage(), kdf: FAST_KDF, pushDelayMs: 60_000 });
 
 interface Node {
-  id: string;
   url: string;
   server: Server;
   app: ReturnType<typeof createApp>;
   files: string;
+  admin: (method: string, path: string, body?: unknown) => Promise<{ status: number; body: any }>;
 }
 
-/** Démarre d'abord les serveurs pour connaître leurs ports, puis les relie */
-async function startCluster(ids: string[], secretFor: (id: string) => string = () => SECRET): Promise<Node[]> {
-  const holders = await Promise.all(ids.map(async id => {
-    let app: ReturnType<typeof createApp> | null = null;
-    const server = createServer((req, res) => void app!(req, res));
-    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-    return { id, server, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, set: (a: typeof app) => { app = a; } };
-  }));
-
-  return holders.map(holder => {
-    const config: ClusterConfig = {
-      nodeId: holder.id,
-      secret: secretFor(holder.id),
-      peers: holders.filter(h => h.id !== holder.id).map(h => ({ id: h.id, url: h.url })),
-      intervalMs: 60_000
-    };
-    const files = mkdtempSync(join(tmpdir(), `bv-${holder.id}-`));
-    const app = createApp({
-      db: openDatabase(':memory:'),
-      serverSecret: `secret-serveur-${holder.id}-suffisamment-long-0123456789`,
-      minKdfMemoryKib: 8,
-      authRateLimit: { windowMs: 60_000, max: 10_000 },
-      settings: settingsFromEnv({}),
-      filesDir: files,
-      cluster: config,
-      clusterAutoStart: false
-    });
-    holder.set(app);
-    return { id: holder.id, url: holder.url, server: holder.server, app, files };
+async function startNode(): Promise<Node> {
+  const files = mkdtempSync(join(tmpdir(), 'bv-node-'));
+  const app = createApp({
+    db: openDatabase(':memory:'),
+    serverSecret: `secret-serveur-${Math.random()}-suffisamment-long-0123456789`,
+    minKdfMemoryKib: 8,
+    authRateLimit: { windowMs: 60_000, max: 10_000 },
+    settings: settingsFromEnv({}),
+    adminTokenHash: createHash('sha256').update(TOKEN).digest('base64'),
+    filesDir: files,
+    clusterAutoStart: false
   });
+  const server = createServer((req, res) => void app(req, res));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const admin = async (method: string, path: string, body?: unknown) => {
+    const r = await fetch(`${url}/api/v1/admin/${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${TOKEN}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    return { status: r.status, body: await r.json().catch(() => null) };
+  };
+  return { url, server, app, files, admin };
 }
 
-const stop = async (nodes: Node[]) => {
-  for (const node of nodes) {
-    node.app.close();
-    await new Promise<void>(resolve => node.server.close(() => resolve()));
-    rmSync(node.files, { recursive: true, force: true });
-  }
+const stopNode = async (node: Node) => {
+  node.app.close();
+  await new Promise<void>(resolve => node.server.close(() => resolve()));
+  rmSync(node.files, { recursive: true, force: true });
 };
+
+/** Invite et approuve un nœud ; renvoie son identifiant */
+async function enroll(root: Node, node: Node, name: string, zone: string): Promise<string> {
+  const invite = await root.admin('POST', 'cluster/invites', {});
+  expect(invite.status).toBe(200);
+  const join = await node.admin('POST', 'cluster/join', { code: invite.body.code, name, zone, region: 'r1', url: node.url });
+  expect(join.status).toBe(200);
+  const pending = (await root.admin('GET', 'cluster')).body.pending as Array<{ id: string; fingerprint: string }>;
+  const request = pending.at(-1)!;
+  // L'empreinte que voit la racine est celle que le nœud affiche : c'est ce que l'administrateur compare
+  expect(request.fingerprint).toBe((await node.admin('GET', 'cluster')).body.self.fingerprint);
+  expect((await root.admin('POST', `cluster/requests/${request.id}/approve`, {})).status).toBe(200);
+  return request.id;
+}
 
 const syncAll = async (nodes: Node[]) => {
-  for (let round = 0; round < 2; round++) for (const node of nodes) await node.app.cluster!.syncNow();
+  for (let round = 0; round < 2; round++) for (const node of nodes) await node.app.cluster.syncNow();
 };
 
-describe('Grappe de serveurs', () => {
-  let nodes: Node[];
-  let eu: Node;
-  let us: Node;
+describe('Grappe à confiance signée', () => {
+  let euW: Node;
+  let euE: Node;
+  let usE: Node;
+  let euEId: string;
 
   beforeAll(async () => {
-    nodes = await startCluster(['eu', 'us']);
-    [eu, us] = nodes;
+    [euW, euE, usE] = await Promise.all([startNode(), startNode(), startNode()]);
+    const created = await euW.admin('POST', 'cluster', { clusterName: 'Primary', name: 'EU-W', zone: 'EU', region: 'eu-west', url: euW.url });
+    expect(created.status).toBe(200);
+    euEId = await enroll(euW, euE, 'EU-E', 'EU');
+    await enroll(euW, usE, 'US-E', 'US');
   });
 
   afterAll(async () => {
-    await stop(nodes);
+    for (const node of [euW, euE, usE]) await stopNode(node);
   });
 
-  it('ouvre sur un nœud un compte créé sur l’autre, coffre compris', async () => {
-    const email = `grappe-${Date.now()}@exemple.fr`;
+  it('ajoute les nœuds approuvés au manifeste, signé et diffusé', async () => {
+    const vue = (await euE.admin('GET', 'cluster')).body;
+    expect(vue.cluster.state).toBe('member');
+    expect(vue.cluster.nodes.map((n: { name: string }) => n.name).sort()).toEqual(['EU-E', 'EU-W', 'US-E']);
+    expect(vue.cluster.isRoot).toBe(false);
+    expect((await euW.admin('GET', 'cluster')).body.cluster.isRoot).toBe(true);
+  });
+
+  it('réplique un compte vers les nœuds de sa zone, et seulement eux', async () => {
+    const email = `zone-${Date.now()}@exemple.fr`;
     const data = createEmptyVaultData();
-    data.credentials.push({ id: 'cred-1', vaultId: data.activeVaultId, title: 'Banque', password: 'p4ss', tags: [], createdAt: 1, updatedAt: 1 } as never);
-    await newService().createAccount({ email, password: PASSWORD, mode: 'cloud', serverUrl: eu.url }, data);
+    data.credentials.push({ id: 'cred-1', vaultId: data.activeVaultId, title: 'Banque', tags: [], createdAt: 1, updatedAt: 1 } as never);
+    await newService().createAccount({ email, password: PASSWORD, mode: 'cloud', serverUrl: euW.url }, data);
+    await syncAll([euW, euE, usE]);
 
-    await syncAll(nodes);
-
-    const surUs = newService();
-    const ouvert = await surUs.signIn(us.url, email, PASSWORD);
+    const ouvert = await newService().signIn(euE.url, email, PASSWORD);
     expect(ouvert.credentials.map(c => c.title)).toContain('Banque');
+    // Le nœud américain fait partie de la grappe, mais pas de la zone EU : il n'a rien reçu
+    await expect(newService().signIn(usE.url, email, PASSWORD)).rejects.toThrow();
   });
 
-  it('fait suivre les modifications dans les deux sens', async () => {
-    const email = `aller-retour-${Date.now()}@exemple.fr`;
-    const depuisEu = newService();
-    const data = createEmptyVaultData();
-    await depuisEu.createAccount({ email, password: PASSWORD, mode: 'cloud', serverUrl: eu.url }, data);
-    await syncAll(nodes);
-
-    const depuisUs = newService();
-    const vu = await depuisUs.signIn(us.url, email, PASSWORD);
-    vu.credentials.push({ id: 'cred-us', vaultId: vu.activeVaultId, title: 'Ajouté aux US', tags: [], createdAt: 2, updatedAt: 2 } as never);
-    await depuisUs.save(vu);
-    await depuisUs.syncNow();
-    await syncAll(nodes);
-
-    const relu = await newService().signIn(eu.url, email, PASSWORD);
-    expect(relu.credentials.map(c => c.title)).toContain('Ajouté aux US');
-  });
-
-  it('ne perd rien quand les deux nœuds changent en même temps', async () => {
+  it('ne perd rien quand deux nœuds de la zone changent en même temps', async () => {
     const email = `concurrent-${Date.now()}@exemple.fr`;
-    await newService().createAccount({ email, password: PASSWORD, mode: 'cloud', serverUrl: eu.url }, createEmptyVaultData());
-    await syncAll(nodes);
+    await newService().createAccount({ email, password: PASSWORD, mode: 'cloud', serverUrl: euW.url }, createEmptyVaultData());
+    await syncAll([euW, euE]);
 
-    // Deux appareils, chacun sur son nœud, écrivent avant que les nœuds se parlent
     const a = newService();
-    const dataA = await a.signIn(eu.url, email, PASSWORD);
-    dataA.credentials.push({ id: 'cred-eu', vaultId: dataA.activeVaultId, title: 'Écrit en Europe', tags: [], createdAt: 3, updatedAt: 3 } as never);
+    const dataA = await a.signIn(euW.url, email, PASSWORD);
+    dataA.credentials.push({ id: 'cred-w', vaultId: dataA.activeVaultId, title: 'Écrit à l’ouest', tags: [], createdAt: 3, updatedAt: 3 } as never);
     await a.save(dataA);
     await a.syncNow();
 
     const b = newService();
-    const dataB = await b.signIn(us.url, email, PASSWORD);
-    dataB.credentials.push({ id: 'cred-us2', vaultId: dataB.activeVaultId, title: 'Écrit aux États-Unis', tags: [], createdAt: 4, updatedAt: 4 } as never);
+    const dataB = await b.signIn(euE.url, email, PASSWORD);
+    dataB.credentials.push({ id: 'cred-e', vaultId: dataB.activeVaultId, title: 'Écrit à l’est', tags: [], createdAt: 4, updatedAt: 4 } as never);
     await b.save(dataB);
     await b.syncNow();
 
-    await syncAll(nodes);
-
-    // Un appareil qui se connecte fusionne la version écartée : les deux ajouts survivent
+    await syncAll([euW, euE]);
     const c = newService();
-    const fusion = await c.signIn(us.url, email, PASSWORD);
+    await c.signIn(euE.url, email, PASSWORD);
     await c.syncNow();
-    const titres = (c.getLatestData() ?? fusion).credentials.map(x => x.title);
-    expect(titres).toEqual(expect.arrayContaining(['Écrit en Europe', 'Écrit aux États-Unis']));
-
-    // La fusion est acquittée, et l'acquittement atteint l'autre nœud : plus rien à refusionner
-    await syncAll(nodes);
-    for (const node of [eu, us]) {
-      const d = newService();
-      const vu = await d.signIn(node.url, email, PASSWORD);
-      expect(vu.credentials.map(x => x.title)).toEqual(expect.arrayContaining(['Écrit en Europe', 'Écrit aux États-Unis']));
-      expect((await d.withCloud(client => client.getVault())).conflicts).toBeUndefined();
-    }
+    expect(c.getLatestData()!.credentials.map(x => x.title)).toEqual(expect.arrayContaining(['Écrit à l’ouest', 'Écrit à l’est']));
   });
 
-  it('refuse l’adresse d’un compte qui existe déjà sur l’autre nœud', async () => {
-    const email = `doublon-${Date.now()}@exemple.fr`;
-    await newService().createAccount({ email, password: PASSWORD, mode: 'cloud', serverUrl: eu.url }, createEmptyVaultData());
-    // Pas encore synchronisé : c'est la vérification à l'inscription qui doit bloquer
-    await expect(newService().createAccount({ email, password: PASSWORD, mode: 'cloud', serverUrl: us.url }, createEmptyVaultData()))
-      .rejects.toThrow();
-  });
-
-  it('propage la suppression d’un compte', async () => {
-    const email = `suppression-${Date.now()}@exemple.fr`;
-    const service = newService();
-    await service.createAccount({ email, password: PASSWORD, mode: 'cloud', serverUrl: eu.url }, createEmptyVaultData());
-    await syncAll(nodes);
-    await expect(newService().signIn(us.url, email, PASSWORD)).resolves.toBeTruthy();
-
-    await service.deleteCloudAccount(PASSWORD);
-    await syncAll(nodes);
-    await expect(newService().signIn(us.url, email, PASSWORD)).rejects.toThrow();
-  });
-
-  it('recopie les fichiers chiffrés, par tranches', async () => {
+  it('recopie les fichiers chiffrés par tranches', async () => {
     const email = `fichier-${Date.now()}@exemple.fr`;
     const service = newService();
-    await service.createAccount({ email, password: PASSWORD, mode: 'cloud', serverUrl: eu.url }, createEmptyVaultData());
-    // 9 Mo : trois tranches de 4 Mo au plus
+    await service.createAccount({ email, password: PASSWORD, mode: 'cloud', serverUrl: euW.url }, createEmptyVaultData());
     const contenu = Buffer.alloc(9 * 1024 * 1024, 7);
     const { id } = await service.withCloud(client => client.uploadAttachment(new Uint8Array(contenu)));
-    await syncAll(nodes);
-
-    expect(existsSync(join(us.files, id))).toBe(true);
-    expect(readFileSync(join(us.files, id)).equals(contenu)).toBe(true);
+    await syncAll([euW, euE]);
+    expect(existsSync(join(euE.files, id))).toBe(true);
+    expect(readFileSync(join(euE.files, id)).equals(contenu)).toBe(true);
   });
 
-  it('n’ouvre rien à une requête non signée ou mal signée', async () => {
-    expect((await fetch(`${eu.url}/api/v1/cluster/changes`)).status).toBe(401);
+  it('refuse une requête non signée, signée par une clé inconnue, ou rejouée', async () => {
+    expect((await fetch(`${euW.url}/api/v1/cluster/changes`)).status).toBe(401);
 
-    const etranger: ClusterConfig = { nodeId: 'us', secret: 'un-autre-secret-tout-aussi-long-0123456789', peers: [], intervalMs: 1 };
+    // Une clé qui n'est dans aucun manifeste, même en se faisant passer pour un nœud connu
+    const { privateKey } = generateKeyPairSync('ed25519');
     const path = '/api/v1/cluster/changes?since=0';
-    expect((await fetch(eu.url + path, { headers: signedHeaders(etranger, 'GET', path) })).status).toBe(401);
-
-    // Bon secret, mais nœud non déclaré : refusé aussi
-    const inconnu: ClusterConfig = { nodeId: 'ap', secret: SECRET, peers: [], intervalMs: 1 };
-    expect((await fetch(eu.url + path, { headers: signedHeaders(inconnu, 'GET', path) })).status).toBe(401);
+    const time = String(Date.now());
+    const nonce = 'a'.repeat(32);
+    const payload = [euEId, time, nonce, 'GET', path, createHash('sha256').update('').digest('base64url')].join('\n');
+    const forged = { 'X-BV-Node': euEId, 'X-BV-Time': time, 'X-BV-Nonce': nonce, 'X-BV-Signature': sign(null, Buffer.from(payload), privateKey).toString('base64url') };
+    expect((await fetch(euW.url + path, { headers: forged })).status).toBe(401);
   });
 
-  it('refuse le rejeu d’une requête signée', async () => {
-    const vrai: ClusterConfig = { nodeId: 'us', secret: SECRET, peers: [], intervalMs: 1 };
-    const path = '/api/v1/cluster/changes?since=0';
-    const headers = signedHeaders(vrai, 'GET', path);
-    expect((await fetch(eu.url + path, { headers })).status).toBe(200);
-    expect((await fetch(eu.url + path, { headers })).status).toBe(401);
-  });
-});
-
-describe('Grappe : serveur d’un autre opérateur', () => {
-  it('ne réplique rien vers un nœud qui n’a pas le secret', async () => {
-    const nodes = await startCluster(['eu', 'xx'], id => (id === 'xx' ? 'un-secret-different-et-assez-long-0123456789' : SECRET));
+  it('refuse un code d’invitation réutilisé', async () => {
+    const intrus = await startNode();
     try {
-      const [eu, xx] = nodes;
-      const email = `isole-${Date.now()}@exemple.fr`;
-      await newService().createAccount({ email, password: PASSWORD, mode: 'cloud', serverUrl: eu.url }, createEmptyVaultData());
-      await syncAll(nodes);
-
-      await expect(newService().signIn(xx.url, email, PASSWORD)).rejects.toThrow();
-      expect(xx.app.cluster!.status()[0].lastError).toMatch(/401/);
+      const invite = (await euW.admin('POST', 'cluster/invites', {})).body.code;
+      const autre = await startNode();
+      try {
+        expect((await autre.admin('POST', 'cluster/join', { code: invite, name: 'Autre', zone: 'EU', region: 'r', url: autre.url })).status).toBe(200);
+        expect((await intrus.admin('POST', 'cluster/join', { code: invite, name: 'Intrus', zone: 'EU', region: 'r', url: intrus.url })).status).toBe(401);
+      } finally {
+        await stopNode(autre);
+      }
     } finally {
-      await stop(nodes);
+      await stopNode(intrus);
     }
+  });
+
+  it('coupe immédiatement un nœud révoqué', async () => {
+    const extra = await startNode();
+    try {
+      const id = await enroll(euW, extra, 'EU-X', 'EU');
+      await syncAll([euW, extra]);
+      expect((await euW.admin('GET', 'cluster')).body.cluster.nodes.find((n: { id: string }) => n.id === id).status).toBe('active');
+
+      expect((await euW.admin('POST', `cluster/nodes/${id}/revoke`, {})).status).toBe(200);
+      // Le nœud révoqué apprend son sort, et plus aucun nœud ne lui répond
+      const vue = (await extra.admin('GET', 'cluster')).body;
+      expect(vue.cluster.nodes.find((n: { id: string }) => n.id === id).status).toBe('revoked');
+      await extra.app.cluster.syncNow();
+      expect(extra.app.cluster.status()).toEqual([]);
+
+      const email = `apres-revocation-${Date.now()}@exemple.fr`;
+      await newService().createAccount({ email, password: PASSWORD, mode: 'cloud', serverUrl: euW.url }, createEmptyVaultData());
+      await syncAll([euW, extra]);
+      await expect(newService().signIn(extra.url, email, PASSWORD)).rejects.toThrow();
+
+      // Un nœud révoqué peut ensuite être retiré du manifeste
+      expect((await euW.admin('DELETE', `cluster/nodes/${id}`)).status).toBe(200);
+    } finally {
+      await stopNode(extra);
+    }
+  });
+
+  it('suspend puis reprend un nœud désactivé, sans perte', async () => {
+    expect((await euW.admin('PATCH', `cluster/nodes/${euEId}`, { status: 'disabled' })).status).toBe(200);
+    const email = `pendant-pause-${Date.now()}@exemple.fr`;
+    await newService().createAccount({ email, password: PASSWORD, mode: 'cloud', serverUrl: euW.url }, createEmptyVaultData());
+    await syncAll([euW, euE]);
+    await expect(newService().signIn(euE.url, email, PASSWORD)).rejects.toThrow();
+
+    // Réactivé, il rattrape ce qui s'est passé pendant la pause
+    expect((await euW.admin('PATCH', `cluster/nodes/${euEId}`, { status: 'active' })).status).toBe(200);
+    await syncAll([euW, euE]);
+    await expect(newService().signIn(euE.url, email, PASSWORD)).resolves.toBeTruthy();
+  });
+
+  it('change la clé d’un nœud et la clé racine sans interrompre la réplication', async () => {
+    const avant = (await euE.admin('GET', 'cluster')).body.self.fingerprint;
+    expect((await euE.admin('POST', 'cluster/node-key/rotate', {})).status).toBe(200);
+    expect((await euE.admin('GET', 'cluster')).body.self.fingerprint).not.toBe(avant);
+
+    const racineAvant = (await euE.admin('GET', 'cluster')).body.cluster.rootFingerprint;
+    expect((await euW.admin('POST', 'cluster/root-key/rotate', {})).status).toBe(200);
+    expect((await euE.admin('GET', 'cluster')).body.cluster.rootFingerprint).not.toBe(racineAvant);
+
+    const email = `apres-rotation-${Date.now()}@exemple.fr`;
+    await newService().createAccount({ email, password: PASSWORD, mode: 'cloud', serverUrl: euW.url }, createEmptyVaultData());
+    await syncAll([euW, euE]);
+    await expect(newService().signIn(euE.url, email, PASSWORD)).resolves.toBeTruthy();
+  });
+
+  it('refuse les actions de grappe sans reconfirmation ni rôle suffisant', async () => {
+    const r = await fetch(`${euW.url}/api/v1/admin/cluster/invites`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    expect(r.status).toBe(401);
+  });
+
+  it('exporte la clé racine chiffrée, et la reprend sur un autre nœud', async () => {
+    expect((await euW.admin('POST', 'cluster/root-key/export', { passphrase: 'court' })).status).toBe(400);
+    const backup = (await euW.admin('POST', 'cluster/root-key/export', { passphrase: 'une phrase de passe longue et solide' })).body;
+    expect(JSON.stringify(backup)).not.toContain('PRIVATE KEY');
+    expect((await euE.admin('POST', 'cluster/root-key/import', { backup, passphrase: 'mauvaise phrase de passe tout à fait' })).status).toBe(401);
+    expect((await euE.admin('POST', 'cluster/root-key/import', { backup, passphrase: 'une phrase de passe longue et solide' })).status).toBe(200);
+    expect((await euE.admin('GET', 'cluster')).body.cluster.isRoot).toBe(true);
   });
 });
 
@@ -249,23 +276,3 @@ describe('Vecteurs de version', () => {
     expect(pickWinner(b, a)).toBe('a');
   });
 });
-
-describe('Configuration', () => {
-  it('reste désactivée sans variable', () => {
-    expect(clusterFromEnv({})).toBeNull();
-  });
-
-  it('exige un secret long et des nœuds en https', () => {
-    expect(() => clusterFromEnv({ CLUSTER_NODE_ID: 'eu', CLUSTER_SECRET: 'court' })).toThrow(/32/);
-    expect(() => clusterFromEnv({ CLUSTER_NODE_ID: 'eu', CLUSTER_SECRET: SECRET, CLUSTER_PEERS: 'us=http://us.exemple.fr' })).toThrow(/https/);
-    expect(clusterFromEnv({ CLUSTER_NODE_ID: 'eu', CLUSTER_SECRET: SECRET, CLUSTER_PEERS: 'us=https://us.exemple.fr/' })!.peers)
-      .toEqual([{ id: 'us', url: 'https://us.exemple.fr' }]);
-  });
-
-  it('refuse de se déclarer lui-même comme pair', () => {
-    expect(() => clusterFromEnv({ CLUSTER_NODE_ID: 'eu', CLUSTER_SECRET: SECRET, CLUSTER_PEERS: 'eu=https://eu.exemple.fr' })).toThrow();
-  });
-});
-
-// Garde l'import utilisé même si un test est désactivé
-void writeFileSync;

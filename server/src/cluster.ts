@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { existsSync, mkdirSync, openSync, readSync, closeSync, renameSync, rmSync, statSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { IncomingMessage } from 'node:http';
@@ -11,11 +11,12 @@ import { route, type PatternRoute } from './context.ts';
  * un aux États-Unis).
  *
  * Confiance
- *   Les nœuds partagent un secret (CLUSTER_SECRET) et se déclarent nommément
- *   (CLUSTER_PEERS). Chaque requête entre nœuds est signée avec ce secret : un
- *   serveur tenu par quelqu'un d'autre ne le possède pas et n'obtient rien. Les
+ *   Voir clusterTrust.ts : chaque nœud a sa clé Ed25519, et seuls les nœuds actifs
+ *   d'un manifeste signé par la clé racine de la grappe peuvent échanger. Un
+ *   serveur d'un autre opérateur n'est dans aucun manifeste et n'obtient rien. Les
  *   routes de grappe ne répondent jamais à un client ordinaire — on ne peut pas,
- *   depuis son serveur, demander les données d'un autre.
+ *   depuis son serveur, demander les données d'un autre. Un compte n'est répliqué
+ *   que vers les nœuds de sa zone de résidence.
  *
  * Contenu
  *   Ce qui circule est ce que le serveur stocke déjà : des blobs chiffrés sur les
@@ -36,53 +37,25 @@ import { route, type PatternRoute } from './context.ts';
  *   - Une suppression laisse une pierre tombale répliquée ; elle l'emporte toujours.
  */
 
-export interface ClusterPeer {
-  id: string;
-  url: string;
+import type { ClusterPeer } from './clusterTrust.ts';
+export type { ClusterPeer };
+
+/** Ce dont la réplication a besoin de la couche de confiance (clusterTrust.ts) */
+export interface ClusterAuth {
+  selfId: string;
+  zone(): string | null;
+  /** Nœuds actifs de la même zone : les seuls avec qui l'on réplique */
+  peers(): ClusterPeer[];
+  signedHeaders(method: string, pathWithQuery: string, body?: string): Record<string, string>;
+  verifyRequest(req: IncomingMessage, body: string, allow: 'active'): { id: string; zone?: string };
+  refreshManifest(): Promise<void>;
+  manifest(): { clusterId: string } | null;
+  event(level: 'info' | 'warn' | 'error', message: string, nodeId?: string): void;
 }
 
-export interface ClusterConfig {
-  nodeId: string;
-  secret: string;
-  peers: ClusterPeer[];
-  intervalMs: number;
-}
-
-const NODE_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
-const MAX_SKEW_MS = 5 * 60 * 1000;
 const PAGE = 200;
 export const FILE_CHUNK = 4 * 1024 * 1024;
-
-/* ── Configuration ─────────────────────────────────────────────────────── */
-
-export function clusterFromEnv(env: Record<string, string | undefined>): ClusterConfig | null {
-  const nodeId = (env.CLUSTER_NODE_ID ?? '').trim();
-  const secret = env.CLUSTER_SECRET ?? '';
-  const peersRaw = (env.CLUSTER_PEERS ?? '').trim();
-  if (!nodeId && !secret && !peersRaw) return null;
-
-  if (!NODE_ID.test(nodeId)) throw new Error('CLUSTER_NODE_ID : lettres minuscules, chiffres et tirets, 32 caractères au plus');
-  if (secret.length < 32) throw new Error('CLUSTER_SECRET doit contenir au moins 32 caractères');
-  const peers = peersRaw ? peersRaw.split(',').map(entry => {
-    const [id, url] = entry.split('=').map(s => s?.trim() ?? '');
-    if (!NODE_ID.test(id)) throw new Error(`CLUSTER_PEERS : identifiant de nœud invalide « ${id} »`);
-    if (id === nodeId) throw new Error('CLUSTER_PEERS ne doit pas contenir ce nœud lui-même');
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
-      throw new Error(`CLUSTER_PEERS : adresse invalide pour « ${id} »`);
-    }
-    // En clair, le secret signé circulerait lisiblement : HTTPS obligatoire hors machine locale
-    const local = ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
-    if (parsed.protocol !== 'https:' && !(local && parsed.protocol === 'http:')) {
-      throw new Error(`CLUSTER_PEERS : « ${id} » doit être en https://`);
-    }
-    return { id, url: url.replace(/\/+$/, '') };
-  }) : [];
-  const seconds = Number(env.CLUSTER_SYNC_INTERVAL_S ?? 30);
-  return { nodeId, secret, peers, intervalMs: Math.max(5, Number.isFinite(seconds) ? seconds : 30) * 1000 };
-}
+const NODE_ID = /^n-[a-f0-9]{16}$/;
 
 /* ── Schéma ────────────────────────────────────────────────────────────── */
 
@@ -93,11 +66,15 @@ const NOW = "CAST(strftime('%s','now') AS INTEGER) * 1000";
 const bump = (vv: string) =>
   `json_set(COALESCE(${vv}, '{}'), '$."' || ${NODE} || '"', COALESCE(json_extract(${vv}, '$."' || ${NODE} || '"'), 0) + 1)`;
 
-export function installClusterSchema(db: DatabaseSync, nodeId: string): void {
+export function installClusterSchema(db: DatabaseSync, nodeId: string, zone?: string | null): void {
   for (const table of ['users', 'vaults', 'shared_vaults']) {
     const cols = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(c => c.name));
     if (!cols.has('vv')) db.exec(`ALTER TABLE ${table} ADD COLUMN vv TEXT`);
   }
+  // Zone de résidence de chaque compte : il n'est répliqué que vers les nœuds de cette zone
+  const userCols = new Set((db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>).map(c => c.name));
+  if (!userCols.has('home_zone')) db.exec('ALTER TABLE users ADD COLUMN home_zone TEXT');
+  if (zone) db.prepare('UPDATE users SET home_zone = ? WHERE home_zone IS NULL').run(zone);
   db.prepare("INSERT INTO settings (key, value) VALUES ('cluster_node', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(nodeId);
   db.prepare("INSERT INTO settings (key, value) VALUES ('cluster_applying', '0') ON CONFLICT(key) DO UPDATE SET value = '0'").run();
 
@@ -264,48 +241,6 @@ export function pickWinner(a: { vv: VersionVector; fingerprint: string }, b: { v
 }
 
 const sha = (value: string) => createHmac('sha256', 'bettervault-fingerprint').update(value).digest('base64url');
-
-/* ── Signature des requêtes entre nœuds ────────────────────────────────── */
-
-const signature = (secret: string, parts: string[]) => createHmac('sha256', secret).update(parts.join('\n')).digest('base64');
-
-export function signedHeaders(config: ClusterConfig, method: string, pathWithQuery: string, now = Date.now()): Record<string, string> {
-  const time = String(now);
-  const nonce = randomBytes(16).toString('hex');
-  return {
-    'X-BV-Node': config.nodeId,
-    'X-BV-Time': time,
-    'X-BV-Nonce': nonce,
-    'X-BV-Signature': signature(config.secret, [config.nodeId, time, nonce, method.toUpperCase(), pathWithQuery])
-  };
-}
-
-export function createVerifier(config: ClusterConfig, now: () => number) {
-  const seen = new Map<string, number>();
-  return (req: IncomingMessage): string => {
-    const node = String(req.headers['x-bv-node'] ?? '');
-    const time = String(req.headers['x-bv-time'] ?? '');
-    const nonce = String(req.headers['x-bv-nonce'] ?? '');
-    const provided = Buffer.from(String(req.headers['x-bv-signature'] ?? ''), 'base64');
-    const refuse = () => new HttpError(401, 'cluster_unauthorized', 'Nœud non reconnu');
-
-    // Seuls les nœuds déclarés sont admis, même porteurs du bon secret
-    if (!config.peers.some(p => p.id === node)) throw refuse();
-    const at = Number(time);
-    if (!Number.isFinite(at) || Math.abs(now() - at) > MAX_SKEW_MS) throw refuse();
-    if (!/^[0-9a-f]{32}$/.test(nonce)) throw refuse();
-
-    const expected = Buffer.from(signature(config.secret, [node, time, nonce, String(req.method).toUpperCase(), req.url ?? '']), 'base64');
-    if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) throw refuse();
-
-    // Une requête signée ne se rejoue pas
-    const key = `${node}:${nonce}`;
-    if (seen.has(key)) throw refuse();
-    seen.set(key, at);
-    if (seen.size > 20_000) for (const [k, t] of seen) if (t < now() - MAX_SKEW_MS) seen.delete(k);
-    return node;
-  };
-}
 
 /* ── Paquets : l'état complet d'un compte ou d'un coffre partagé ────────── */
 
@@ -564,47 +499,71 @@ export function applyTombstone(db: DatabaseSync, key: string): string[] {
 
 /* ── Routes exposées aux autres nœuds ──────────────────────────────────── */
 
+/** Zone d'un compte ; un compte d'avant la grappe appartient à la zone de ce nœud */
+const accountZone = (db: DatabaseSync, userId: string, fallback: string | null) =>
+  (db.prepare('SELECT home_zone FROM users WHERE id = ?').get(userId) as { home_zone: string | null } | undefined)?.home_zone ?? fallback;
+
 export function clusterRoutes(options: {
   db: DatabaseSync;
-  config: ClusterConfig;
+  auth: ClusterAuth;
   filesDir: string | null;
-  now: () => number;
 }): PatternRoute[] {
-  const { db, config, filesDir, now } = options;
-  const verify = createVerifier(config, now);
+  const { db, auth, filesDir } = options;
   const json = (body: unknown): Reply => ({ status: 200, body });
+
+  /** Nœud appelant, actif, et de la même zone que ce nœud : sinon rien ne sort */
+  const caller = (req: IncomingMessage) => {
+    const node = auth.verifyRequest(req, '', 'active');
+    if (node.zone !== auth.zone()) throw new HttpError(403, 'zone_mismatch', 'Ce nœud n’est pas de la même zone');
+    return node;
+  };
 
   return [
     route('GET', '/api/v1/cluster/changes', async req => {
-      verify(req);
+      caller(req);
       const params = new URL(req.url ?? '/', 'http://localhost').searchParams;
       const since = Math.max(0, Number(params.get('since') ?? 0) || 0);
       const limit = Math.min(PAGE, Math.max(1, Number(params.get('limit') ?? PAGE) || PAGE));
-      const items = db.prepare(`
+      const zone = auth.zone();
+      const all = db.prepare(`
         SELECT kind, key, MAX(seq) AS seq FROM cluster_log WHERE seq > ?
         GROUP BY kind, key ORDER BY seq LIMIT ?`).all(since, limit) as Array<{ kind: string; key: string; seq: number }>;
+      // Les comptes d'une autre zone ne quittent pas celle-ci, même vers un nœud de la grappe
+      const items = all.filter(item => {
+        if (item.kind === 'account') return accountZone(db, item.key, zone) === zone;
+        if (item.kind === 'shared') {
+          const owner = db.prepare('SELECT owner_id FROM shared_vaults WHERE id = ?').get(item.key) as { owner_id: string } | undefined;
+          return !owner || accountZone(db, owner.owner_id, zone) === zone;
+        }
+        return true;
+      });
       const head = (db.prepare('SELECT COALESCE(MAX(seq), 0) AS head FROM cluster_log').get() as { head: number }).head;
-      return json({ node: config.nodeId, head, items });
+      // La position avance jusqu'au dernier élément examiné, filtré ou non
+      const reached = all.length ? all[all.length - 1].seq : since;
+      return json({ node: auth.selfId, head, reached, full: all.length === limit, items });
     }),
 
     route('GET', '/api/v1/cluster/accounts/:id', async (req, params) => {
-      verify(req);
+      caller(req);
+      if (accountZone(db, params.id, auth.zone()) !== auth.zone()) throw new HttpError(404, 'not_found', 'Compte inconnu');
       const bundle = accountBundle(db, params.id);
       if (!bundle) throw new HttpError(404, 'not_found', 'Compte inconnu');
       return json(bundle);
     }),
 
     route('GET', '/api/v1/cluster/shared/:id', async (req, params) => {
-      verify(req);
+      caller(req);
       const bundle = sharedBundle(db, params.id);
-      if (!bundle) throw new HttpError(404, 'not_found', 'Coffre inconnu');
+      if (!bundle || accountZone(db, String(bundle.vault.owner_id), auth.zone()) !== auth.zone()) throw new HttpError(404, 'not_found', 'Coffre inconnu');
       return json(bundle);
     }),
 
     // Fichier chiffré, par tranches : un gros fichier ne bloque ni la mémoire ni une requête trop longue
     route('GET', '/api/v1/cluster/files/:id', async (req, params) => {
-      verify(req);
+      caller(req);
       if (!filesDir || !/^[A-Za-z0-9_-]{1,64}$/.test(params.id)) throw new HttpError(404, 'not_found', 'Fichier inconnu');
+      const row = db.prepare('SELECT owner_id FROM attachments WHERE id = ?').get(params.id) as { owner_id: string } | undefined;
+      if (!row || accountZone(db, row.owner_id, auth.zone()) !== auth.zone()) throw new HttpError(404, 'not_found', 'Fichier inconnu');
       const path = join(filesDir, params.id);
       if (!existsSync(path)) throw new HttpError(404, 'not_found', 'Fichier inconnu');
       const size = statSync(path).size;
@@ -623,18 +582,18 @@ export function clusterRoutes(options: {
       return { status: 200, raw: buffer, contentType: 'application/octet-stream', headers: { 'X-BV-Size': String(size) } } as Reply;
     }),
 
-    // Adresse déjà prise ailleurs dans la grappe ? L'adresse ne circule que sous forme d'empreinte
+    // Adresse déjà prise ailleurs dans la zone ? L'adresse ne circule que sous forme d'empreinte
     route('GET', '/api/v1/cluster/email/:hash', async (req, params) => {
-      verify(req);
+      caller(req);
+      const clusterId = auth.manifest()?.clusterId ?? '';
       const rows = db.prepare('SELECT email FROM users').all() as Array<{ email: string }>;
-      const taken = rows.some(r => emailFingerprint(config.secret, r.email) === params.hash);
-      return json({ taken });
+      return json({ taken: rows.some(r => emailFingerprint(clusterId, r.email) === params.hash) });
     })
   ];
 }
 
-export const emailFingerprint = (secret: string, email: string) =>
-  createHmac('sha256', secret).update(`email:${email.trim().toLowerCase()}`).digest('base64url');
+export const emailFingerprint = (clusterId: string, email: string) =>
+  createHash('sha256').update(`bettervault/email:${clusterId}:${email.trim().toLowerCase()}`).digest('base64url');
 
 /* ── Réplication : ce nœud tire les changements des autres ─────────────── */
 
@@ -651,31 +610,40 @@ export interface PeerStatus {
 
 export function createClusterSync(options: {
   db: DatabaseSync;
-  config: ClusterConfig;
+  auth: ClusterAuth;
   filesDir: string | null;
+  intervalMs?: number;
   fetchImpl?: typeof fetch;
   now?: () => number;
-  log?: (message: string) => void;
 }) {
-  const { db, config, filesDir } = options;
+  const { db, auth, filesDir } = options;
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? Date.now;
-  const log = options.log ?? (message => console.warn(`[grappe] ${message}`));
-  const status = new Map<string, PeerStatus>(config.peers.map(p => [p.id, {
-    id: p.id, url: p.url, cursor: readCursor(p.id), head: null, lastOkAt: null, lastError: null, lastErrorAt: null, conflicts: 0
-  }]));
+  const intervalMs = options.intervalMs ?? 30_000;
+  const status = new Map<string, PeerStatus>();
   let running: Promise<void> | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
 
-  function readCursor(peer: string): number {
+  const readCursor = (peer: string): number => {
     const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(`cluster_cursor:${peer}`) as { value: string } | undefined;
     return Number(row?.value ?? 0) || 0;
-  }
+  };
   const writeCursor = (peer: string, value: number) =>
     db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(`cluster_cursor:${peer}`, String(value));
 
-  const get = async (peer: ClusterPeer, path: string): Promise<Response> => {
-    const response = await fetchImpl(peer.url + path, { headers: signedHeaders(config, 'GET', path, now()), signal: AbortSignal.timeout(20_000) });
+  const stateOf = (peer: ClusterPeer): PeerStatus => {
+    let state = status.get(peer.id);
+    if (!state) {
+      state = { id: peer.id, url: peer.url, cursor: readCursor(peer.id), head: null, lastOkAt: null, lastError: null, lastErrorAt: null, conflicts: 0 };
+      status.set(peer.id, state);
+    }
+    state.url = peer.url;
+    return state;
+  };
+
+  const get = async (peer: ClusterPeer, path: string, allowNotFound = false): Promise<Response | null> => {
+    const response = await fetchImpl(peer.url + path, { headers: auth.signedHeaders('GET', path), signal: AbortSignal.timeout(20_000) });
+    if (allowNotFound && response.status === 404) return null;
     if (!response.ok) throw new Error(`${path.split('?')[0]} : HTTP ${response.status}`);
     return response;
   };
@@ -691,7 +659,7 @@ export function createClusterSync(options: {
     try {
       let offset = 0;
       for (;;) {
-        const response = await get(peer, `/api/v1/cluster/files/${id}?offset=${offset}`);
+        const response = (await get(peer, `/api/v1/cluster/files/${id}?offset=${offset}`))!;
         const size = Number(response.headers.get('x-bv-size'));
         const chunk = Buffer.from(await response.arrayBuffer());
         appendFileSync(partial, chunk);
@@ -709,28 +677,22 @@ export function createClusterSync(options: {
   };
 
   const pullAccount = async (peer: ClusterPeer, id: string) => {
-    const response = await fetchImpl(peer.url + `/api/v1/cluster/accounts/${encodeURIComponent(id)}`, {
-      headers: signedHeaders(config, 'GET', `/api/v1/cluster/accounts/${encodeURIComponent(id)}`, now()),
-      signal: AbortSignal.timeout(20_000)
-    });
-    if (response.status === 404) return; // supprimé entre-temps : la pierre tombale suivra
-    if (!response.ok) throw new Error(`compte : HTTP ${response.status}`);
+    const response = await get(peer, `/api/v1/cluster/accounts/${encodeURIComponent(id)}`, true);
+    if (!response) return; // supprimé entre-temps, ou hors de la zone : la pierre tombale suivra
     const outcome = applyAccountBundle(db, await response.json() as AccountBundle, filesDir, now());
     if (outcome.conflict) {
-      status.get(peer.id)!.conflicts += 1;
-      log(`${peer.id} : ${outcome.conflict}`);
+      stateOf(peer).conflicts += 1;
+      auth.event('warn', outcome.conflict, peer.id);
     }
     for (const file of outcome.missingFiles) await pullFile(peer, file);
   };
 
-  const pullShared = async (peer: ClusterPeer, id: string, depth = 0): Promise<void> => {
-    const path = `/api/v1/cluster/shared/${encodeURIComponent(id)}`;
-    const response = await fetchImpl(peer.url + path, { headers: signedHeaders(config, 'GET', path, now()), signal: AbortSignal.timeout(20_000) });
-    if (response.status === 404) return;
-    if (!response.ok) throw new Error(`coffre partagé : HTTP ${response.status}`);
+  const pullShared = async (peer: ClusterPeer, id: string): Promise<void> => {
+    const response = await get(peer, `/api/v1/cluster/shared/${encodeURIComponent(id)}`, true);
+    if (!response) return;
     const bundle = await response.json() as SharedBundle;
     let outcome = applySharedBundle(db, bundle, filesDir, now());
-    if (outcome.needsAccounts?.length && depth === 0) {
+    if (outcome.needsAccounts?.length) {
       for (const account of outcome.needsAccounts) await pullAccount(peer, account);
       outcome = applySharedBundle(db, bundle, filesDir, now());
     }
@@ -738,15 +700,14 @@ export function createClusterSync(options: {
   };
 
   const syncPeer = async (peer: ClusterPeer) => {
-    const state = status.get(peer.id)!;
+    const state = stateOf(peer);
     try {
       for (let pages = 0; pages < 1000; pages++) {
-        const response = await get(peer, `/api/v1/cluster/changes?since=${state.cursor}&limit=${PAGE}`);
-        const page = await response.json() as { node: string; head: number; items: Array<{ kind: string; key: string; seq: number }> };
-        // Le nœud répond sous le nom qu'on lui connaît, sinon on parle à quelqu'un d'autre
-        if (page.node !== peer.id) throw new Error(`le nœud répond sous le nom « ${page.node} »`);
+        const response = (await get(peer, `/api/v1/cluster/changes?since=${state.cursor}&limit=${PAGE}`))!;
+        const page = await response.json() as { node: string; head: number; reached: number; full: boolean; items: Array<{ kind: string; key: string; seq: number }> };
+        // Le nœud répond sous l'identité qu'on lui connaît, sinon on parle à quelqu'un d'autre
+        if (page.node !== peer.id) throw new Error('le nœud répond sous une autre identité');
         state.head = page.head;
-        if (!page.items.length) break;
 
         // Les comptes d'abord : un coffre partagé cite ses membres
         const ordered = [...page.items].sort((a, b) => (a.kind === 'account' ? 0 : 1) - (b.kind === 'account' ? 0 : 1));
@@ -757,25 +718,33 @@ export function createClusterSync(options: {
             for (const file of applyTombstone(db, item.key)) if (filesDir) rmSync(join(filesDir, file), { force: true });
           }
         }
-        state.cursor = Math.max(state.cursor, ...page.items.map(i => i.seq));
+        // La position n'avance qu'une fois la page entièrement appliquée : une panne en
+        // cours de route fait rejouer la page, et l'application est idempotente
+        state.cursor = Math.max(state.cursor, page.reached);
         writeCursor(peer.id, state.cursor);
-        if (page.items.length < PAGE) break;
+        if (!page.full) break;
       }
+      if (state.lastError) auth.event('info', 'Réplication rétablie', peer.id);
       state.lastOkAt = now();
       state.lastError = null;
     } catch (err) {
-      state.lastError = err instanceof Error ? err.message : String(err);
+      const message = err instanceof Error ? err.message : String(err);
+      if (message !== state.lastError) auth.event('error', `Réplication : ${message}`, peer.id);
+      state.lastError = message;
       state.lastErrorAt = now();
-      log(`${peer.id} : ${state.lastError}`);
     }
   };
 
   const syncNow = (): Promise<void> => {
     if (running) return running;
     running = (async () => {
-      for (const peer of config.peers) await syncPeer(peer);
+      // Un nœud revenu d'absence se remet d'abord à jour de la liste des nœuds autorisés
+      await auth.refreshManifest();
+      for (const peer of auth.peers()) await syncPeer(peer);
       // Le journal ne garde que la dernière entrée de chaque compte ou coffre
-      db.exec('DELETE FROM cluster_log WHERE seq NOT IN (SELECT MAX(seq) FROM cluster_log GROUP BY kind, key)');
+      if (db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'cluster_log'").get()) {
+        db.exec('DELETE FROM cluster_log WHERE seq NOT IN (SELECT MAX(seq) FROM cluster_log GROUP BY kind, key)');
+      }
     })().finally(() => { running = null; });
     return running;
   };
@@ -783,8 +752,8 @@ export function createClusterSync(options: {
   return {
     syncNow,
     start() {
-      if (timer || !config.peers.length) return;
-      timer = setInterval(() => void syncNow(), config.intervalMs);
+      if (timer) return;
+      timer = setInterval(() => void syncNow(), intervalMs);
       timer.unref?.();
       void syncNow();
     },
@@ -792,15 +761,17 @@ export function createClusterSync(options: {
       if (timer) clearInterval(timer);
       timer = null;
     },
-    status: () => [...status.values()],
-    /** Une adresse est-elle déjà prise sur un autre nœud ? Un nœud injoignable ne bloque pas l'inscription */
+    /** État de réplication de chaque nœud actif de la zone, y compris ceux jamais joints */
+    status: () => auth.peers().map(peer => ({ ...stateOf(peer) })),
+    /** Une adresse est-elle déjà prise sur un autre nœud de la zone ? Un nœud injoignable ne bloque pas */
     async emailTaken(email: string): Promise<boolean> {
-      const hash = emailFingerprint(config.secret, email);
-      const answers = await Promise.all(config.peers.map(async peer => {
+      const clusterId = auth.manifest()?.clusterId;
+      if (!clusterId) return false;
+      const hash = emailFingerprint(clusterId, email);
+      const answers = await Promise.all(auth.peers().map(async peer => {
         try {
-          const path = `/api/v1/cluster/email/${hash}`;
-          const response = await fetchImpl(peer.url + path, { headers: signedHeaders(config, 'GET', path, now()), signal: AbortSignal.timeout(3000) });
-          return response.ok && (await response.json() as { taken: boolean }).taken;
+          const response = await get(peer, `/api/v1/cluster/email/${hash}`);
+          return !!response && (await response.json() as { taken: boolean }).taken;
         } catch {
           return false;
         }
