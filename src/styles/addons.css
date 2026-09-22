@@ -3969,3 +3969,30 @@ body.dragging-item .folder-breadcrumb button { outline: 1px dashed var(--border-
   .template-field-row { grid-template-columns: minmax(0, 1fr) 36px; }
   .template-field-row select, .template-field-row .check-inline { grid-column: 1 / 2; }
 }
+
+/* Barre latérale réduite (ordinateur) : icônes seules, libellé en infobulle */
+.sidebar-collapse-btn { display: none; }
+@media (min-width: 901px) {
+  .sidebar-collapse-btn { display: inline-flex; }
+  .app-container.sidebar-collapsed { grid-template-columns: 60px 380px minmax(0, 1fr); }
+  .app-container.sidebar-collapsed.tasks-board { grid-template-columns: 60px minmax(0, 1fr) minmax(340px, 420px); }
+  .sidebar-collapsed .sidebar-header { flex-direction: column; gap: 10px; padding: 12px 8px; }
+  .sidebar-collapsed .workspace-title,
+  .sidebar-collapsed .nav-section-title,
+  .sidebar-collapsed .nav-count,
+  .sidebar-collapsed .vault-type-badge,
+  .sidebar-collapsed .nav-item-left > span:not(.nav-item-icon),
+  .sidebar-collapsed .sidebar-nav .icon-btn,
+  .sidebar-collapsed .sidebar-footer .sync-text { display: none !important; }
+  .sidebar-collapsed .sidebar-nav { padding-left: 6px; padding-right: 6px; }
+  .sidebar-collapsed .nav-item { justify-content: center; padding: 9px 0; }
+  .sidebar-collapsed .nav-item-left { flex: 0 0 auto; justify-content: center; }
+  .sidebar-collapsed .sidebar-collapse-btn svg { transform: scaleX(-1); }
+}
+@media (min-width: 901px) {
+  .sidebar-collapsed .nav-empty,
+  .sidebar-collapsed .sync-label { display: none !important; }
+  .sidebar-collapsed .sidebar-footer { padding-left: 6px; padding-right: 6px; }
+  .sidebar-collapsed .sidebar-footer > div,
+  .sidebar-collapsed .sidebar-footer > div > div { flex-direction: column; gap: 6px !important; }
+}

@@ -127,6 +127,7 @@ const GEN_ICONS = {
 };
 
 const GENERATOR_PREFS_KEY = 'bettervault.generator-prefs';
+const SIDEBAR_COLLAPSED_KEY = 'bettervault.sidebar-collapsed';
 const REMINDER_CHECK_INTERVAL_MS = 30_000;
 const SYNC_INTERVAL_MS = 60_000;
 const LIST_PREFS_KEY = 'bettervault.list-prefs';
@@ -690,6 +691,25 @@ class AppController {
 
     document.getElementById('btn-open-audit')?.addEventListener('click', () => {
       this.openAuditModal();
+    });
+
+    // Barre latérale réduite : le choix est retenu, et chaque entrée garde son nom en infobulle
+    const collapseBtn = document.getElementById('btn-collapse-sidebar');
+    const appRoot = document.getElementById('app');
+    const setCollapsed = (collapsed: boolean) => {
+      appRoot?.classList.toggle('sidebar-collapsed', collapsed);
+      collapseBtn?.setAttribute('aria-pressed', String(collapsed));
+      const label = collapsed ? this.tr('Déplier le menu', 'Expand menu') : this.tr('Réduire le menu', 'Collapse menu');
+      collapseBtn?.setAttribute('title', label);
+      collapseBtn?.setAttribute('aria-label', label);
+      try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch { /* stockage indisponible */ }
+    };
+    try { setCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'); } catch { setCollapsed(false); }
+    collapseBtn?.addEventListener('click', () => setCollapsed(!appRoot?.classList.contains('sidebar-collapsed')));
+    document.querySelector('.sidebar')?.addEventListener('mouseover', event => {
+      if (!appRoot?.classList.contains('sidebar-collapsed')) return;
+      const item = (event.target as HTMLElement).closest<HTMLElement>('.nav-item');
+      if (item && !item.title) item.title = item.textContent?.replace(/\s+/g, ' ').trim() ?? '';
     });
 
     document.getElementById('btn-open-templates')?.addEventListener('click', () => {
@@ -7490,6 +7510,12 @@ ${uri}` : uri;
     const type = itemTypeOf(cred.type);
     const info = ITEM_TYPE_INFO[type];
     const fallback = this.tr(info.fr, info.en);
+    // Type personnalisé : sa première valeur visible, sinon le nom du type
+    if (cred.templateId) {
+      const visible = (cred.fields ?? []).find(f => !f.isMasked && f.value.trim());
+      const custom = vaultStore.getTemplates().find(t => t.id === cred.templateId);
+      if (visible || custom) return visible ? `${visible.label} : ${visible.value}` : custom!.name;
+    }
 
     switch (type) {
       case 'login':
