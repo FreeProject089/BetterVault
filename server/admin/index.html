@@ -20,12 +20,25 @@
 
     <section class="card narrow" id="login-card">
       <h1 data-i18n="loginTitle">Connexion administrateur</h1>
-      <p class="muted" data-i18n="loginHelp">Le jeton est affiché dans les journaux du serveur au premier démarrage, ou défini par ADMIN_TOKEN.</p>
-      <form id="login-form">
-        <label for="token" data-i18n="token">Jeton d’administration</label>
-        <input id="token" type="password" autocomplete="current-password" required>
+      <form id="login-form" class="stack">
+        <div id="login-account" class="stack">
+          <label for="login-email" data-i18n="email">Email</label>
+          <input id="login-email" type="email" autocomplete="username" inputmode="email">
+          <label for="login-password" data-i18n="password">Mot de passe</label>
+          <input id="login-password" type="password" autocomplete="current-password">
+          <div id="login-totp-row" class="stack" hidden>
+            <label for="login-totp" data-i18n="totpCode">Code de l’application d’authentification</label>
+            <input id="login-totp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}">
+          </div>
+        </div>
+        <div id="login-token-row" class="stack" hidden>
+          <label for="token" data-i18n="token">Jeton de secours (ADMIN_TOKEN)</label>
+          <input id="token" type="password" autocomplete="off">
+          <p class="muted" data-i18n="loginHelp">Affiché dans les journaux du serveur au premier démarrage, ou défini par ADMIN_TOKEN. Sert à créer le premier compte et à dépanner.</p>
+        </div>
         <p class="error" id="login-error" role="alert" hidden></p>
         <button class="btn primary" type="submit" data-i18n="signIn">Se connecter</button>
+        <button class="btn ghost" type="button" id="login-mode" data-i18n="useToken">Utiliser le jeton de secours</button>
       </form>
     </section>
 
@@ -36,6 +49,7 @@
         <button type="button" class="tab" data-tab="billing" data-i18n="tabBilling">Offres</button>
         <button type="button" class="tab" data-tab="legal" data-i18n="tabLegal">Documents légaux</button>
         <button type="button" class="tab" data-tab="audit" data-i18n="tabAudit">Journal</button>
+        <button type="button" class="tab" data-tab="admins" data-i18n="tabAdmins">Administrateurs</button>
       </nav>
 
       <section data-panel="overview">
@@ -208,6 +222,50 @@
           <div class="table-wrap"><table class="audit"><thead><tr><th data-i18n="when">Date</th><th data-i18n="event">Événement</th><th data-i18n="subject">Compte</th><th data-i18n="detail">Détails</th></tr></thead><tbody id="audit-rows"></tbody></table></div>
         </section>
       </section>
+
+      <section data-panel="admins" hidden>
+        <p class="notice" id="break-glass-warning" hidden data-i18n="breakGlassWarning">Le jeton de secours ADMIN_TOKEN est encore actif alors que des comptes existent. Une fois un propriétaire créé, passez ADMIN_TOKEN=disabled.</p>
+        <section class="card" data-requires="manage">
+          <div class="panel-head"><h2 data-i18n="adminsTitle">Administrateurs</h2></div>
+          <p class="hint" data-i18n="adminsHint">Lecteur : consulter. Opérateur : lancer synchronisations, sauvegardes et tests. Propriétaire : tout, dont réglages, nœuds, secrets et restaurations.</p>
+          <ul class="admin-list" id="admin-list"></ul>
+          <form id="admin-add" class="admin-add">
+            <input id="admin-add-email" type="email" required autocomplete="off" data-i18n-placeholder="email">
+            <input id="admin-add-password" type="password" required minlength="12" autocomplete="new-password" data-i18n-placeholder="tempPassword">
+            <select id="admin-add-role">
+              <option value="viewer" data-i18n="roleViewer">Lecteur</option>
+              <option value="operator" data-i18n="roleOperator">Opérateur</option>
+              <option value="owner" data-i18n="roleOwner">Propriétaire</option>
+            </select>
+            <button class="btn primary" type="submit" data-i18n="add">Ajouter</button>
+          </form>
+          <p class="status" id="admin-add-status"></p>
+        </section>
+        <section class="card" id="my-account">
+          <h2 data-i18n="myAccount">Mon compte</h2>
+          <p class="hint" id="my-account-line"></p>
+          <form id="my-password" class="admin-add">
+            <input id="my-password-new" type="password" minlength="12" required autocomplete="new-password" data-i18n-placeholder="newPassword">
+            <button class="btn" type="submit" data-i18n="changePassword">Changer le mot de passe</button>
+          </form>
+          <div id="my-totp"></div>
+          <p class="status" id="my-status"></p>
+        </section>
+      </section>
+
+      <dialog id="reauth-dialog" class="card narrow">
+        <form method="dialog" id="reauth-form" class="stack">
+          <h2 data-i18n="reauthTitle">Confirmez votre identité</h2>
+          <p class="hint" data-i18n="reauthHint">Cette action est sensible : ressaisissez votre mot de passe.</p>
+          <input id="reauth-password" type="password" autocomplete="current-password" required>
+          <input id="reauth-totp" inputmode="numeric" maxlength="6" autocomplete="one-time-code" data-i18n-placeholder="totpCode" hidden>
+          <p class="error" id="reauth-error" hidden></p>
+          <div class="row-end">
+            <button class="btn ghost" type="button" id="reauth-cancel" data-i18n="cancel">Annuler</button>
+            <button class="btn primary" type="submit" data-i18n="confirm">Confirmer</button>
+          </div>
+        </form>
+      </dialog>
     </div>
   </main>
   <script type="module" src="/admin/admin.js"></script>

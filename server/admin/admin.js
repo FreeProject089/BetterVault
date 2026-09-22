@@ -5,8 +5,30 @@ const TEXT = {
   admin: ['Administration', 'Administration'],
   logout: ['Se déconnecter', 'Sign out'],
   loginTitle: ['Connexion administrateur', 'Administrator sign-in'],
-  loginHelp: ['Le jeton est affiché dans les journaux du serveur au premier démarrage, ou défini par ADMIN_TOKEN.', 'The token is printed in the server logs on first start, or set with ADMIN_TOKEN.'],
-  token: ['Jeton d’administration', 'Admin token'],
+  loginHelp: ['Affiché dans les journaux du serveur au premier démarrage, ou défini par ADMIN_TOKEN. Sert à créer le premier compte et à dépanner.', 'Printed in the server logs on first start, or set with ADMIN_TOKEN. Used to create the first account and for recovery.'],
+  token: ['Jeton de secours (ADMIN_TOKEN)', 'Recovery token (ADMIN_TOKEN)'],
+  email: ['Email', 'Email'],
+  password: ['Mot de passe', 'Password'],
+  totpCode: ['Code de l’application d’authentification', 'Authenticator app code'],
+  useToken: ['Utiliser le jeton de secours', 'Use the recovery token'],
+  useAccount: ['Se connecter avec un compte', 'Sign in with an account'],
+  wrongCredentials: ['Email, mot de passe ou code incorrect', 'Wrong email, password or code'],
+  tabAdmins: ['Administrateurs', 'Administrators'],
+  adminsTitle: ['Administrateurs', 'Administrators'],
+  adminsHint: ['Lecteur : consulter. Opérateur : lancer synchronisations, sauvegardes et tests. Propriétaire : tout, dont réglages, nœuds, secrets et restaurations.', 'Viewer: read only. Operator: run syncs, backups and tests. Owner: everything, including settings, nodes, secrets and restores.'],
+  roleViewer: ['Lecteur', 'Viewer'],
+  roleOperator: ['Opérateur', 'Operator'],
+  roleOwner: ['Propriétaire', 'Owner'],
+  tempPassword: ['Mot de passe provisoire (12 caractères min.)', 'Temporary password (12+ characters)'],
+  add: ['Ajouter', 'Add'],
+  myAccount: ['Mon compte', 'My account'],
+  newPassword: ['Nouveau mot de passe', 'New password'],
+  changePassword: ['Changer le mot de passe', 'Change password'],
+  reauthTitle: ['Confirmez votre identité', 'Confirm it’s you'],
+  reauthHint: ['Cette action est sensible : ressaisissez votre mot de passe.', 'This action is sensitive: enter your password again.'],
+  cancel: ['Annuler', 'Cancel'],
+  confirm: ['Confirmer', 'Confirm'],
+  breakGlassWarning: ['Le jeton de secours ADMIN_TOKEN est encore actif alors que des comptes existent. Une fois un propriétaire créé, passez ADMIN_TOKEN=disabled.', 'The ADMIN_TOKEN recovery token is still active while accounts exist. Once an owner exists, set ADMIN_TOKEN=disabled.'],
   signIn: ['Se connecter', 'Sign in'],
   general: ['Général', 'General'],
   publicUrl: ['Adresse publique', 'Public address'],
@@ -135,10 +157,11 @@ let token = sessionStorage.getItem(TOKEN_KEY) ?? '';
 
 document.documentElement.lang = fr ? 'fr' : 'en';
 document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); });
 $('limits').innerHTML = LIMITS.map(([key, labels]) => `
   <div><label for="limit-${key}">${labels[fr ? 0 : 1]}</label><input id="limit-${key}" type="number" min="1" required></div>`).join('');
 
-async function api(method, path, body) {
+async function api(method, path, body, retried = false) {
   const response = await fetch(`/api/v1/admin/${path}`, {
     method,
     headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
@@ -147,11 +170,65 @@ async function api(method, path, body) {
   if (response.status === 204) return null;
   const json = await response.json().catch(() => null);
   if (!response.ok) {
+    // Action sensible : on redemande le mot de passe, puis on rejoue une seule fois
+    if (json?.error?.code === 'reauth_required' && !retried && await askReauth()) return api(method, path, body, true);
     const error = new Error(json?.error?.message ?? `HTTP ${response.status}`);
     error.status = response.status;
+    error.code = json?.error?.code;
     throw error;
   }
   return json;
+}
+
+/** Demande le mot de passe (et le code 2FA si besoin) ; vrai si la reconfirmation a réussi */
+function askReauth() {
+  const dialog = $('reauth-dialog');
+  const form = $('reauth-form');
+  const error = $('reauth-error');
+  const totp = $('reauth-totp');
+  error.hidden = true;
+  $('reauth-password').value = '';
+  totp.value = '';
+  totp.hidden = !me?.totpEnabled;
+  dialog.showModal();
+  $('reauth-password').focus();
+  return new Promise(resolve => {
+    const close = ok => {
+      form.removeEventListener('submit', submit);
+      $('reauth-cancel').removeEventListener('click', cancel);
+      dialog.close();
+      resolve(ok);
+    };
+    const cancel = () => close(false);
+    const submit = async event => {
+      event.preventDefault();
+      const response = await fetch('/api/v1/admin/reauth', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: $('reauth-password').value, totp: totp.value || undefined })
+      });
+      if (response.ok) return close(true);
+      const json = await response.json().catch(() => null);
+      if (json?.error?.code === 'totp_required') totp.hidden = false;
+      error.textContent = json?.error?.message ?? t('wrongCredentials');
+      error.hidden = false;
+    };
+    form.addEventListener('submit', submit);
+    $('reauth-cancel').addEventListener('click', cancel);
+  });
+}
+
+/* ── Rôle de l'administrateur connecté ─────────────────────────────────── */
+let me = null;
+const PERMISSIONS = { viewer: ['view'], operator: ['view', 'operate'], owner: ['view', 'operate', 'manage'] };
+const can = permission => !!me && PERMISSIONS[me.role]?.includes(permission);
+
+/** Ce que le rôle ne permet pas n'est pas proposé : pas de bouton qui mène à un refus */
+function applyRole() {
+  document.querySelectorAll('[data-requires]').forEach(el => { el.hidden = !can(el.dataset.requires); });
+  document.querySelectorAll('#settings-form input, #settings-form select, #settings-form textarea, #save-bar button')
+    .forEach(el => { el.disabled = !can('manage'); });
+  $('break-glass-warning').hidden = !(me?.breakGlassActive && me.accounts > 0);
 }
 
 const formatBytes = bytes => bytes < 1048576 ? `${(bytes / 1024).toFixed(0)} Ko` : `${(bytes / 1048576).toFixed(1)} Mo`;
@@ -201,6 +278,8 @@ function fill({ settings }) {
 
 async function load() {
   try {
+    me = await api('GET', 'me');
+    applyRole();
     fill(await api('GET', 'settings'));
     $('login-card').hidden = true;
     $('dashboard').hidden = false;
@@ -219,15 +298,43 @@ async function load() {
   }
 }
 
+let tokenMode = false;
+$('login-mode').addEventListener('click', () => {
+  tokenMode = !tokenMode;
+  $('login-account').hidden = tokenMode;
+  $('login-token-row').hidden = !tokenMode;
+  $('login-mode').textContent = t(tokenMode ? 'useAccount' : 'useToken');
+});
+
 $('login-form').addEventListener('submit', async event => {
   event.preventDefault();
   $('login-error').hidden = true;
-  token = $('token').value.trim();
+  if (tokenMode) {
+    token = $('token').value.trim();
+  } else {
+    const response = await fetch('/api/v1/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: $('login-email').value, password: $('login-password').value, totp: $('login-totp').value || undefined })
+    });
+    const json = await response.json().catch(() => null);
+    if (!response.ok) {
+      if (json?.error?.code === 'totp_required') {
+        $('login-totp-row').hidden = false;
+        $('login-totp').focus();
+      }
+      $('login-error').textContent = json?.error?.message ?? t('wrongCredentials');
+      $('login-error').hidden = false;
+      return;
+    }
+    token = json.token;
+  }
   sessionStorage.setItem(TOKEN_KEY, token);
   await load();
 });
 
-$('logout').addEventListener('click', () => {
+$('logout').addEventListener('click', async () => {
+  await fetch('/api/v1/admin/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
   sessionStorage.removeItem(TOKEN_KEY);
   location.reload();
 });
@@ -366,7 +473,125 @@ document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', (
   $('save-bar').hidden = !FORM_TABS.has(name);
   if (name === 'overview') void loadOverview();
   if (name === 'audit') void loadAudit();
+  if (name === 'admins') void loadAdmins();
 }));
+
+/* ── Administrateurs ───────────────────────────────────────────────────── */
+const ROLE_LABEL = { viewer: 'roleViewer', operator: 'roleOperator', owner: 'roleOwner' };
+
+async function loadAdmins() {
+  $('my-account-line').textContent = me?.breakGlass
+    ? t('token')
+    : `${me?.email ?? ''} · ${t(ROLE_LABEL[me?.role] ?? 'roleViewer')}`;
+  $('my-password').hidden = !!me?.breakGlass;
+  renderMyTotp();
+  if (!can('manage')) return;
+  const { accounts } = await api('GET', 'accounts');
+  $('admin-list').innerHTML = accounts.map(a => `
+    <li class="admin-row${a.disabled ? ' disabled' : ''}" data-id="${escapeHtml(a.id)}">
+      <div class="admin-who">
+        <strong>${escapeHtml(a.email)}</strong>
+        <span class="hint">${a.totpEnabled ? '2FA ✓' : (fr ? 'Sans 2FA' : 'No 2FA')}${a.disabled ? ` · ${fr ? 'désactivé' : 'disabled'}` : ''}${a.lastLoginAt ? ` · ${new Date(a.lastLoginAt).toLocaleString(locale)}` : ''}</span>
+      </div>
+      <div class="admin-actions">
+        <select data-role aria-label="${escapeHtml(t('tabAdmins'))}">
+          ${['viewer', 'operator', 'owner'].map(r => `<option value="${r}" ${a.role === r ? 'selected' : ''}>${t(ROLE_LABEL[r])}</option>`).join('')}
+        </select>
+        <button class="btn" type="button" data-toggle>${a.disabled ? (fr ? 'Réactiver' : 'Enable') : (fr ? 'Désactiver' : 'Disable')}</button>
+        ${a.totpEnabled ? `<button class="btn ghost" type="button" data-reset-totp>${fr ? 'Réinitialiser la 2FA' : 'Reset 2FA'}</button>` : ''}
+        <button class="btn danger" type="button" data-delete>${fr ? 'Supprimer' : 'Delete'}</button>
+      </div>
+    </li>`).join('');
+}
+
+$('admin-list').addEventListener('change', async event => {
+  const select = event.target.closest('[data-role]');
+  if (!select) return;
+  const id = select.closest('[data-id]').dataset.id;
+  try {
+    await api('PATCH', `accounts/${id}`, { role: select.value });
+  } catch (err) {
+    alert(err.message);
+  }
+  void loadAdmins();
+});
+
+$('admin-list').addEventListener('click', async event => {
+  const row = event.target.closest('[data-id]');
+  if (!row) return;
+  const id = row.dataset.id;
+  try {
+    if (event.target.closest('[data-toggle]')) await api('PATCH', `accounts/${id}`, { disabled: !row.classList.contains('disabled') });
+    else if (event.target.closest('[data-reset-totp]')) await api('PATCH', `accounts/${id}`, { resetTotp: true });
+    else if (event.target.closest('[data-delete]')) {
+      if (!confirm(fr ? 'Supprimer cet administrateur ?' : 'Delete this administrator?')) return;
+      await api('DELETE', `accounts/${id}`);
+    } else return;
+  } catch (err) {
+    alert(err.message);
+  }
+  void loadAdmins();
+});
+
+$('admin-add').addEventListener('submit', async event => {
+  event.preventDefault();
+  try {
+    await api('POST', 'accounts', { email: $('admin-add-email').value, password: $('admin-add-password').value, role: $('admin-add-role').value });
+    $('admin-add').reset();
+    setStatus($('admin-add-status'), fr ? 'Administrateur ajouté. Transmettez-lui le mot de passe provisoire par un canal sûr.' : 'Administrator added. Share the temporary password over a safe channel.', 'ok');
+    me = await api('GET', 'me');
+    applyRole();
+    void loadAdmins();
+  } catch (err) {
+    setStatus($('admin-add-status'), err.message, 'fail');
+  }
+});
+
+$('my-password').addEventListener('submit', async event => {
+  event.preventDefault();
+  try {
+    await api('POST', 'password', { password: $('my-password-new').value });
+    $('my-password').reset();
+    setStatus($('my-status'), fr ? 'Mot de passe changé. Vos autres sessions sont fermées.' : 'Password changed. Your other sessions are closed.', 'ok');
+  } catch (err) {
+    setStatus($('my-status'), err.message, 'fail');
+  }
+});
+
+function renderMyTotp() {
+  const host = $('my-totp');
+  if (me?.breakGlass) { host.innerHTML = ''; return; }
+  if (me?.totpEnabled) {
+    host.innerHTML = `<p class="status ok">${fr ? 'Double authentification activée' : 'Two-factor authentication on'}</p>`;
+    return;
+  }
+  host.innerHTML = `<button class="btn" type="button" id="totp-start">${fr ? 'Activer la double authentification' : 'Turn on two-factor authentication'}</button>`;
+  $('totp-start').addEventListener('click', async () => {
+    try {
+      const { secret, uri } = await api('POST', 'totp/setup', {});
+      host.innerHTML = `
+        <p class="hint">${fr ? 'Ajoutez cette clé dans votre application (Aegis, 2FAS…), puis saisissez le code affiché.' : 'Add this key to your app (Aegis, 2FAS…), then enter the code shown.'}</p>
+        <code class="secret">${escapeHtml(secret)}</code>
+        <a class="hint" href="${escapeHtml(uri)}">${fr ? 'Ouvrir dans l’application' : 'Open in the app'}</a>
+        <form id="totp-confirm" class="admin-add">
+          <input id="totp-code" inputmode="numeric" maxlength="6" required autocomplete="one-time-code" placeholder="000000">
+          <button class="btn primary" type="submit">${fr ? 'Activer' : 'Enable'}</button>
+        </form>`;
+      $('totp-confirm').addEventListener('submit', async e => {
+        e.preventDefault();
+        try {
+          await api('POST', 'totp/enable', { code: $('totp-code').value });
+          me = await api('GET', 'me');
+          renderMyTotp();
+        } catch (err) {
+          setStatus($('my-status'), err.message, 'fail');
+        }
+      });
+    } catch (err) {
+      setStatus($('my-status'), err.message, 'fail');
+    }
+  });
+}
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 const locale = fr ? 'fr-FR' : 'en-GB';

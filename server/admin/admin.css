@@ -194,3 +194,28 @@ table.audit.compact td, table.audit.compact th { padding: 4px 6px; }
 .price-row > div { margin: 0; }
 .price-row label { margin-top: 0; }
 .price-row [data-remove-price] { flex: 0 0 auto; padding: 8px 12px; }
+
+/* ── Comptes administrateurs ───────────────────────────────────────── */
+.stack { display: flex; flex-direction: column; gap: 8px; }
+.row-end { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.btn.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: none; }
+.notice { padding: 10px 14px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent); background: color-mix(in srgb, var(--danger) 10%, transparent); font-size: 13px; }
+.admin-list { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.admin-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.admin-row.disabled { opacity: .6; }
+.admin-who { display: flex; flex-direction: column; min-width: 0; }
+.admin-who strong { overflow-wrap: anywhere; }
+.admin-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.admin-add { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.admin-add input, .admin-add select { flex: 1 1 180px; min-width: 0; }
+code.secret { display: block; margin: 8px 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; letter-spacing: 1px; overflow-wrap: anywhere; user-select: all; }
+dialog.card { max-width: min(420px, calc(100vw - 32px)); padding: 20px; color: inherit; }
+dialog::backdrop { background: rgba(0, 0, 0, .55); }
+/* Au doigt : des cibles confortables, les actions passent sous le nom */
+@media (pointer: coarse) {
+  .admin-actions .btn, .admin-actions select, .admin-add .btn, .admin-add input, .admin-add select { min-height: 42px; }
+}
+@media (max-width: 560px) {
+  .admin-actions { width: 100%; }
+  .admin-actions > * { flex: 1 1 auto; }
+}

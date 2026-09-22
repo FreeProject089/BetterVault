@@ -29,6 +29,7 @@ import { billingRoutes, createLimitsResolver } from './billing.ts';
 import { LEGAL_DOCUMENTS, legalConfigured, legalTitle, renderLegalPage } from './legal.ts';
 import { renderNotMePage, renderNotMeDone, renderNotMeExpired } from './securityAlert.ts';
 import { clusterRoutes, createClusterSync, installClusterSchema, type ClusterConfig, type ClusterSync } from './cluster.ts';
+import { createAdminAuth, type AdminPermission } from './adminAuth.ts';
 import { analytics, createAudit, type Metrics } from './metrics.ts';
 import { describeUserAgent, truncateIp, type GeoLookup } from './geoip.ts';
 import { route } from './context.ts';
@@ -341,16 +342,18 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     mailerFactory(settings.smtp).send(message).catch(err => console.error(`Email non envoyé à ${user.email} :`, err instanceof Error ? err.message : err));
   };
 
-  const requireAdmin = (req: IncomingMessage) => {
-    limit(req, 'admin');
-    if (!options.adminTokenHash) throw new HttpError(404, 'not_found', 'Route inconnue');
-    const match = /^Bearer (.{16,200})$/.exec(req.headers.authorization ?? '');
-    const provided = Buffer.from(match ? sha256(match[1]) : '', 'base64');
-    const expected = Buffer.from(options.adminTokenHash, 'base64');
-    if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
-      throw new HttpError(401, 'unauthorized', 'Jeton d’administration incorrect');
-    }
-  };
+  /*
+   * Administration : comptes avec rôles (adminAuth.ts). Le jeton ADMIN_TOKEN reste
+   * un accès de secours de propriétaire. `sensitive` exige une reconfirmation récente.
+   */
+  const adminAuth = createAdminAuth({
+    db,
+    breakGlassHash: options.adminTokenHash ?? null,
+    now,
+    limit: (req, bucket) => limit(req, bucket),
+    audit: (type, detail) => audit(type, detail)
+  });
+  const requireAdmin = (req: IncomingMessage, permission: AdminPermission = 'view', sensitive = false) => adminAuth.require(req, permission, sensitive);
 
   const emailCodeHash = (userId: string, code: string) => createHmac('sha256', serverSecret).update(`email-code:${userId}:${code}`).digest('base64');
 
@@ -744,7 +747,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     },
 
     'PUT /api/v1/admin/settings': async req => {
-      requireAdmin(req);
+      requireAdmin(req, 'manage', true);
       const body = await readJson(req, 16 * 1024);
       try {
         settings = parseSettingsUpdate(body, settings);
@@ -757,7 +760,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     },
 
     'POST /api/v1/admin/smtp-test': async req => {
-      requireAdmin(req);
+      requireAdmin(req, 'operate');
       const body = await readJson(req, 4096);
       const to = parseEmail(body.to);
       if (!settings.smtp) throw new HttpError(400, 'smtp_disabled', 'Configurez d’abord le serveur SMTP');
@@ -801,7 +804,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
   });
   const legalDir = options.legalDir ?? fileURLToPath(new URL('../legal', import.meta.url));
 
-  Object.assign(routes, accountKeyRoutes(context), sessionRoutes(context), billingRoutes(context, fetchImpl), avatarRoutes(context), {
+  Object.assign(routes, adminAuth.routes, accountKeyRoutes(context), sessionRoutes(context), billingRoutes(context, fetchImpl), avatarRoutes(context), {
     // Consultable sans session : l'application interroge ce serveur avant même
     // de proposer la création d'un compte, pour savoir s'il y a des conditions à accepter.
     'GET /api/v1/legal': async (req: IncomingMessage): Promise<Reply> => {
@@ -848,7 +851,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       };
     },
     'POST /api/v1/admin/cluster/sync': async (req: IncomingMessage): Promise<Reply> => {
-      requireAdmin(req);
+      requireAdmin(req, 'operate');
       if (!cluster) throw new HttpError(404, 'cluster_disabled', 'Ce serveur ne fait pas partie d’une grappe');
       await cluster.syncNow();
       return { status: 200, body: { peers: cluster.status() } };
@@ -859,7 +862,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       return { status: 200, body: { events: rows.map(r => ({ ...r, detail: JSON.parse(r.detail) })) } };
     },
     'POST /api/v1/admin/backup/download': async (req: IncomingMessage): Promise<Reply> => {
-      requireAdmin(req);
+      requireAdmin(req, 'manage', true);
       const passphrase = String((await readJson(req, 2048)).passphrase ?? '');
       if (passphrase.length < 12) throw new HttpError(400, 'weak_passphrase', 'Phrase de chiffrement de 12 caractères minimum');
       const payload = encryptBackup(databaseSnapshot(db), passphrase);
@@ -874,7 +877,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       };
     },
     'POST /api/v1/admin/backup/run': async (req: IncomingMessage): Promise<Reply> => {
-      requireAdmin(req);
+      requireAdmin(req, 'operate');
       if (!backup) throw new HttpError(503, 'backup_unavailable', 'Sauvegardes indisponibles sur ce serveur');
       try {
         const run = await backup.runNow('manual');
@@ -885,7 +888,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       }
     },
     'POST /api/v1/admin/backup/test': async (req: IncomingMessage): Promise<Reply> => {
-      requireAdmin(req);
+      requireAdmin(req, 'operate');
       if (!backup) throw new HttpError(503, 'backup_unavailable', 'Sauvegardes indisponibles sur ce serveur');
       try {
         await backup.test();
@@ -931,6 +934,8 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
 
   const patternRoutes: PatternRoute[] = [
     ...(clusterConfig ? clusterRoutes({ db, config: clusterConfig, filesDir: options.filesDir ?? null, now }) : []),
+    route('PATCH', '/api/v1/admin/accounts/:id', async (req, params) => adminAuth.updateAccount(req, params.id, 'PATCH')),
+    route('DELETE', '/api/v1/admin/accounts/:id', async (req, params) => adminAuth.updateAccount(req, params.id, 'DELETE')),
     ...sharingRoutes(context),
     ...attachmentRoutes(context),
     route('GET', '/security/not-me/:token', async (_req, params) => {
