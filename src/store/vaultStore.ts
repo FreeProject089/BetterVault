@@ -342,6 +342,12 @@ export class VaultStore {
     this.emit();
   }
 
+  /** Adopte le résultat d'un import complet (qui ajoute sans rien écraser), puis l'enregistre */
+  adoptImport(data: UnlockedVaultData): void {
+    this.data = normalizeVaultData(data);
+    this.commit();
+  }
+
   unload(): void {
     this.data = createEmptyVaultData();
     this.loaded = false;

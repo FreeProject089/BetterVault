@@ -18,7 +18,8 @@ import {
 } from './crypto/vaultCrypto';
 import { exportVaultAsJson, exportVaultAsCsv, downloadExportFile } from './import_export/importEngine';
 import { parseImportData, PasswordRequiredError, ImportSecrets } from './import_export/importRouter';
-import { encryptExport, MIN_EXPORT_PASSWORD_LENGTH } from './import_export/encryptedExport';
+import { decryptExport, encryptExport, isEncryptedExport, MIN_EXPORT_PASSWORD_LENGTH } from './import_export/encryptedExport';
+import { applyImport, buildFullBackup, isFullBackup, planImport, type FullBackup, type ImportPlan, type ImportTarget } from './import_export/fullBackup';
 import {
   collectTwoFactor,
   exportAsUriList,
@@ -4147,6 +4148,7 @@ class AppController {
           <div class="ie-group-title">${tr('Chiffré', 'Encrypted')}</div>
           <div class="ie-export-list">
             ${exportItem('encrypted', bvLogo, tr('BetterVault chiffré', 'Encrypted BetterVault'), tr('Protégé par un mot de passe dédié · Argon2id et AES-256-GCM', 'Protected by a dedicated password · Argon2id and AES-256-GCM'), { label: tr('Recommandé', 'Recommended'), safe: true })}
+            ${exportItem('full', bvLogo, tr('Tout le compte, fichiers compris', 'The whole account, files included'), tr('Tous les coffres et pièces jointes, chiffrés · pour changer de compte ou de serveur', 'Every vault and attachment, encrypted · to move to another account or server'))}
             ${exportItem('kdbx', brand('keepassxc'), tr('Base KeePass (.kdbx)', 'KeePass database (.kdbx)'), 'KeePass, KeePassXC, Strongbox')}
           </div>
           <div id="export-password-panel" class="form-section" hidden>
@@ -4222,7 +4224,7 @@ class AppController {
     const exportPwdConfirm = $<HTMLInputElement>('#export-password-confirm');
     const exportStatus = $<HTMLElement>('#export-password-status');
     const exportConfirmBtn = $<HTMLButtonElement>('#btn-export-password-confirm');
-    let protectedExportMode: 'encrypted' | 'kdbx' = 'encrypted';
+    let protectedExportMode: 'encrypted' | 'kdbx' | 'full' = 'encrypted';
 
     const setExportStatus = (text: string, error = false) => {
       exportStatus.textContent = text;
@@ -4232,7 +4234,7 @@ class AppController {
     box.querySelectorAll<HTMLButtonElement>('[data-export]').forEach(button => {
       button.addEventListener('click', async () => {
         const kind = button.dataset.export;
-        if (kind === 'encrypted' || kind === 'kdbx') {
+        if (kind === 'encrypted' || kind === 'kdbx' || kind === 'full') {
           const reopen = exportPanel.hidden || protectedExportMode !== kind;
           box.querySelectorAll('[data-export]').forEach(b => b.setAttribute('aria-expanded', 'false'));
           if (!reopen) {
@@ -4243,7 +4245,9 @@ class AppController {
           button.setAttribute('aria-expanded', 'true');
           $<HTMLElement>('#export-password-title').textContent = kind === 'encrypted'
             ? tr('Mot de passe de l’export', 'Export password')
-            : tr('Mot de passe de la base KeePass', 'KeePass database password');
+            : kind === 'full'
+              ? tr('Mot de passe de la sauvegarde complète', 'Full backup password')
+              : tr('Mot de passe de la base KeePass', 'KeePass database password');
           button.parentElement?.insertAdjacentElement('afterend', exportPanel);
           setExportStatus('');
           exportPanel.hidden = false;
@@ -4296,6 +4300,24 @@ class AppController {
         if (protectedExportMode === 'encrypted') {
           const file = await encryptExport(exportVaultAsJson(creds, tasks), exportPwd.value);
           downloadExportFile(file, `bettervault-${exportDate}.encrypted.json`, 'application/json');
+        } else if (protectedExportMode === 'full') {
+          // Les fichiers restent chiffrés avec leur propre clé ; le tout est chiffré une seconde fois par ce mot de passe
+          const { backup, problems } = await buildFullBackup(vaultStore.getData(), {
+            canExport: vault => sharedVaults.can(vault.id, 'export'),
+            fetchPayload: meta => accountService.withCloud(client => client.downloadAttachment(meta.id)),
+            onProgress: (done, total) => setExportStatus(tr(`Fichiers : ${done} / ${total}`, `Files: ${done} / ${total}`))
+          });
+          setExportStatus(tr('Chiffrement…', 'Encrypting…'));
+          const file = await encryptExport(JSON.stringify(backup), exportPwd.value);
+          downloadExportFile(file, `bettervault-complet-${exportDate}.encrypted.json`, 'application/json');
+          if (problems.length) {
+            const vaultsDenied = problems.filter(p => p.vault).map(p => p.vault as string);
+            const filesLost = problems.filter(p => p.file).length;
+            this.showToast([
+              vaultsDenied.length ? tr(`Coffres partagés non exportés (votre rôle ne le permet pas) : ${vaultsDenied.join(', ')}`, `Shared vaults not exported (your role does not allow it): ${vaultsDenied.join(', ')}`) : '',
+              filesLost ? tr(`${filesLost} fichier(s) illisible(s) sur le serveur, non inclus`, `${filesLost} file(s) unreadable on the server, not included`) : ''
+            ].filter(Boolean).join(' · '), 'error', 8000);
+          }
         } else {
           const kdbx = await buildKdbx4(creds, exportPwd.value, { databaseName: activeVaultName });
           downloadExportFile(kdbx, `bettervault-${exportDate}.kdbx`, 'application/octet-stream');
@@ -4325,6 +4347,8 @@ class AppController {
     const unlockBtn = $<HTMLButtonElement>('#btn-import-unlock');
 
     let pendingFile: { bytes: Uint8Array; name: string } | null = null;
+    /** Sauvegarde complète prête à importer, avec ce qui tiendra sur ce compte */
+    let fullReady: { backup: FullBackup; plan: ImportPlan } | null = null;
     let ready: { credentials: Partial<CredentialItem>[]; tasks: Partial<Task>[] } | null = null;
     /** Vrai quand la source choisie est « Codes 2FA seuls » : la lecture ne passe pas par les formats habituels */
     let sourceTotp = false;
@@ -4406,10 +4430,102 @@ class AppController {
     });
     $<HTMLButtonElement>('[data-action="change-source"]').addEventListener('click', showSources);
 
+    /** Ce compte peut-il recevoir la sauvegarde ? Calculé d'après ce que le serveur annonce */
+    const importTarget = async (): Promise<ImportTarget> => {
+      const cloud = accountService.isCloud();
+      const usage = cloud ? await accountService.getAttachmentUsage().catch(() => null) : null;
+      const limits = accountService.getLimits();
+      const data = vaultStore.getData();
+      const inlineUsed = data.credentials.reduce((total, c) => total + localAttachmentBytes(c.attachments), 0);
+      return {
+        serverFiles: !!usage?.enabled,
+        maxFileBytes: usage?.maxFileBytes ?? 0,
+        freeBytes: usage ? Math.max(0, usage.quotaBytes - usage.usedBytes) : 0,
+        inlineMaxBytes: MAX_LOCAL_ATTACHMENT_BYTES,
+        inlineBudgetBytes: Math.max(0, Math.floor(limits.maxVaultBytes / 2) - inlineUsed),
+        vaultSlots: limits.maxVaults - data.vaults.length
+      };
+    };
+
+    const showFullPlan = async (backup: FullBackup) => {
+      const plan = planImport(backup, await importTarget());
+      const limits = accountService.getLimits();
+      const mb = (bytes: number) => formatFileSize(bytes);
+      const inlineBytes = plan.files.filter(f => f.destination === 'vault').reduce((n, f) => n + Math.ceil(f.bytes * 4 / 3), 0);
+      const { files: _files, ...withoutFiles } = backup;
+      const projected = JSON.stringify(vaultStore.getData()).length + JSON.stringify(withoutFiles.data).length + inlineBytes;
+      const refused = plan.files.filter(f => f.destination === 'refused');
+      const byReason = (reason: string) => refused.filter(f => f.reason === reason);
+      const origin = backup.source?.server ? ` · ${this.escapeHtml(backup.source.server)}` : '';
+
+      const summary = `<div class="notice ${plan.complete ? 'notice-success' : 'notice-warning'}">
+        <strong>${tr('Sauvegarde complète', 'Full backup')}</strong> ${tr('du', 'from')} ${this.escapeHtml(new Date(backup.exportedAt).toLocaleString(this.tr('fr-FR', 'en-GB')))}${origin}<br>
+        ${tr(`${plan.vaults} coffre(s), ${plan.credentials} identifiant(s), ${plan.tasks} tâche(s), ${plan.files.length} fichier(s)`, `${plan.vaults} vault(s), ${plan.credentials} credential(s), ${plan.tasks} task(s), ${plan.files.length} file(s)`)}
+      </div>`;
+
+      if (projected > limits.maxVaultBytes) {
+        fullReady = null;
+        confirmBtn.disabled = true;
+        setStatus(`${summary}<div class="notice notice-danger" style="margin-top:8px;"><strong>${tr('Trop volumineux pour ce compte', 'Too large for this account')}</strong> · ${tr(
+          `le coffre ferait environ ${mb(projected)}, la limite de ce compte est ${mb(limits.maxVaultBytes)}. Passez à une offre supérieure, videz la corbeille ou importez dans un compte vide.`,
+          `the vault would be about ${mb(projected)}, this account’s limit is ${mb(limits.maxVaultBytes)}. Upgrade your plan, empty the trash or import into an empty account.`)}</div>`);
+        return;
+      }
+
+      const lines: string[] = [];
+      if (plan.vaultsOverLimit) lines.push(tr(`${plan.vaultsOverLimit} coffre(s) de trop : ce compte en accepte ${limits.maxVaults}. Les derniers ne seront pas créés.`, `${plan.vaultsOverLimit} vault(s) too many: this account accepts ${limits.maxVaults}. The last ones will not be created.`));
+      if (byReason('no_files').length) lines.push(tr(`${byReason('no_files').length} fichier(s) : ce serveur ne garde pas de fichiers, et ils dépassent ${mb(MAX_LOCAL_ATTACHMENT_BYTES)} pour tenir dans le coffre.`, `${byReason('no_files').length} file(s): this server keeps no files, and they exceed ${mb(MAX_LOCAL_ATTACHMENT_BYTES)} to fit in the vault.`));
+      if (byReason('too_large').length) lines.push(tr(`${byReason('too_large').length} fichier(s) dépassent la taille maximale de ce serveur.`, `${byReason('too_large').length} file(s) exceed this server’s maximum size.`));
+      if (byReason('no_space').length) lines.push(plan.availableServerBytes || accountService.isCloud()
+        ? tr(`${byReason('no_space').length} fichier(s) sans place : ${mb(plan.requiredServerBytes)} requis, ${mb(plan.availableServerBytes)} disponibles.`, `${byReason('no_space').length} file(s) without room: ${mb(plan.requiredServerBytes)} required, ${mb(plan.availableServerBytes)} available.`)
+        : tr(`${byReason('no_space').length} fichier(s) ne tiennent plus dans le coffre.`, `${byReason('no_space').length} file(s) no longer fit in the vault.`));
+
+      const where = plan.files.filter(f => f.destination !== 'refused');
+      fullReady = { backup, plan };
+      confirmBtn.disabled = false;
+      setStatus(`${summary}
+        ${where.length ? `<p class="field-hint" style="margin-top:8px;">${tr(`${where.length} fichier(s) seront ${plan.files.some(f => f.destination === 'server') ? 'envoyés chiffrés sur le serveur' : 'gardés dans le coffre chiffré'}.`, `${where.length} file(s) will be ${plan.files.some(f => f.destination === 'server') ? 'uploaded encrypted to the server' : 'kept inside the encrypted vault'}.`)}</p>` : ''}
+        ${lines.length ? `<div class="notice notice-warning" style="margin-top:8px;">
+          <strong>${tr('Tout ne tiendra pas', 'Not everything will fit')}</strong>
+          <ul style="margin:6px 0 6px 18px;">${lines.map(l => `<li>${l}</li>`).join('')}</ul>
+          ${tr('Solutions : une offre supérieure, libérer de la place, un autre serveur qui accepte les fichiers, ou votre propre serveur. Vous pouvez aussi importer sans ce qui dépasse : rien n’est perdu, tout reste dans le fichier de sauvegarde.',
+               'Options: a higher plan, freeing up space, another server that accepts files, or your own server. You can also import without what doesn’t fit: nothing is lost, it all stays in the backup file.')}
+        </div>` : ''}
+        <p class="field-hint" style="margin-top:8px;">${tr('Tout est ajouté à côté de ce que contient déjà ce compte : rien n’est remplacé.', 'Everything is added next to what this account already holds: nothing is replaced.')}</p>`);
+      confirmBtn.focus();
+    };
+
+    /** Reconnaît une sauvegarde complète, chiffrée ou non ; null si le fichier est d'un autre type */
+    const readFullBackup = async (bytes: Uint8Array, password?: string): Promise<FullBackup | 'password' | null> => {
+      let json: unknown;
+      try {
+        json = JSON.parse(new TextDecoder().decode(bytes));
+      } catch {
+        return null;
+      }
+      if (isFullBackup(json)) return json;
+      if (!isEncryptedExport(json)) return null;
+      if (!password) return 'password';
+      try {
+        const inner = JSON.parse(await decryptExport(json, password));
+        return isFullBackup(inner) ? inner : null;
+      } catch {
+        return null;
+      }
+    };
+
     const tryParse = async (secrets?: ImportSecrets) => {
       if (!pendingFile) return;
       confirmBtn.disabled = true;
       ready = null;
+      fullReady = null;
+      const full = await readFullBackup(pendingFile.bytes, secrets?.password);
+      if (full && full !== 'password') {
+        secretPanel.hidden = true;
+        secretPwd.value = '';
+        await showFullPlan(full);
+        return;
+      }
       if (secrets) setStatus(`<div class="field-hint">${tr('Déchiffrement…', 'Decrypting…')}</div>`);
       try {
         const parsed = await parseImportData(pendingFile.bytes, pendingFile.name, secrets);
@@ -4531,7 +4647,43 @@ ${uri}` : uri;
       if (file) void handleFile(file);
     });
 
-    confirmBtn.addEventListener('click', () => {
+    confirmBtn.addEventListener('click', async () => {
+      if (fullReady) {
+        const { backup, plan } = fullReady;
+        confirmBtn.disabled = true;
+        try {
+          const result = await applyImport(backup, plan, vaultStore.getData(), {
+            // Un envoi qui échoue est retenté : une coupure brève ne fait pas perdre le fichier
+            upload: async payload => {
+              for (let attempt = 1; ; attempt++) {
+                try {
+                  return await accountService.withCloud(client => client.uploadAttachment(payload));
+                } catch (err) {
+                  if (attempt >= 3) throw err;
+                  await new Promise(resolve => setTimeout(resolve, attempt * 1500));
+                }
+              }
+            },
+            newId: prefix => randomId(prefix),
+            importedSuffix: tr('(importé)', '(imported)'),
+            onProgress: (done, total) => setStatus(`<div class="field-hint">${tr(`Envoi des fichiers : ${done} / ${total}`, `Uploading files: ${done} / ${total}`)}</div>`)
+          });
+          vaultStore.adoptImport(result.data);
+          pendingFile?.bytes.fill(0);
+          pendingFile = null;
+          fullReady = null;
+          this.closeModal();
+          const skipped = result.skippedFiles.length + result.skippedVaults.length;
+          this.showToast(tr(
+            `Importé : ${result.imported.vaults} coffre(s), ${result.imported.credentials} identifiant(s), ${result.imported.files} fichier(s)${skipped ? ` · ${skipped} élément(s) laissé(s) dans la sauvegarde` : ''}`,
+            `Imported: ${result.imported.vaults} vault(s), ${result.imported.credentials} credential(s), ${result.imported.files} file(s)${skipped ? ` · ${skipped} item(s) left in the backup` : ''}`), 'success', 6000);
+        } catch (err) {
+          // Rien n'est enregistré tant que tout n'est pas passé : on peut relancer sans doublon dans le coffre
+          setStatus(`<div class="notice notice-danger"><strong>${tr('Import interrompu', 'Import interrupted')}</strong> · ${this.escapeHtml(accountErrorMessage(err))}. ${tr('Le coffre n’a pas été modifié ; relancez l’import quand la connexion revient.', 'The vault was not changed; run the import again once the connection is back.')}</div>`);
+          confirmBtn.disabled = false;
+        }
+        return;
+      }
       if (!ready) return;
       const result = vaultStore.importBulk(ready.credentials, ready.tasks);
       pendingFile?.bytes.fill(0);
