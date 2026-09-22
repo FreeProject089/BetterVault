@@ -57,7 +57,7 @@ const metrics = createMetrics();
 
 const backupKey = process.env.BACKUP_ENCRYPTION_KEY || null;
 if (settings.backup.enabled && !backupKey) {
-  console.warn('Sauvegardes activées sans BACKUP_ENCRYPTION_KEY : les copies de la base ne seront pas chiffrées en plus.');
+  console.warn('Sauvegardes activées sans BACKUP_ENCRYPTION_KEY : aucune sauvegarde ne partira tant qu’elle n’est pas définie (une copie est toujours chiffrée avant de quitter le serveur).');
 }
 
 /**
@@ -98,7 +98,7 @@ const api = createApp({
   geo,
   metrics,
   dbPath,
-  backupFactory: getSettings => createBackupService({ db, filesDir, settings: getSettings, encryptionKey: backupKey })
+  backupFactory: getSettings => createBackupService({ db, filesDir, settings: getSettings, encryptionKey: backupKey, nodeId: () => (db.prepare("SELECT value FROM settings WHERE key = 'cluster_node'").get() as { value: string } | undefined)?.value ?? null })
 });
 
 const MIME_TYPES: Record<string, string> = {

@@ -23,7 +23,7 @@ import {
 import type { PatternRoute, RouteContext } from './context.ts';
 import { accountKeyRoutes, sharingRoutes } from './sharing.ts';
 import { attachmentRoutes, deleteUserAttachments } from './attachments.ts';
-import { databaseSnapshot, encryptBackup, type BackupService, type BackupSettings } from './backup.ts';
+import { databaseSnapshot, effectiveDestinations, encryptBackup, type BackupDestination, type BackupService, type BackupSettings } from './backup.ts';
 import { sessionRoutes } from './sessions.ts';
 import { billingRoutes, createLimitsResolver } from './billing.ts';
 import { LEGAL_DOCUMENTS, legalConfigured, legalTitle, renderLegalPage } from './legal.ts';
@@ -35,7 +35,7 @@ import { analytics, createAudit, type Metrics } from './metrics.ts';
 import { describeUserAgent, truncateIp, type GeoLookup } from './geoip.ts';
 import { route } from './context.ts';
 import type { DatabaseSync } from 'node:sqlite';
-import { parseSettingsUpdate, publicSettings, settingsFromEnv, type ServerSettings } from './config.ts';
+import { parseS3, parseSettingsUpdate, publicSettings, settingsFromEnv, type ServerSettings } from './config.ts';
 import { createSmtpMailer, type Mailer, type MailMessage, type SmtpConfig } from './mailer.ts';
 import { emails, pickLocale, type Locale } from './emails.ts';
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.ts';
@@ -815,7 +815,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
   const legalContext = () => ({
     legal: settings.legal,
     retentionDays: settings.backup.retentionDays,
-    backupsEnabled: settings.backup.enabled && !!settings.backup.s3,
+    backupsEnabled: settings.backup.enabled && effectiveDestinations(settings.backup).some(d => d.status === 'active'),
     emailEnabled: !!settings.smtp,
     billingEnabled: settings.billing.enabled,
     geoEnabled: geoAvailable(),
@@ -851,7 +851,10 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
           generatedAt: now(),
           analytics: analytics(db, { now: now(), filesDir: options.filesDir ?? null, dbPath: options.dbPath ?? null }),
           system: options.metrics?.snapshot() ?? null,
-          backups: { enabled: settings.backup.enabled, runs: backup?.history().slice(0, 5) ?? [] },
+          backups: (() => {
+            const view = backupView();
+            return { enabled: view.enabled, encrypted: view.encrypted, destinations: view.destinations.map(d => ({ name: d.name, health: d.health })), runs: view.runs.slice(0, 5) };
+          })(),
           security: {
             geoEnabled: geoAvailable(),
             emailEnabled: !!settings.smtp,
@@ -884,34 +887,6 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       audit('admin.backup_downloaded', { bytes: payload.length });
       return { status: 200, raw: payload, contentType: 'application/octet-stream' };
     },
-    'GET /api/v1/admin/backup': async (req: IncomingMessage): Promise<Reply> => {
-      requireAdmin(req);
-      return {
-        status: 200,
-        body: { available: !!backup, running: backup?.isRunning() ?? false, runs: backup?.history() ?? [], encrypted: !!options.backupFactory && process.env.BACKUP_ENCRYPTION_KEY !== undefined && process.env.BACKUP_ENCRYPTION_KEY !== '' }
-      };
-    },
-    'POST /api/v1/admin/backup/run': async (req: IncomingMessage): Promise<Reply> => {
-      requireAdmin(req, 'operate');
-      if (!backup) throw new HttpError(503, 'backup_unavailable', 'Sauvegardes indisponibles sur ce serveur');
-      try {
-        const run = await backup.runNow('manual');
-        audit('admin.backup_run', { status: run.status });
-        return { status: 200, body: run };
-      } catch (err) {
-        throw new HttpError(502, 'backup_failed', err instanceof Error ? err.message : String(err));
-      }
-    },
-    'POST /api/v1/admin/backup/test': async (req: IncomingMessage): Promise<Reply> => {
-      requireAdmin(req, 'operate');
-      if (!backup) throw new HttpError(503, 'backup_unavailable', 'Sauvegardes indisponibles sur ce serveur');
-      try {
-        await backup.test();
-      } catch (err) {
-        throw new HttpError(502, 'backup_test_failed', err instanceof Error ? err.message : String(err));
-      }
-      return { status: 204 };
-    }
   });
   const legalPage = (slug: string, req: IncomingMessage): Reply => {
     const lang = new URL(req.url ?? '/', 'http://localhost').searchParams.get('lang');
@@ -946,6 +921,211 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     raw: Buffer.from(html),
     contentType: 'text/html; charset=utf-8'
   });
+
+  /* ── Sauvegardes dans l'administration ─────────────────────────────────── */
+
+  const saveSettings = () => writeSetting.run('settings', JSON.stringify(settings));
+
+  /** Santé d'une destination : ce qu'un administrateur doit savoir sans lire de journal */
+  const backupView = () => {
+    const interval = settings.backup.intervalHours * 3_600_000;
+    const list = backup?.destinations() ?? effectiveDestinations(settings.backup).map(d => ({ ...d, state: null }));
+    return {
+      available: !!backup,
+      encrypted: !!process.env.BACKUP_ENCRYPTION_KEY,
+      enabled: settings.backup.enabled,
+      intervalHours: settings.backup.intervalHours,
+      retentionDays: settings.backup.retentionDays,
+      running: backup?.isRunning() ?? false,
+      destinations: list.map(d => {
+        const state = d.state;
+        const health = d.status !== 'active' ? d.status
+          : !state?.lastSuccessAt ? (state?.lastError ? 'error' : 'never')
+          : state.lastErrorAt && state.lastErrorAt > state.lastSuccessAt ? 'error'
+          : now() - state.lastSuccessAt > 2 * interval ? 'late' : 'ok';
+        const full = d.quotaBytes && state?.usedBytes ? state.usedBytes / d.quotaBytes : null;
+        return {
+          id: d.id, name: d.name, region: d.region, status: d.status, replacedBy: d.replacedBy ?? null, addedAt: d.addedAt,
+          endpoint: d.s3.endpoint, bucket: d.s3.bucket, prefix: d.s3.prefix, hasSecret: !!d.s3.secretAccessKey,
+          quotaBytes: d.quotaBytes ?? null, usage: full, health, state
+        };
+      }),
+      runs: backup?.history() ?? []
+    };
+  };
+
+  /** Toute modification passe d'abord l'ancienne destination unique en liste, pour ne pas la perdre */
+  const editDestinations = (change: (list: BackupDestination[]) => BackupDestination[]) => {
+    const list = effectiveDestinations(settings.backup).map(d => ({ ...d, s3: { ...d.s3 } }));
+    settings = { ...settings, backup: { ...settings.backup, s3: null, destinations: change(list) } };
+    saveSettings();
+  };
+
+  function backupAdminRoutes(): PatternRoute[] {
+    const need = () => {
+      if (!backup) throw new HttpError(503, 'backup_unavailable', 'Sauvegardes indisponibles sur ce serveur');
+      return backup;
+    };
+    const fail = (code: string, err: unknown) => new HttpError(502, code, err instanceof Error ? err.message : String(err));
+    const destinationFields = (body: Record<string, unknown>, previous?: BackupDestination) => {
+      const name = String(body.name ?? previous?.name ?? '').trim();
+      if (!/^[\p{L}\p{N} ._-]{1,40}$/u.test(name)) throw new HttpError(400, 'invalid_name', 'Nom de destination invalide (40 caractères au plus)');
+      let s3;
+      try {
+        s3 = body.s3 === undefined && previous ? previous.s3 : parseS3(body.s3 as never, previous?.s3.secretAccessKey ?? '');
+      } catch (err) {
+        throw new HttpError(400, 'invalid_s3', err instanceof Error ? err.message : String(err));
+      }
+      if (!s3 || !s3.accessKeyId || !s3.secretAccessKey) throw new HttpError(400, 'invalid_s3', 'Adresse, bucket, identifiant et secret S3 requis');
+      const quotaGb = body.quotaGb === undefined ? (previous?.quotaBytes ? previous.quotaBytes / 1e9 : 0) : Number(body.quotaGb);
+      return {
+        name,
+        region: String(body.region ?? previous?.region ?? s3.region).trim().slice(0, 30) || s3.region,
+        s3,
+        ...(Number.isFinite(quotaGb) && quotaGb > 0 ? { quotaBytes: Math.round(quotaGb * 1e9) } : {})
+      };
+    };
+
+    return [
+      route('GET', '/api/v1/admin/backup', async req => {
+        requireAdmin(req);
+        return { status: 200, body: backupView() };
+      }),
+
+      route('POST', '/api/v1/admin/backup/run', async req => {
+        const admin = requireAdmin(req, 'operate');
+        const body = await readJson(req, 1024);
+        try {
+          const runs = await need().runNow('manual', typeof body.destinationId === 'string' ? body.destinationId : undefined);
+          audit('admin.backup_run', { admin: admin.id, ok: runs.filter(r => r.status === 'success').length, failed: runs.filter(r => r.status === 'error').length });
+        } catch (err) {
+          throw fail('backup_failed', err);
+        }
+        return { status: 200, body: backupView() };
+      }),
+
+      route('POST', '/api/v1/admin/backup/test', async req => {
+        requireAdmin(req, 'operate');
+        const body = await readJson(req, 4096);
+        try {
+          if (body.s3) {
+            const s3 = parseS3(body.s3 as never, typeof body.destinationId === 'string'
+              ? effectiveDestinations(settings.backup).find(d => d.id === body.destinationId)?.s3.secretAccessKey ?? '' : '');
+            if (!s3) throw new Error('Adresse et bucket S3 requis');
+            await need().testConfig(s3);
+          } else {
+            await need().test(typeof body.destinationId === 'string' ? body.destinationId : undefined);
+          }
+        } catch (err) {
+          throw fail('backup_test_failed', err);
+        }
+        return { status: 204 };
+      }),
+
+      // Ajouter : la connexion est vérifiée avant d'enregistrer, pour ne pas garder une destination morte
+      route('POST', '/api/v1/admin/backup/destinations', async req => {
+        const admin = requireAdmin(req, 'manage', true);
+        const fields = destinationFields(await readJson(req, 8192));
+        try {
+          await need().testConfig(fields.s3);
+        } catch (err) {
+          throw fail('backup_test_failed', err);
+        }
+        const id = `dst-${randomBytes(6).toString('hex')}`;
+        editDestinations(list => [...list, { id, ...fields, status: 'active', addedAt: now() }]);
+        audit('admin.backup_destination_added', { admin: admin.id, destination: id });
+        return { status: 200, body: backupView() };
+      }),
+
+      route('PATCH', '/api/v1/admin/backup/destinations/:id', async (req, params) => {
+        const admin = requireAdmin(req, 'manage', true);
+        const body = await readJson(req, 8192);
+        const current = effectiveDestinations(settings.backup).find(d => d.id === params.id);
+        if (!current) throw new HttpError(404, 'not_found', 'Destination de sauvegarde inconnue');
+        if (current.status === 'revoked') throw new HttpError(409, 'revoked', 'Une destination révoquée ne se réactive pas : ajoutez-en une nouvelle');
+        const patch: Partial<BackupDestination> = {};
+        if (body.status !== undefined) {
+          if (body.status !== 'active' && body.status !== 'disabled') throw new HttpError(400, 'invalid_status', 'Statut invalide');
+          patch.status = body.status;
+        }
+        if (body.name !== undefined || body.region !== undefined || body.s3 !== undefined || body.quotaGb !== undefined) {
+          Object.assign(patch, destinationFields(body, current));
+        }
+        editDestinations(list => list.map(d => (d.id === params.id ? { ...d, ...patch } : d)));
+        audit('admin.backup_destination_updated', { admin: admin.id, destination: params.id });
+        return { status: 200, body: backupView() };
+      }),
+
+      // Révoquer : les identifiants sont effacés tout de suite, même si l'accès côté S3 reste à retirer
+      route('POST', '/api/v1/admin/backup/destinations/:id/revoke', async (req, params) => {
+        const admin = requireAdmin(req, 'manage', true);
+        const body = await readJson(req, 1024);
+        const list = effectiveDestinations(settings.backup);
+        if (!list.some(d => d.id === params.id)) throw new HttpError(404, 'not_found', 'Destination de sauvegarde inconnue');
+        const replacedBy = typeof body.replacedBy === 'string' && list.some(d => d.id === body.replacedBy && d.status === 'active') ? body.replacedBy : undefined;
+        editDestinations(all => all.map(d => (d.id === params.id
+          ? { ...d, status: 'revoked', s3: { ...d.s3, secretAccessKey: '' }, ...(replacedBy ? { replacedBy } : {}) }
+          : d)));
+        audit('admin.backup_destination_revoked', { admin: admin.id, destination: params.id });
+        return { status: 200, body: backupView() };
+      }),
+
+      route('DELETE', '/api/v1/admin/backup/destinations/:id', async (req, params) => {
+        const admin = requireAdmin(req, 'manage', true);
+        const target = effectiveDestinations(settings.backup).find(d => d.id === params.id);
+        if (!target) throw new HttpError(404, 'not_found', 'Destination de sauvegarde inconnue');
+        if (target.status !== 'revoked') throw new HttpError(409, 'not_revoked', 'Révoquez d’abord la destination');
+        editDestinations(list => list.filter(d => d.id !== params.id));
+        audit('admin.backup_destination_removed', { admin: admin.id, destination: params.id });
+        return { status: 200, body: backupView() };
+      }),
+
+      route('GET', '/api/v1/admin/backup/destinations/:id/points', async (req, params) => {
+        requireAdmin(req, 'manage');
+        try {
+          return { status: 200, body: { points: await need().restorePoints(params.id) } };
+        } catch (err) {
+          throw fail('backup_list_failed', err);
+        }
+      }),
+
+      route('POST', '/api/v1/admin/backup/restore/preview', async req => {
+        requireAdmin(req, 'manage', true);
+        const body = await readJson(req, 4096);
+        try {
+          return { status: 200, body: await need().preview(String(body.destinationId ?? ''), String(body.key ?? '')) };
+        } catch (err) {
+          throw fail('restore_preview_failed', err);
+        }
+      }),
+
+      route('POST', '/api/v1/admin/backup/restore/account', async req => {
+        const admin = requireAdmin(req, 'manage', true);
+        const body = await readJson(req, 4096);
+        try {
+          const result = await need().restoreAccount(String(body.token ?? ''), String(body.email ?? ''));
+          audit('admin.restore_account', { admin: admin.id });
+          return { status: 200, body: result };
+        } catch (err) {
+          throw fail('restore_failed', err);
+        }
+      }),
+
+      // Restauration du serveur : confirmation écrite en plus de la reconfirmation du mot de passe
+      route('POST', '/api/v1/admin/backup/restore/server', async req => {
+        const admin = requireAdmin(req, 'manage', true);
+        const body = await readJson(req, 4096);
+        if (body.confirm !== 'RESTAURER') throw new HttpError(400, 'confirmation_required', 'Saisissez RESTAURER pour confirmer');
+        try {
+          const result = await need().restoreServer(String(body.token ?? ''));
+          audit('admin.restore_server', { admin: admin.id, accounts: result.accounts });
+          return { status: 200, body: result };
+        } catch (err) {
+          throw fail('restore_failed', err);
+        }
+      })
+    ];
+  }
 
   /* ── Grappe dans l'administration ─────────────────────────────────────── */
 
@@ -1012,6 +1192,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     ...trust.nodeRoutes,
     ...clusterRoutes({ db, auth: trust, filesDir: options.filesDir ?? null }),
     ...clusterAdminRoutes(),
+    ...backupAdminRoutes(),
     route('PATCH', '/api/v1/admin/accounts/:id', async (req, params) => adminAuth.updateAccount(req, params.id, 'PATCH')),
     route('DELETE', '/api/v1/admin/accounts/:id', async (req, params) => adminAuth.updateAccount(req, params.id, 'DELETE')),
     ...sharingRoutes(context),

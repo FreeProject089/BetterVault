@@ -1,5 +1,5 @@
 import type { SmtpConfig, SmtpSecurity } from './mailer.ts';
-import type { BackupSettings } from './backup.ts';
+import type { BackupDestination, BackupSettings } from './backup.ts';
 import type { S3Config } from './s3.ts';
 import { billingFromEnv, DEFAULT_BILLING, parseBillingUpdate, publicBilling, type BillingSettings } from './billing.ts';
 import { DEFAULT_LEGAL, legalFromEnv, parseLegalUpdate, type LegalSettings } from './legal.ts';
@@ -183,6 +183,57 @@ const int = (value: unknown, name: string, min = 1, max = Number.MAX_SAFE_INTEGE
 };
 
 /** Valide des réglages envoyés par la page d'administration */
+/** Configuration S3 validée ; un secret absent reprend celui déjà enregistré */
+export function parseS3(input: Partial<S3Config> | null | undefined, previousSecret = ''): S3Config | null {
+  if (!input || typeof input !== 'object') return null;
+  const endpoint = String(input.endpoint ?? '').trim();
+  const bucket = String(input.bucket ?? '').trim();
+  if (!endpoint || !bucket) return null;
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    throw new Error('Adresse S3 invalide');
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('Adresse S3 invalide');
+  return {
+    endpoint,
+    bucket,
+    region: String(input.region ?? '').trim() || 'us-east-1',
+    accessKeyId: String(input.accessKeyId ?? '').trim(),
+    secretAccessKey: input.secretAccessKey ? String(input.secretAccessKey) : previousSecret,
+    prefix: String(input.prefix ?? '').trim(),
+    pathStyle: input.pathStyle !== false
+  };
+}
+
+const DEST_ID = /^dst-[a-z0-9-]{1,40}$/;
+const DEST_NAME = /^[\p{L}\p{N} ._-]{1,40}$/u;
+
+/** Destinations de sauvegarde relues depuis le stockage des réglages */
+function parseDestinations(input: unknown, previous: BackupDestination[] = []): BackupDestination[] {
+  if (!Array.isArray(input)) return previous;
+  return input.slice(0, 10).flatMap((raw): BackupDestination[] => {
+    const d = raw as Partial<BackupDestination> & { s3?: Partial<S3Config> };
+    if (!d || !DEST_ID.test(String(d.id)) || !DEST_NAME.test(String(d.name ?? ''))) return [];
+    const before = previous.find(p => p.id === d.id);
+    const s3 = parseS3(d.s3, before?.s3.secretAccessKey ?? '');
+    if (!s3) return [];
+    const status = d.status === 'disabled' || d.status === 'revoked' ? d.status : 'active';
+    return [{
+      id: String(d.id),
+      name: String(d.name),
+      region: String(d.region ?? s3.region).slice(0, 30),
+      // Une destination révoquée perd son secret : ses identifiants ne servent plus à rien
+      s3: status === 'revoked' ? { ...s3, secretAccessKey: '' } : s3,
+      status,
+      ...(Number.isFinite(d.quotaBytes) && (d.quotaBytes as number) > 0 ? { quotaBytes: Math.floor(d.quotaBytes as number) } : {}),
+      addedAt: Number(d.addedAt) || Date.now(),
+      ...(d.replacedBy && DEST_ID.test(String(d.replacedBy)) ? { replacedBy: String(d.replacedBy) } : {})
+    }];
+  });
+}
+
 export function parseSettingsUpdate(input: unknown, current: ServerSettings): ServerSettings {
   const body = (input ?? {}) as Record<string, unknown>;
   const next: ServerSettings = {
@@ -239,26 +290,10 @@ export function parseSettingsUpdate(input: unknown, current: ServerSettings): Se
     if (backup.s3 === null) {
       next.backup.s3 = null;
     } else if (backup.s3 && typeof backup.s3 === 'object') {
-      const endpoint = String(backup.s3.endpoint ?? '').trim();
-      const bucket = String(backup.s3.bucket ?? '').trim();
-      if (!endpoint || !bucket) {
-        next.backup.s3 = null;
-      } else {
-        try {
-          new URL(endpoint);
-        } catch {
-          throw new Error('Adresse S3 invalide');
-        }
-        next.backup.s3 = {
-          endpoint,
-          bucket,
-          region: String(backup.s3.region ?? '').trim() || 'us-east-1',
-          accessKeyId: String(backup.s3.accessKeyId ?? '').trim(),
-          secretAccessKey: backup.s3.secretAccessKey ? String(backup.s3.secretAccessKey) : current.backup?.s3?.secretAccessKey ?? '',
-          prefix: String(backup.s3.prefix ?? '').trim(),
-          pathStyle: backup.s3.pathStyle !== false
-        };
-      }
+      next.backup.s3 = parseS3(backup.s3, current.backup?.s3?.secretAccessKey ?? '');
+    }
+    if (backup.destinations !== undefined) {
+      next.backup.destinations = parseDestinations(backup.destinations, current.backup?.destinations);
     }
   }
   return next;
@@ -271,7 +306,9 @@ export function publicSettings(settings: ServerSettings): unknown {
     smtp: settings.smtp ? { ...settings.smtp, password: '', hasPassword: !!settings.smtp.password } : null,
     backup: {
       ...settings.backup,
-      s3: settings.backup?.s3 ? { ...settings.backup.s3, secretAccessKey: '', hasSecret: !!settings.backup.s3.secretAccessKey } : null
+      s3: settings.backup?.s3 ? { ...settings.backup.s3, secretAccessKey: '', hasSecret: !!settings.backup.s3.secretAccessKey } : null,
+      // Les secrets ne quittent jamais le serveur, même vers l'administration
+      destinations: (settings.backup?.destinations ?? []).map(d => ({ ...d, s3: { ...d.s3, secretAccessKey: '', hasSecret: !!d.s3.secretAccessKey } }))
     },
     billing: publicBilling(settings.billing ?? DEFAULT_BILLING)
   };

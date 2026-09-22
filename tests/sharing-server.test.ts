@@ -166,6 +166,7 @@ describe('Sauvegardes', () => {
     objects = new Map<string, { body: Buffer; lastModified: number }>();
     clock = Date.now();
     async put(key: string, body: Buffer) { this.objects.set(key, { body, lastModified: this.clock }); }
+    async get(key: string) { return this.objects.get(key)!.body; }
     async delete(key: string) { this.objects.delete(key); }
     async list(prefix: string): Promise<S3Object[]> {
       return [...this.objects].filter(([key]) => key.startsWith(prefix)).map(([key, o]) => ({ key, size: o.body.length, lastModified: o.lastModified }));
@@ -184,7 +185,7 @@ describe('Sauvegardes', () => {
     try {
       const { writeFileSync } = await import('node:fs');
       writeFileSync(join(filesDir, 'fichier-1'), randomBytes(20));
-      const run = await service.runNow();
+      const [run] = await service.runNow();
       expect(run).toMatchObject({ status: 'success', files: 1 });
 
       const dbKey = [...s3.objects.keys()].find(k => k.startsWith('bv/db/'))!;
@@ -197,7 +198,7 @@ describe('Sauvegardes', () => {
       // Le fichier n'est pas renvoyé une seconde fois
       now += 10 * 86_400_000;
       s3.clock = now;
-      expect((await service.runNow()).files).toBe(0);
+      expect((await service.runNow())[0].files).toBe(0);
 
       // Après 10 jours (conservation 7), l'ancienne copie de base et le fichier supprimé sont purgés
       db.prepare('INSERT INTO deleted_files (id, deleted_at) VALUES (?, ?)').run('fichier-1', now - 9 * 86_400_000);

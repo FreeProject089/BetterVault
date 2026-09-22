@@ -24,6 +24,7 @@ export interface S3Object {
 
 export interface S3Like {
   put(key: string, body: Buffer, contentType?: string): Promise<void>;
+  get(key: string): Promise<Buffer>;
   list(prefix: string): Promise<S3Object[]>;
   delete(key: string): Promise<void>;
 }
@@ -100,6 +101,10 @@ export class S3Client implements S3Like {
 
   async put(key: string, body: Buffer, contentType = 'application/octet-stream'): Promise<void> {
     await this.request('PUT', key, { body, contentType });
+  }
+
+  async get(key: string): Promise<Buffer> {
+    return Buffer.from(await (await this.request('GET', key)).arrayBuffer());
   }
 
   async delete(key: string): Promise<void> {
