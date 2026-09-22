@@ -14,7 +14,7 @@ Le bouton **Nouveau** demande d'abord **ce que vous voulez ranger**, puis n'affi
 | **Fichier** | Un document chiffré, gardé tel quel |
 | **Dossier de fichiers** | Plusieurs fichiers réunis dans un même élément |
 
-Tous les types partagent le nom, l'icône, les notes, les tags, le dossier, les champs personnalisés et les pièces jointes. Seul l'identifiant a une étape **2FA**.
+Tous les types partagent le nom, l'icône, les notes, les tags, les champs personnalisés et les pièces jointes. Seul l'identifiant a une étape **2FA**.
 
 Les champs sensibles — numéro de carte, cryptogramme, code, numéro de pièce, clé privée — sont **masqués** dans la fiche jusqu'à ce que vous demandiez à les voir, et leur copie s'efface du presse-papiers comme un mot de passe.
 

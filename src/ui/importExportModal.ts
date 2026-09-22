@@ -1,3 +1,4 @@
+import { learnMore } from '../ui/docsLink';
 import type { AccountService } from '../account/accountService';
 import type { SharedVaultManager } from '../account/sharedVaults';
 import { GEN_ICONS, GENERIC_FILE_ICON } from './icons';
@@ -495,8 +496,8 @@ export function openImportExportModal(app: ModalHost, { accountService, sharedVa
         ${lines.length ? `<div class="notice notice-warning" style="margin-top:8px;">
           <strong>${tr('Tout ne tiendra pas', 'Not everything will fit')}</strong>
           <ul style="margin:6px 0 6px 18px;">${lines.map(l => `<li>${l}</li>`).join('')}</ul>
-          ${tr('Solutions : une offre supérieure, libérer de la place, un autre serveur qui accepte les fichiers, ou votre propre serveur. Vous pouvez aussi importer sans ce qui dépasse : rien n’est perdu, tout reste dans le fichier de sauvegarde.',
-               'Options: a higher plan, freeing up space, another server that accepts files, or your own server. You can also import without what doesn’t fit: nothing is lost, it all stays in the backup file.')}
+          ${tr('Vous pouvez importer sans ce qui dépasse : rien n’est perdu, tout reste dans le fichier.',
+               'You can import without what doesn’t fit: nothing is lost, it all stays in the file.')}${learnMore('guide/changer-de-serveur', tr)}
         </div>` : ''}
         <p class="field-hint" style="margin-top:8px;">${tr('Tout est ajouté à côté de ce que contient déjà ce compte : rien n’est remplacé.', 'Everything is added next to what this account already holds: nothing is replaced.')}</p>`);
       confirmBtn.focus();

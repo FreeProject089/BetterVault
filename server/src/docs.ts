@@ -128,8 +128,11 @@ header img{width:26px;height:26px}header strong{margin-right:auto}
 .shell{max-width:1160px;margin:0 auto;padding:24px 16px 64px;display:grid;gap:28px}
 nav{display:flex;flex-direction:column;gap:18px;font-size:14px}
 .doc-group{display:flex;flex-direction:column;gap:2px}
-.doc-group span{color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:0 8px 4px}
-nav a{padding:7px 10px;border-radius:8px;color:var(--text);text-decoration:none}
+.doc-group span{color:var(--muted);font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:0 8px 4px}
+nav a{display:flex;align-items:center;min-height:44px;padding:8px 10px;border-radius:8px;color:var(--text);text-decoration:none}
+.toc{border:1px solid var(--border);border-radius:12px;background:var(--card);padding:4px 12px}
+.toc summary{padding:10px 2px;font-weight:600;cursor:pointer}
+.toc[open] summary{margin-bottom:6px;border-bottom:1px solid var(--border)}
 nav a:hover{background:var(--card)}
 nav a[aria-current]{background:var(--accent);color:#fff;font-weight:600}
 main{min-width:0}h1{font-size:30px;line-height:1.2;margin:0 0 16px}h2{margin-top:36px;font-size:21px}h3{font-size:17px}
@@ -143,7 +146,14 @@ th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-a
 .admo-warning,.admo-danger{border-left-color:#d29922}.admo-tip,.admo-success{border-left-color:#3fb950}
 hr{border:none;border-top:1px solid var(--border);margin:32px 0}
 .btn{display:inline-flex;align-items:center;min-height:38px;padding:0 14px;border-radius:9px;border:1px solid var(--border);color:var(--text);text-decoration:none;font-size:14px;font-weight:600}
-@media (min-width:1000px){.shell{grid-template-columns:240px minmax(0,1fr)}nav{position:sticky;top:70px;align-self:start;max-height:calc(100vh - 90px);overflow-y:auto}}
+@media (min-width:1000px){
+  .shell{grid-template-columns:248px minmax(0,1fr)}
+  /* Sur grand écran le sommaire est toujours là, sans dépliant */
+  .toc{border:0;background:none;padding:0;position:sticky;top:74px;align-self:start;max-height:calc(100vh - 96px);overflow-y:auto}
+  .toc summary{display:none}
+  nav a{min-height:36px;padding:6px 10px}
+}
+@media (max-width:560px){main{font-size:15.5px}h1{font-size:26px}pre{padding:12px;font-size:12.5px}}
 </style>
 </head>
 <body>
@@ -154,7 +164,10 @@ hr{border:none;border-top:1px solid var(--border);margin:32px 0}
   <a class="btn" href="/about">${t('À propos', 'About')}</a>
 </div></header>
 <div class="shell">
-  <nav aria-label="${t('Sommaire', 'Contents')}">${sections}</nav>
+  <details class="toc" aria-label="${t('Sommaire', 'Contents')}">
+    <summary>${t('Sommaire', 'Contents')}</summary>
+    <nav>${sections}</nav>
+  </details>
   <main>${renderMarkdown(markdown)}</main>
 </div>
 </body>

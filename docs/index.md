@@ -12,7 +12,7 @@ La même interface fonctionne dans le navigateur, en application de bureau (Wind
 - **Générateur** : mots de passe et phrases secrètes Diceware
 - **Audit** : mots de passe faibles, réutilisés, sans 2FA ou présents dans des fuites connues
 - **Tâches** : liste, Kanban, matrice d'Eisenhower, calendrier, dépendances, récurrences, rappels
-- **Organisation** : plusieurs coffres, dossiers en arborescence, tags colorés
+- **Organisation** : plusieurs coffres, tags colorés, types d’éléments personnalisés
 - **Import / export** : KeePass, 1Password, Bitwarden, FIDO CXF, CSV, JSON chiffré
 - **Synchronisation** : serveur auto-hébergé qui ne voit jamais les données en clair
 

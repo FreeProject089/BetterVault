@@ -176,6 +176,8 @@ h2{font-size:22px;margin:0 0 8px}h3{font-size:16px;margin:0 0 6px}
 .steps li::before{content:counter(step);position:absolute;left:0;top:0;width:28px;height:28px;border-radius:50%;background:var(--card);border:1px solid var(--border);color:var(--text);display:grid;place-items:center;font-size:13px;font-weight:700}
 .steps strong{color:var(--text)}
 footer{border-top:1px solid var(--border);margin-top:64px;padding:24px 0 0;display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;font-size:14px}
+header a,footer a{display:inline-flex;align-items:center;min-height:44px;padding:0 4px;text-decoration:none}
+header a:hover,footer a:hover{text-decoration:underline}
 footer .meta{margin-right:auto}
 @media (max-width:560px){.hero{padding:40px 0 0}section{padding:40px 0 0}.btn{width:100%;justify-content:center}}
 </style>

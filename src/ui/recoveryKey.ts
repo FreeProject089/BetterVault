@@ -30,7 +30,7 @@ export function printRecoveryKey(email: string, key: string): void {
 <p>${t('Créée le', 'Created on')} : ${escape(new Date().toLocaleString(french ? 'fr-FR' : 'en-US'))}</p>
 <div class="key">${groups.map(group => `<span>${escape(group)}</span>`).join('')}</div>
 <div class="note">${t(
-    'Cette clé permet de choisir un nouveau mot de passe principal sans perdre le coffre. Elle donne accès au compte : rangez cette feuille dans un endroit sûr, hors de l’ordinateur.',
+    'Cette clé rouvre le coffre si le mot de passe principal est oublié. Elle donne accès au compte : gardez-la hors de l’ordinateur.',
     'This key lets you set a new master password without losing the vault. It grants access to the account: keep this sheet somewhere safe, away from the computer.'
   )}</div>
 </body></html>`);

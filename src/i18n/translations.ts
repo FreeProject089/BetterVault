@@ -156,7 +156,7 @@ export const fr: Translations = {
     importTab: 'Importer',
     exportTab: 'Exporter',
     dragDropLabel: 'Déposez un fichier ici ou cliquez pour le choisir',
-    supportedFormats: 'Formats pris en charge : KeePass (.kdbx, .xml), 1Password (.1pux, CSV), Bitwarden (JSON, CSV), FIDO CXF, LastPass, Dashlane, Chrome, Firefox et BetterVault (JSON, JSON chiffré, CSV).'
+    supportedFormats: 'KeePass, 1Password, Bitwarden, LastPass, Dashlane, Chrome, Firefox, FIDO CXF et BetterVault.'
   }
 };
 
@@ -236,6 +236,6 @@ export const en: Translations = {
     importTab: 'Import',
     exportTab: 'Export',
     dragDropLabel: 'Drop a file here or click to choose one',
-    supportedFormats: 'Supported formats: KeePass (.kdbx, .xml), 1Password (.1pux, CSV), Bitwarden (JSON, CSV), FIDO CXF, LastPass, Dashlane, Chrome, Firefox and BetterVault (JSON, encrypted JSON, CSV).'
+    supportedFormats: 'KeePass, 1Password, Bitwarden, LastPass, Dashlane, Chrome, Firefox, FIDO CXF and BetterVault.'
   }
 };

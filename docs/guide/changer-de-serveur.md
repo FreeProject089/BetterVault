@@ -8,7 +8,7 @@ La **grappe** réplique automatiquement vos données entre les serveurs d'un mê
 2. **Tout le compte, fichiers compris**, puis choisissez un mot de passe (10 caractères minimum).
 3. Un fichier `bettervault-complet-<date>.encrypted.json` est enregistré.
 
-Il contient tous vos coffres, identifiants, tâches, dossiers, étiquettes et pièces jointes. Les fichiers restent chiffrés avec leur propre clé, et le tout est chiffré une seconde fois par ce mot de passe (Argon2id et AES-256-GCM).
+Il contient tous vos coffres, identifiants, tâches, étiquettes et pièces jointes. Les fichiers restent chiffrés avec leur propre clé, et le tout est chiffré une seconde fois par ce mot de passe (Argon2id et AES-256-GCM).
 
 Un coffre partagé n'est inclus que si votre rôle permet l'export. Il devient un coffre ordinaire, car ses membres n'existent pas sur l'autre serveur.
 

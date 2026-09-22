@@ -4186,3 +4186,6 @@ input[type="range"]::-webkit-slider-thumb { width: 20px; height: 20px; }
   .sidebar-footer .sync-label { display: none; }
   .sidebar-footer .sync-status { min-width: 28px; justify-content: center; }
 }
+
+/* Lien « En savoir plus » d'une explication courte */
+.doc-link { color: var(--accent); font-weight: 600; white-space: nowrap; }

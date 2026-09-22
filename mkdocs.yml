@@ -50,7 +50,7 @@ nav:
       - Premiers pas: guide/premiers-pas.md
       - Identifiants et 2FA: guide/identifiants.md
       - Tâches: guide/taches.md
-      - Coffres, dossiers et tags: guide/coffres-tags.md
+      - Coffres et tags: guide/coffres-tags.md
       - Import et export: guide/import-export.md
       - Compte et synchronisation: guide/synchronisation.md
       - Sécurité du compte: guide/securite-compte.md
