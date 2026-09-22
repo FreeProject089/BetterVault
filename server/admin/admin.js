@@ -1451,3 +1451,26 @@ function wireRestore() {
     }
   });
 }
+
+/* ── Thème : automatique, clair ou sombre, retenu sur cet appareil ──── */
+{
+  const THEME_KEY = 'bv-admin-theme';
+  const order = ['auto', 'light', 'dark'];
+  const icons = { auto: '◐', light: '☀', dark: '☾' };
+  const labels = { auto: ['Thème : automatique', 'Theme: automatic'], light: ['Thème : clair', 'Theme: light'], dark: ['Thème : sombre', 'Theme: dark'] };
+  const read = () => { try { return localStorage.getItem(THEME_KEY) ?? 'auto'; } catch { return 'auto'; } };
+  const apply = theme => {
+    if (theme === 'auto') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = theme;
+    const button = $('theme-toggle');
+    button.textContent = icons[theme];
+    button.title = button.ariaLabel = labels[theme][fr ? 0 : 1];
+  };
+  let theme = order.includes(read()) ? read() : 'auto';
+  apply(theme);
+  $('theme-toggle').addEventListener('click', () => {
+    theme = order[(order.indexOf(theme) + 1) % order.length];
+    try { localStorage.setItem(THEME_KEY, theme); } catch { /* navigation privée : le choix vaut pour la session */ }
+    apply(theme);
+  });
+}

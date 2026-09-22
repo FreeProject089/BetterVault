@@ -11,11 +11,14 @@
   <main class="shell">
     <header class="top">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true">BV</span>
+        <img class="brand-logo on-dark" src="/admin/logo-on-dark.svg" alt="" width="30" height="30"><img class="brand-logo on-light" src="/admin/logo-on-light.svg" alt="" width="30" height="30">
         <span>BetterVault</span>
         <span class="brand-sub" data-i18n="admin">Administration</span>
       </div>
-      <button class="btn ghost" id="logout" type="button" hidden data-i18n="logout">Se déconnecter</button>
+      <div class="top-actions">
+        <button class="btn ghost theme-toggle" id="theme-toggle" type="button" aria-label="Thème"></button>
+        <button class="btn ghost" id="logout" type="button" hidden data-i18n="logout">Se déconnecter</button>
+      </div>
     </header>
 
     <section class="card narrow" id="login-card">

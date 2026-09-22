@@ -12,8 +12,21 @@
   color-scheme: dark;
 }
 
+/* Thème : automatique, ou imposé par le bouton de l'en-tête */
+:root[data-theme="light"] {
+    --bg: #f6f8fa;
+    --card: #ffffff;
+    --field: #ffffff;
+    --border: #d0d7de;
+    --text: #1f2328;
+    --muted: #656d76;
+    --accent: #5754c7;
+    --danger: #cf222e;
+    --ok: #1a7f37;
+    color-scheme: light;}
+
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme="dark"]) {
     --bg: #f6f8fa;
     --card: #ffffff;
     --field: #ffffff;
@@ -256,3 +269,15 @@ code.fp.big { font-size: 18px; }
 .restore-facts .warn { color: #d29922; }
 .restore-choices h3 { margin: 0; font-size: 15px; }
 .restore-choices form { padding: 12px; border: 1px solid var(--border); border-radius: 10px; }
+
+/* Logo et bouton de thème */
+.brand-logo { width: 30px; height: 30px; display: block; }
+.brand-logo.on-light { display: none; }
+:root[data-theme="light"] .brand-logo.on-dark { display: none; }
+:root[data-theme="light"] .brand-logo.on-light { display: block; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .brand-logo.on-dark { display: none; }
+  :root:not([data-theme="dark"]) .brand-logo.on-light { display: block; }
+}
+.top-actions { display: flex; align-items: center; gap: 8px; }
+.theme-toggle { min-width: 40px; min-height: 36px; }
