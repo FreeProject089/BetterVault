@@ -49,6 +49,7 @@
         <button type="button" class="tab" data-tab="billing" data-i18n="tabBilling">Offres</button>
         <button type="button" class="tab" data-tab="legal" data-i18n="tabLegal">Documents légaux</button>
         <button type="button" class="tab" data-tab="audit" data-i18n="tabAudit">Journal</button>
+        <button type="button" class="tab" data-tab="cluster" data-i18n="tabCluster">Grappe</button>
         <button type="button" class="tab" data-tab="admins" data-i18n="tabAdmins">Administrateurs</button>
       </nav>
 
@@ -76,11 +77,8 @@
             <ul class="checks" id="checks"></ul>
           </section>
           <section class="card" id="cluster-card" hidden>
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-              <h2 data-i18n="clusterTitle">Grappe de serveurs</h2>
-              <button type="button" class="secondary" id="cluster-sync" data-i18n="clusterSync">Synchroniser</button>
-            </div>
-            <div id="cluster-body"></div>
+            <h2 data-i18n="clusterTitle">Grappe de serveurs</h2>
+            <div id="cluster-summary"></div>
           </section>
           <section class="card">
             <h2 data-i18n="downloadTitle">Copie chiffrée de la base</h2>
@@ -221,6 +219,10 @@
           <p class="hint" data-i18n="auditHint">Conservé 90 jours. Les comptes sont désignés par un pseudonyme (HMAC) : on peut relier des événements sans connaître l’adresse email.</p>
           <div class="table-wrap"><table class="audit"><thead><tr><th data-i18n="when">Date</th><th data-i18n="event">Événement</th><th data-i18n="subject">Compte</th><th data-i18n="detail">Détails</th></tr></thead><tbody id="audit-rows"></tbody></table></div>
         </section>
+      </section>
+
+      <section data-panel="cluster" hidden>
+        <div id="cluster-panel"></div>
       </section>
 
       <section data-panel="admins" hidden>

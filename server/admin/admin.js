@@ -14,6 +14,7 @@ const TEXT = {
   useAccount: ['Se connecter avec un compte', 'Sign in with an account'],
   wrongCredentials: ['Email, mot de passe ou code incorrect', 'Wrong email, password or code'],
   tabAdmins: ['Administrateurs', 'Administrators'],
+  tabCluster: ['Grappe', 'Cluster'],
   adminsTitle: ['Administrateurs', 'Administrators'],
   adminsHint: ['Lecteur : consulter. Opérateur : lancer synchronisations, sauvegardes et tests. Propriétaire : tout, dont réglages, nœuds, secrets et restaurations.', 'Viewer: read only. Operator: run syncs, backups and tests. Owner: everything, including settings, nodes, secrets and restores.'],
   roleViewer: ['Lecteur', 'Viewer'],
@@ -474,6 +475,7 @@ document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', (
   if (name === 'overview') void loadOverview();
   if (name === 'audit') void loadAudit();
   if (name === 'admins') void loadAdmins();
+  if (name === 'cluster') void loadCluster();
 }));
 
 /* ── Administrateurs ───────────────────────────────────────────────────── */
@@ -694,46 +696,9 @@ async function loadOverview() {
     [!security.registrationOpen, fr ? 'Inscriptions fermées (serveur privé)' : 'Registration closed (private server)']
   ];
   $('checks').innerHTML = checks.map(([ok, label]) => `<li class="${ok ? 'ok' : 'todo'}">${label}</li>`).join('');
-  lastCluster = data.cluster;
-  renderCluster(data.cluster);
+  renderClusterSummary(data.cluster);
 }
 
-/* ── Grappe : un nœud en retard ou en erreur doit se voir d'un coup d'œil ── */
-function renderCluster(cluster) {
-  const card = $('cluster-card');
-  card.hidden = !cluster;
-  if (!cluster) return;
-  const when = t => (t ? new Date(t).toLocaleString(fr ? 'fr-FR' : 'en-GB') : '—');
-  const rows = cluster.peers.map(peer => {
-    const lag = peer.head === null ? '?' : Math.max(0, peer.head - peer.cursor);
-    const ok = !peer.lastError;
-    return `<li class="${ok ? 'ok' : 'todo'}">
-      <strong>${escapeHtml(peer.id)}</strong> · ${escapeHtml(peer.url)}<br>
-      <span class="hint">${ok
-        ? `${fr ? 'Dernière synchro' : 'Last sync'} : ${when(peer.lastOkAt)} · ${fr ? 'retard' : 'lag'} : ${lag}`
-        : `${fr ? 'Erreur' : 'Error'} : ${escapeHtml(peer.lastError)} (${when(peer.lastErrorAt)})`}</span>
-      ${peer.conflicts ? `<br><span class="hint">${peer.conflicts} ${fr ? 'compte(s) en double non répliqué(s)' : 'duplicate account(s) not replicated'}</span>` : ''}
-    </li>`;
-  }).join('');
-  $('cluster-body').innerHTML = `
-    <p class="hint">${fr ? 'Ce nœud' : 'This node'} : <strong>${escapeHtml(cluster.nodeId)}</strong>
-      · ${cluster.pendingConflicts} ${fr ? 'version(s) concurrente(s) en attente de fusion par les appareils' : 'concurrent version(s) waiting to be merged by devices'}</p>
-    <ul class="checks">${rows || `<li class="todo">${fr ? 'Aucun autre nœud déclaré (CLUSTER_PEERS)' : 'No other node declared (CLUSTER_PEERS)'}</li>`}</ul>`;
-}
-
-$('cluster-sync').addEventListener('click', async event => {
-  const button = event.currentTarget;
-  button.disabled = true;
-  try {
-    const { peers } = await api('POST', 'cluster/sync');
-    renderCluster({ ...lastCluster, peers });
-  } catch (err) {
-    alert(err.message);
-  } finally {
-    button.disabled = false;
-  }
-});
-let lastCluster = null;
 
 $('refresh-overview').addEventListener('click', () => void loadOverview());
 
@@ -937,3 +902,308 @@ async function loadAudit() {
 $('refresh-audit').addEventListener('click', () => void loadAudit());
 
 if (token) void load();
+
+
+/* ── Grappe de serveurs ────────────────────────────────────────────────── */
+
+const HEALTH = {
+  self: ['Ce nœud', 'This node', 'ok'],
+  ok: ['Synchronisé', 'In sync', 'ok'],
+  offline: ['Hors ligne', 'Offline', 'fail'],
+  error: ['En erreur', 'Failing', 'fail'],
+  unknown: ['Jamais joint', 'Not reached yet', 'warn'],
+  disabled: ['Désactivé', 'Disabled', 'warn'],
+  revoked: ['Révoqué', 'Revoked', 'fail'],
+  'other-zone': ['Autre zone', 'Other zone', 'muted']
+};
+const healthBadge = health => {
+  const [f, e, tone] = HEALTH[health] ?? [health, health, 'muted'];
+  return `<span class="badge ${tone}">${fr ? f : e}</span>`;
+};
+const when = ms => (ms ? new Date(ms).toLocaleString(locale) : '—');
+
+/** Résumé du tableau de bord : ce qui demande une intervention se voit d'un coup d'œil */
+function renderClusterSummary(view) {
+  const card = $('cluster-card');
+  const cluster = view?.cluster;
+  card.hidden = !cluster;
+  if (!cluster) return;
+  const others = cluster.nodes.filter(n => !n.self);
+  const count = h => others.filter(n => n.health === h).length;
+  const problems = count('offline') + count('error');
+  $('cluster-summary').innerHTML = `
+    <p class="hint">${escapeHtml(cluster.name)} · ${fr ? 'zone' : 'zone'} ${escapeHtml(view.self.zone ?? '—')} · ${cluster.nodes.length} ${fr ? 'nœud(s)' : 'node(s)'}</p>
+    <ul class="checks">
+      <li class="${problems ? 'todo' : 'ok'}">${problems
+        ? (fr ? `${problems} nœud(s) demandent une intervention` : `${problems} node(s) need attention`)
+        : (fr ? 'Tous les nœuds de la zone sont synchronisés' : 'Every node in the zone is in sync')}</li>
+      ${view.pending?.length ? `<li class="todo">${view.pending.length} ${fr ? 'demande(s) d’adhésion à examiner' : 'join request(s) to review'}</li>` : ''}
+      ${view.pendingConflicts ? `<li class="todo">${view.pendingConflicts} ${fr ? 'version(s) concurrente(s) en attente de fusion' : 'concurrent version(s) awaiting merge'}</li>` : ''}
+    </ul>`;
+}
+
+async function loadCluster() {
+  const host = $('cluster-panel');
+  try {
+    renderClusterPanel(await api('GET', 'cluster'));
+  } catch (err) {
+    host.innerHTML = `<p class="status fail">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+/** Lance une action de grappe puis redessine ; les erreurs s'affichent à côté */
+async function clusterAction(method, path, body, success) {
+  try {
+    const result = await api(method, path, body);
+    // Une action qui affiche son propre résultat (le code d'invitation) ne doit pas être effacée
+    if (success) return success(result);
+    if (result && result.cluster !== undefined && result.self) renderClusterPanel(result);
+    else await loadCluster();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+function nodeFieldsHtml(prefix, defaults = {}) {
+  return `
+    <div class="grid-2">
+      <div><label for="${prefix}-name">${fr ? 'Nom du nœud' : 'Node name'}</label><input id="${prefix}-name" required maxlength="40" placeholder="EU-W" value="${escapeHtml(defaults.name ?? '')}"></div>
+      <div><label for="${prefix}-zone">${fr ? 'Zone de résidence' : 'Residency zone'}</label><input id="${prefix}-zone" required maxlength="10" placeholder="EU" value="${escapeHtml(defaults.zone ?? '')}"></div>
+      <div><label for="${prefix}-region">${fr ? 'Région' : 'Region'}</label><input id="${prefix}-region" required maxlength="20" placeholder="eu-west" value="${escapeHtml(defaults.region ?? '')}"></div>
+      <div><label for="${prefix}-url">${fr ? 'Adresse publique du nœud' : 'Node public address'}</label><input id="${prefix}-url" type="url" required value="${escapeHtml(defaults.url ?? location.origin)}"></div>
+    </div>
+    <p class="hint">${fr
+      ? 'Les comptes ne sont répliqués qu’entre nœuds de la même zone (EU, US, CH…). Ils ne franchissent jamais les zones.'
+      : 'Accounts are only replicated between nodes of the same zone (EU, US, CH…). They never cross zones.'}</p>`;
+}
+const readNodeFields = prefix => ({
+  name: $(`${prefix}-name`).value.trim(),
+  zone: $(`${prefix}-zone`).value.trim().toUpperCase(),
+  region: $(`${prefix}-region`).value.trim(),
+  url: $(`${prefix}-url`).value.trim()
+});
+
+function renderClusterPanel(view) {
+  const host = $('cluster-panel');
+  const cluster = view.cluster;
+  const manage = can('manage');
+  const selfLine = `<p class="hint">${fr ? 'Empreinte de la clé de ce nœud' : 'This node’s key fingerprint'} : <code class="fp">${escapeHtml(view.self.fingerprint)}</code></p>`;
+
+  // ── Pas de grappe : la créer, ou en rejoindre une ──
+  if (!cluster) {
+    host.innerHTML = `
+      <section class="card">
+        <h2>${fr ? 'Ce serveur fonctionne seul' : 'This server runs on its own'}</h2>
+        <p class="hint">${fr
+          ? 'Une grappe relie plusieurs serveurs de VOTRE infrastructure (par exemple EU-W et EU-E) : chacun garde une copie chiffrée des comptes de sa zone, et prend le relais si un autre tombe. Aucun serveur d’un autre opérateur ne peut y entrer.'
+          : 'A cluster links several servers of YOUR infrastructure (e.g. EU-W and EU-E): each keeps an encrypted copy of its zone’s accounts and takes over if another fails. No server run by someone else can join.'}</p>
+        ${selfLine}
+      </section>
+      ${manage ? `
+      <section class="card">
+        <h2>${fr ? 'Créer une grappe' : 'Create a cluster'}</h2>
+        <p class="hint">${fr ? 'Ce serveur deviendra le nœud racine : il détiendra la clé qui autorise les autres nœuds.' : 'This server becomes the root node: it holds the key that authorises the other nodes.'}</p>
+        <form id="cluster-create" class="stack">
+          <label for="cc-cluster">${fr ? 'Nom de la grappe' : 'Cluster name'}</label>
+          <input id="cc-cluster" required maxlength="40" placeholder="Primary">
+          ${nodeFieldsHtml('cc')}
+          <button class="btn primary" type="submit">${fr ? 'Créer la grappe' : 'Create cluster'}</button>
+        </form>
+      </section>
+      <section class="card">
+        <h2>${fr ? 'Rejoindre une grappe' : 'Join a cluster'}</h2>
+        <p class="hint">${fr ? 'Collez le code d’invitation créé sur le nœud racine. Il est valable une heure et ne sert qu’une fois.' : 'Paste the invitation code created on the root node. It is valid for one hour and works once.'}</p>
+        <form id="cluster-join" class="stack">
+          <label for="cj-code">${fr ? 'Code d’invitation' : 'Invitation code'}</label>
+          <textarea id="cj-code" rows="3" required spellcheck="false"></textarea>
+          ${nodeFieldsHtml('cj')}
+          <button class="btn primary" type="submit">${fr ? 'Envoyer la demande' : 'Send request'}</button>
+        </form>
+      </section>` : ''}`;
+    $('cluster-create')?.addEventListener('submit', e => {
+      e.preventDefault();
+      void clusterAction('POST', 'cluster', { clusterName: $('cc-cluster').value.trim(), ...readNodeFields('cc') });
+    });
+    $('cluster-join')?.addEventListener('submit', e => {
+      e.preventDefault();
+      void clusterAction('POST', 'cluster/join', { code: $('cj-code').value.trim(), ...readNodeFields('cj') });
+    });
+    return;
+  }
+
+  // ── Demande envoyée, approbation attendue ──
+  if (cluster.state === 'joining') {
+    host.innerHTML = `
+      <section class="card">
+        <h2>${fr ? 'En attente d’approbation' : 'Waiting for approval'}</h2>
+        <p class="hint">${fr
+          ? 'Sur le nœud racine, onglet Grappe, vérifiez que l’empreinte affichée pour cette demande est bien celle-ci, puis approuvez.'
+          : 'On the root node, Cluster tab, check that the fingerprint shown for this request is this one, then approve.'}</p>
+        <p><code class="fp big">${escapeHtml(view.self.fingerprint)}</code></p>
+        <div class="row-end"><button class="btn" type="button" id="cluster-refresh">${fr ? 'Vérifier' : 'Check'}</button></div>
+      </section>`;
+    $('cluster-refresh').addEventListener('click', () => void clusterAction('POST', 'cluster/sync', {}));
+    return;
+  }
+
+  // ── Membre ──
+  const zones = [...new Set(cluster.nodes.map(n => n.zone))].sort();
+  const root = cluster.isRoot && manage;
+  const nodeRow = node => `
+    <li class="node-row" data-node="${escapeHtml(node.id)}">
+      <div class="node-main">
+        <div class="node-title"><strong>${escapeHtml(node.name)}</strong> ${healthBadge(node.self ? 'self' : node.health)}</div>
+        <div class="hint">${escapeHtml(node.region)} · ${escapeHtml(node.url)}</div>
+        <div class="hint">${node.self ? (cluster.isRoot ? (fr ? 'Détient la clé racine' : 'Holds the root key') : '')
+          : node.zone === view.self.zone && node.status === 'active'
+            ? `${fr ? 'Dernière synchro' : 'Last sync'} : ${when(node.lastOkAt)}${node.lag ? ` · ${fr ? 'retard' : 'lag'} : ${node.lag}` : ''}`
+            : ''}</div>
+        ${node.lastError ? `<div class="hint fail">${escapeHtml(node.lastError)} (${when(node.lastErrorAt)})</div>` : ''}
+        <details class="fp-details"><summary>${fr ? 'Empreinte' : 'Fingerprint'}</summary><code class="fp">${escapeHtml(node.fingerprint)}</code></details>
+      </div>
+      ${root && !node.self ? `
+      <div class="node-actions">
+        ${node.status === 'active' ? `<button class="btn" type="button" data-node-action="disable">${fr ? 'Désactiver' : 'Disable'}</button>` : ''}
+        ${node.status === 'disabled' ? `<button class="btn" type="button" data-node-action="enable">${fr ? 'Réactiver' : 'Enable'}</button>` : ''}
+        ${node.status !== 'revoked' ? `<button class="btn danger" type="button" data-node-action="revoke">${fr ? 'Révoquer' : 'Revoke'}</button>` : ''}
+        ${node.status === 'revoked' ? `<button class="btn danger" type="button" data-node-action="remove">${fr ? 'Retirer' : 'Remove'}</button>` : ''}
+      </div>` : ''}
+    </li>`;
+
+  host.innerHTML = `
+    <section class="card">
+      <div class="panel-head">
+        <h2>${escapeHtml(cluster.name)}</h2>
+        ${can('operate') ? `<button class="btn" type="button" id="cluster-sync-now">${fr ? 'Synchroniser maintenant' : 'Sync now'}</button>` : ''}
+      </div>
+      <p class="hint">${fr ? 'Époque du manifeste' : 'Manifest epoch'} ${cluster.epoch} · ${fr ? 'racine' : 'root'} <code class="fp">${escapeHtml(cluster.rootFingerprint)}</code></p>
+      ${selfLine}
+      ${view.pendingConflicts ? `<p class="hint">${view.pendingConflicts} ${fr ? 'version(s) concurrente(s) attendent d’être fusionnées par les appareils des utilisateurs.' : 'concurrent version(s) are waiting to be merged by users’ devices.'}</p>` : ''}
+    </section>
+
+    ${view.pending?.length && root ? `
+    <section class="card attention">
+      <h2>${fr ? 'Demandes d’adhésion' : 'Join requests'}</h2>
+      <p class="hint">${fr ? 'Comparez l’empreinte avec celle affichée sur le nœud demandeur avant d’approuver.' : 'Compare the fingerprint with the one shown on the requesting node before approving.'}</p>
+      <ul class="node-list">${view.pending.map(r => `
+        <li class="node-row" data-request="${escapeHtml(r.id)}">
+          <div class="node-main">
+            <strong>${escapeHtml(r.name)}</strong> <span class="badge muted">${escapeHtml(r.zone)}</span>
+            <div class="hint">${escapeHtml(r.region)} · ${escapeHtml(r.url)} · ${when(r.requestedAt)}</div>
+            <code class="fp">${escapeHtml(r.fingerprint)}</code>
+          </div>
+          <div class="node-actions">
+            <button class="btn primary" type="button" data-request-action="approve">${fr ? 'Approuver' : 'Approve'}</button>
+            <button class="btn" type="button" data-request-action="reject">${fr ? 'Refuser' : 'Reject'}</button>
+          </div>
+        </li>`).join('')}</ul>
+    </section>` : ''}
+
+    ${zones.map(zone => `
+    <section class="card">
+      <h2>${fr ? 'Zone' : 'Zone'} ${escapeHtml(zone)}${zone === view.self.zone ? ` <span class="badge muted">${fr ? 'celle de ce nœud' : 'this node’s'}</span>` : ''}</h2>
+      <ul class="node-list">${cluster.nodes.filter(n => n.zone === zone).map(nodeRow).join('')}</ul>
+    </section>`).join('')}
+
+    ${manage ? `
+    <section class="card">
+      <h2>${fr ? 'Nœuds et clés' : 'Nodes and keys'}</h2>
+      <div class="stack">
+        ${root ? `<div class="row-split"><span>${fr ? 'Ajouter un nœud à la grappe' : 'Add a node to the cluster'}</span><button class="btn primary" type="button" id="cluster-invite">${fr ? 'Créer une invitation' : 'Create invitation'}</button></div><div id="cluster-invite-out"></div>` : ''}
+        <div class="row-split"><span>${fr ? 'Renouveler la clé de ce nœud' : 'Renew this node’s key'}</span><button class="btn" type="button" id="cluster-rotate-node">${fr ? 'Renouveler' : 'Renew'}</button></div>
+        ${root ? `
+        <div class="row-split"><span>${fr ? 'Renouveler la clé racine' : 'Renew the root key'}</span><button class="btn" type="button" id="cluster-rotate-root">${fr ? 'Renouveler' : 'Renew'}</button></div>
+        <div class="row-split"><span>${fr ? 'Copie de secours de la clé racine (chiffrée)' : 'Backup of the root key (encrypted)'}</span><button class="btn" type="button" id="cluster-export-root">${fr ? 'Exporter' : 'Export'}</button></div>` : `
+        <div class="row-split"><span>${fr ? 'Reprendre la clé racine sur ce nœud (si le nœud racine est perdu)' : 'Take over the root key on this node (if the root node is lost)'}</span>
+          <label class="btn">${fr ? 'Importer…' : 'Import…'}<input type="file" id="cluster-import-root" accept="application/json" hidden></label></div>`}
+        <div class="row-split"><span>${fr ? 'Quitter la grappe (les données restent)' : 'Leave the cluster (data stays)'}</span><button class="btn danger" type="button" id="cluster-leave">${fr ? 'Quitter' : 'Leave'}</button></div>
+      </div>
+    </section>` : ''}
+
+    <section class="card">
+      <h2>${fr ? 'Événements' : 'Events'}</h2>
+      <ul class="events">${(view.events ?? []).map(ev => `
+        <li class="${escapeHtml(ev.level)}"><span class="hint">${when(ev.at)}</span> ${escapeHtml(ev.message)}</li>`).join('') || `<li class="hint">${fr ? 'Rien à signaler' : 'Nothing to report'}</li>`}</ul>
+    </section>`;
+
+  $('cluster-sync-now')?.addEventListener('click', () => void clusterAction('POST', 'cluster/sync', {}));
+
+  host.querySelectorAll('[data-node-action]').forEach(button => button.addEventListener('click', () => {
+    const id = button.closest('[data-node]').dataset.node;
+    const node = cluster.nodes.find(n => n.id === id);
+    const action = button.dataset.nodeAction;
+    if (action === 'enable' || action === 'disable') {
+      return void clusterAction('PATCH', `cluster/nodes/${id}`, { status: action === 'enable' ? 'active' : 'disabled' });
+    }
+    if (action === 'revoke') {
+      const candidates = cluster.nodes.filter(n => n.id !== id && n.status === 'active' && n.zone === node.zone);
+      const replacement = candidates.length
+        ? prompt(fr
+          ? `Révoquer ${node.name} ? Il ne pourra plus échanger avec la grappe.\nRemplaçant (facultatif), parmi : ${candidates.map(c => c.name).join(', ')}`
+          : `Revoke ${node.name}? It will no longer talk to the cluster.\nReplacement (optional), among: ${candidates.map(c => c.name).join(', ')}`, '')
+        : (confirm(fr ? `Révoquer ${node.name} ?` : `Revoke ${node.name}?`) ? '' : null);
+      if (replacement === null) return;
+      const by = candidates.find(c => c.name.toLowerCase() === replacement.trim().toLowerCase());
+      return void clusterAction('POST', `cluster/nodes/${id}/revoke`, by ? { replacedBy: by.id } : {});
+    }
+    if (action === 'remove' && confirm(fr ? `Retirer ${node.name} du manifeste ?` : `Remove ${node.name} from the manifest?`)) {
+      return void clusterAction('DELETE', `cluster/nodes/${id}`);
+    }
+  }));
+
+  host.querySelectorAll('[data-request-action]').forEach(button => button.addEventListener('click', () => {
+    const id = button.closest('[data-request]').dataset.request;
+    void clusterAction('POST', `cluster/requests/${id}/${button.dataset.requestAction}`, {});
+  }));
+
+  $('cluster-invite')?.addEventListener('click', () => void clusterAction('POST', 'cluster/invites', {}, result => {
+    {
+      $('cluster-invite-out').innerHTML = `
+        <p class="hint">${fr ? 'À coller sur le nouveau nœud, onglet Grappe → Rejoindre. Valable jusqu’à' : 'Paste on the new node, Cluster tab → Join. Valid until'} ${when(result.expiresAt)}.</p>
+        <code class="secret">${escapeHtml(result.code)}</code>`;
+    }
+  }));
+  $('cluster-rotate-node')?.addEventListener('click', () => {
+    if (confirm(fr ? 'Renouveler la clé de ce nœud ? Les autres nœuds l’adoptent automatiquement.' : 'Renew this node’s key? Other nodes adopt it automatically.')) {
+      void clusterAction('POST', 'cluster/node-key/rotate', {});
+    }
+  });
+  $('cluster-rotate-root')?.addEventListener('click', () => {
+    if (confirm(fr ? 'Renouveler la clé racine ? Pensez à refaire ensuite la copie de secours.' : 'Renew the root key? Remember to redo the backup afterwards.')) {
+      void clusterAction('POST', 'cluster/root-key/rotate', {});
+    }
+  });
+  $('cluster-export-root')?.addEventListener('click', async () => {
+    const passphrase = prompt(fr ? 'Phrase de passe pour chiffrer la copie (16 caractères au moins). Sans elle, la copie est inutilisable.' : 'Passphrase to encrypt the backup (16+ characters). Without it the backup is useless.');
+    if (!passphrase) return;
+    try {
+      const backup = await api('POST', 'cluster/root-key/export', { passphrase });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }));
+      link.download = `bettervault-cluster-root-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+  $('cluster-import-root')?.addEventListener('change', async event => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const passphrase = prompt(fr ? 'Phrase de passe de la copie' : 'Backup passphrase');
+    if (!passphrase) return;
+    let backup;
+    try {
+      backup = JSON.parse(await file.text());
+    } catch {
+      return alert(fr ? 'Fichier illisible' : 'Unreadable file');
+    }
+    void clusterAction('POST', 'cluster/root-key/import', { backup, passphrase });
+  });
+  $('cluster-leave')?.addEventListener('click', () => {
+    if (confirm(fr ? 'Quitter la grappe ? Ce serveur garde ses données mais ne réplique plus.' : 'Leave the cluster? This server keeps its data but stops replicating.')) {
+      void clusterAction('POST', 'cluster/leave', {});
+    }
+  });
+}
