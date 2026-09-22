@@ -1,3 +1,4 @@
+import type { RegistrationOptions, SecurityKeyAssertion, SecurityKeyInfo } from './securityKey';
 import type { Argon2Params } from '../import_export/encryptedExport';
 import type { EncryptedBlob } from './accountCrypto';
 import type { VaultLimits } from './limits';
@@ -74,6 +75,7 @@ export interface AccountInfo {
   email: string;
   createdAt: number;
   totpEnabled: boolean;
+  securityKeys?: SecurityKeyInfo[];
   hasRecoveryKey: boolean;
   emailEnabled: boolean;
   limits: VaultLimits;
@@ -270,7 +272,7 @@ export class CloudClient {
     return result;
   }
 
-  async login(email: string, authHash: string, extra: { totp?: string; locale?: string; notify?: boolean } = {}): Promise<CloudSession> {
+  async login(email: string, authHash: string, extra: { totp?: string; locale?: string; notify?: boolean; rpId?: string; webauthn?: SecurityKeyAssertion } = {}): Promise<CloudSession> {
     const session = await this.request<CloudSession>('POST', '/api/v1/sessions', { email, authHash, ...extra });
     this.token = session.token;
     return session;
@@ -278,6 +280,18 @@ export class CloudClient {
 
   me(): Promise<AccountInfo> {
     return this.request('GET', '/api/v1/accounts/me');
+  }
+
+  securityKeyOptions(authHash: string, rpId: string): Promise<RegistrationOptions> {
+    return this.request('POST', '/api/v1/accounts/security-keys/options', { authHash, rpId });
+  }
+
+  addSecurityKey(payload: { name: string; rpId: string; clientDataJSON: string; attestationObject: string }): Promise<SecurityKeyInfo> {
+    return this.request('POST', '/api/v1/accounts/security-keys', payload);
+  }
+
+  async removeSecurityKey(authHash: string, id: string): Promise<void> {
+    await this.request('DELETE', `/api/v1/accounts/security-keys/${encodeURIComponent(id)}`, { authHash });
   }
 
   listSessions(): Promise<{ sessions: AccountSession[] }> {

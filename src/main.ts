@@ -66,6 +66,7 @@ import { translateError } from './i18n/errorMessages';
 import { tabIcon } from './ui/tabIcons';
 import { mountStepper, type StepDef } from './ui/stepper';
 import { ProfileStore } from './account/profiles';
+import { securityKeysSectionHtml, wireSecurityKeys } from './ui/securityKeysPanel';
 import { renderVersioning, wireVersioning, renderTrash, type VersionsContext } from './ui/versionsPanel';
 import { expiredTrash } from './store/vaultStore';
 import { TRASH_DAYS } from './account/merge';
@@ -5320,7 +5321,8 @@ ${uri}` : uri;
               <span class="status-pill" data-totp-status>…</span>
             </div>
             <div class="account-actions account-actions-end"><button class="btn-primary" data-action="totp" disabled>${tr('Configurer', 'Set up')}</button></div>
-            <div class="form-section" data-totp-flow hidden></div>` : `
+            <div class="form-section" data-totp-flow hidden></div>
+            <div data-security-keys>${securityKeysSectionHtml(tr)}</div>` : `
             <p class="modal-text">${tr('La double authentification protège la connexion au serveur : activez d’abord la synchronisation.', 'Two-factor authentication protects the server sign-in: enable sync first.')}</p>`}
           <div class="switch-row" style="cursor:default;">
             <span>${tr('Clé de secours', 'Recovery key')}<small>${tr('Permet de choisir un nouveau mot de passe principal sans perdre le coffre', 'Lets you set a new master password without losing the vault')}</small></span>
@@ -5516,6 +5518,18 @@ ${uri}` : uri;
           showError('connect', err);
         }
       });
+    });
+
+    const keysRoot = $<HTMLElement>('[data-security-keys]');
+    if (keysRoot) wireSecurityKeys(keysRoot, {
+      list: () => accountService.listSecurityKeys(),
+      add: (password, name) => accountService.addSecurityKey(password, name),
+      remove: (password, id) => accountService.removeSecurityKey(password, id),
+      tr,
+      escape: value => this.escapeHtml(value),
+      errorMessage: accountErrorMessage,
+      toast: (message, kind) => this.showToast(message, kind),
+      locale
     });
 
     // Double authentification du compte

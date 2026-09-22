@@ -39,6 +39,7 @@ import { parseS3, parseSettingsUpdate, publicSettings, settingsFromEnv, type Ser
 import { createSmtpMailer, type Mailer, type MailMessage, type SmtpConfig } from './mailer.ts';
 import { emails, pickLocale, type Locale } from './emails.ts';
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.ts';
+import { createWebauthn, parseRpId, type AssertionInput } from './webauthn.ts';
 
 /**
  * API BetterVault : le serveur ne stocke que des données chiffrées côté client.
@@ -288,6 +289,8 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     return hasRecovery && timingSafeEqual(computed, expected);
   };
 
+  const webauthn = createWebauthn(db, now);
+
   /** Consomme un code de l'application d'authentification (un code ne sert qu'une fois) */
   const consumeTotp = (user: UserRow, code: string | null): boolean => {
     if (!user.totp_secret || !code) return false;
@@ -455,9 +458,26 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       if (!(await verifyAuthHash(user, authHash)) || !user) {
         throw new HttpError(401, 'invalid_credentials', 'Email ou mot de passe incorrect');
       }
-      if (user.totp_enabled) {
-        if (!totp) throw new HttpError(401, 'totp_required', 'Code de l’application d’authentification requis');
-        if (!consumeTotp(user, totp)) throw new HttpError(401, 'totp_invalid', 'Code incorrect ou déjà utilisé');
+      /*
+       * Second facteur : un code de l'application, ou une clé de sécurité enregistrée
+       * pour le domaine de l'application qui se connecte. Sans l'un ni l'autre, on
+       * renvoie ce qui est possible, avec un défi prêt si une clé existe ici.
+       */
+      const hasKeys = webauthn.keysFor(user.id).length > 0;
+      if (user.totp_enabled || hasKeys) {
+        if (body.webauthn) {
+          webauthn.verifyLogin(user.id, body.rpId, body.webauthn as AssertionInput);
+        } else if (totp && user.totp_enabled) {
+          if (!consumeTotp(user, totp)) throw new HttpError(401, 'totp_invalid', 'Code incorrect ou déjà utilisé');
+        } else {
+          const options = hasKeys && body.rpId !== undefined ? webauthn.loginOptions(user.id, parseRpId(body.rpId)) : null;
+          const details = { totp: !!user.totp_enabled, webauthn: options, otherKeys: hasKeys && !options };
+          if (!options && !user.totp_enabled) {
+            throw new HttpError(401, 'security_key_elsewhere', 'Votre clé de sécurité est enregistrée dans une autre application BetterVault. Connectez-vous depuis celle-ci, ou utilisez votre clé de récupération.', details);
+          }
+          throw new HttpError(401, options ? 'second_factor_required' : 'totp_required',
+            options ? 'Clé de sécurité ou code de l’application requis' : 'Code de l’application d’authentification requis', details);
+        }
       }
 
       if (body.locale === 'fr' || body.locale === 'en') sql.updateLocale.run(body.locale, user.id);
@@ -524,6 +544,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
           email: user.email,
           createdAt: user.created_at,
           totpEnabled: !!user.totp_enabled,
+          securityKeys: webauthn.list(user.id),
           hasRecoveryKey: !!user.recovery_verifier,
           emailEnabled: !!settings.smtp,
           limits: limitsFor(user.id),
@@ -620,6 +641,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       const user = sql.userById.get(userId) as UserRow | undefined;
       if (!(await verifyAuthHash(user, authHash))) throw new HttpError(403, 'invalid_credentials', 'Mot de passe incorrect');
       deleteUserAttachments(context, userId);
+      db.prepare('DELETE FROM security_keys WHERE user_id = ?').run(userId);
       sql.deleteUser.run(userId);
       audit('account.deleted', {}, userId);
       return { status: 204 };
@@ -1197,6 +1219,40 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     route('DELETE', '/api/v1/admin/accounts/:id', async (req, params) => adminAuth.updateAccount(req, params.id, 'DELETE')),
     ...sharingRoutes(context),
     ...attachmentRoutes(context),
+    /* ── Clés de sécurité ── */
+    route('POST', '/api/v1/accounts/security-keys/options', async req => {
+      const { userId } = authenticate(req);
+      limit(req, 'password');
+      const body = await readJson(req, 4096);
+      const user = getUser(userId);
+      if (!(await verifyAuthHash(user, parseBase64(body.authHash, 'authHash', { exact: 32 })))) {
+        throw new HttpError(403, 'invalid_credentials', 'Mot de passe principal incorrect');
+      }
+      return { status: 200, body: webauthn.registrationOptions(userId, user.email, parseRpId(body.rpId)) };
+    }),
+    route('POST', '/api/v1/accounts/security-keys', async req => {
+      const { userId } = authenticate(req);
+      limit(req, 'password');
+      const body = await readJson(req, 32768);
+      const key = webauthn.register(userId, body as never);
+      const user = getUser(userId);
+      notify(ctx => emails.twoFactor(ctx, now(), true), user, 'security_key_added');
+      audit('account.security_key_added', { rpId: key.rpId }, userId);
+      return { status: 201, body: key };
+    }),
+    route('DELETE', '/api/v1/accounts/security-keys/:id', async (req, params) => {
+      const { userId } = authenticate(req);
+      limit(req, 'password');
+      const body = await readJson(req, 4096);
+      const user = getUser(userId);
+      if (!(await verifyAuthHash(user, parseBase64(body.authHash, 'authHash', { exact: 32 })))) {
+        throw new HttpError(403, 'invalid_credentials', 'Mot de passe principal incorrect');
+      }
+      if (!webauthn.remove(userId, params.id)) throw new HttpError(404, 'not_found', 'Clé de sécurité inconnue');
+      notify(ctx => emails.twoFactor(ctx, now(), false), user, 'security_key_removed');
+      audit('account.security_key_removed', {}, userId);
+      return { status: 204 };
+    }),
     route('GET', '/security/not-me/:token', async (_req, params) => {
       const alert = alertByToken(params.token);
       return alert ? htmlReply(renderNotMePage(alert.kind, params.token)) : htmlReply(renderNotMeExpired(), 410);

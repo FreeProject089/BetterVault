@@ -1,3 +1,4 @@
+import { createCredential, currentRpId, getAssertion, securityKeysSupported, type LoginOptions, type SecurityKeyInfo } from './securityKey';
 import type { Argon2Params } from '../import_export/encryptedExport';
 import type { UnlockedVaultData } from '../types/vault';
 import { createEmptyVaultData } from '../store/vaultStore';
@@ -277,7 +278,7 @@ export class AccountService {
 
     let session;
     try {
-      session = await client.login(email, keys.authHash, { totp: totp?.replace(/\s/g, '') || undefined, locale: this.locale() });
+      session = await this.loginWithFactor(client, email, keys.authHash, { totp, locale: this.locale() });
     } catch (err) {
       if (err instanceof CloudError && err.status === 401 && err.code === 'invalid_credentials') throw new WrongPasswordError('Email ou mot de passe incorrect');
       throw err;
@@ -558,10 +559,13 @@ export class AccountService {
       if (!(err instanceof CloudError) || err.status !== 401 || !this.authHash || !this.cloud || !account) throw err;
       let session;
       try {
-        session = await this.cloud.login(account.email, this.authHash, { notify: false });
+        session = await this.cloud.login(account.email, this.authHash, { notify: false, rpId: currentRpId() });
       } catch (loginErr) {
-        if (loginErr instanceof CloudError && loginErr.code === 'totp_required') {
-          throw new CloudError('Session expirée : saisissez un code de votre application d’authentification pour reprendre la synchronisation.', 401, 'totp_required');
+        // Pas de clé sollicitée en arrière-plan : c'est l'utilisateur qui relance, depuis la fenêtre du compte
+        if (loginErr instanceof CloudError && (loginErr.code === 'totp_required' || loginErr.code === 'second_factor_required')) {
+          throw new CloudError(loginErr.code === 'totp_required'
+            ? 'Session expirée : saisissez un code de votre application d’authentification pour reprendre la synchronisation.'
+            : 'Session expirée : touchez votre clé de sécurité, ou saisissez un code, pour reprendre la synchronisation.', 401, 'totp_required');
         }
         if (loginErr instanceof CloudError && loginErr.status === 401) {
           throw new CloudError(
@@ -944,9 +948,63 @@ export class AccountService {
     const account = this.getAccount();
     if (!account || !this.authHash) throw new Error('Déverrouillez le coffre d’abord');
     const client = this.cloudClient();
-    const session = await client.login(account.email, this.authHash, { totp: totp.replace(/\s/g, ''), notify: false });
+    // Sans code, c'est la clé de sécurité qui est sollicitée
+    const session = await this.loginWithFactor(client, account.email, this.authHash, { totp, notify: false });
     this.writeSession({ token: session.token, lastSyncAt: this.readSession()?.lastSyncAt ?? null });
     await this.syncNow();
+  }
+
+  /**
+   * Connexion avec second facteur. Si le serveur propose une clé de sécurité et
+   * qu'aucun code n'a été saisi, la clé est sollicitée tout de suite. Si
+   * l'utilisateur l'écarte, on retombe sur le code de l'application quand il existe.
+   */
+  private async loginWithFactor(client: CloudClient, email: string, authHash: string, extra: { totp?: string; locale?: string; notify?: boolean }) {
+    const totp = extra.totp?.replace(/\s/g, '') || undefined;
+    const rpId = currentRpId();
+    try {
+      return await client.login(email, authHash, { ...extra, totp, rpId });
+    } catch (err) {
+      if (!(err instanceof CloudError) || err.code !== 'second_factor_required' || totp) throw err;
+      const details = err.details as { totp?: boolean; webauthn?: LoginOptions | null } | undefined;
+      if (!details?.webauthn) throw err;
+      let assertion;
+      try {
+        assertion = await getAssertion(details.webauthn);
+      } catch {
+        if (details.totp) throw new CloudError('Clé non utilisée : saisissez plutôt un code de votre application d’authentification', 401, 'totp_required');
+        throw new CloudError('Clé de sécurité non utilisée : réessayez en la touchant quand elle clignote', 401, 'security_key_cancelled');
+      }
+      return client.login(email, authHash, { ...extra, totp: undefined, rpId, webauthn: assertion });
+    }
+  }
+
+  async listSecurityKeys(): Promise<SecurityKeyInfo[]> {
+    const client = this.cloudClient();
+    return (await this.withSessionRetry(() => client.me())).securityKeys ?? [];
+  }
+
+  /** Enregistre une clé pour l'application courante ; le mot de passe confirme que c'est bien le titulaire */
+  async addSecurityKey(password: string, name: string): Promise<SecurityKeyInfo> {
+    const rpId = currentRpId();
+    if (!rpId || !securityKeysSupported()) throw new Error('Les clés de sécurité ne sont pas prises en charge ici');
+    const client = this.cloudClient();
+    const { authHash } = await this.verifyPassword(password);
+    const options = await this.withSessionRetry(() => client.securityKeyOptions(authHash, rpId));
+    let created;
+    try {
+      created = await createCredential(options);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'InvalidStateError') throw new Error('Cette clé est déjà enregistrée');
+      throw new Error('Clé non enregistrée : l’opération a été annulée ou a expiré');
+    }
+    return this.withSessionRetry(() => client.addSecurityKey({ name, rpId, ...created }));
+  }
+
+  async removeSecurityKey(password: string, id: string): Promise<void> {
+    const client = this.cloudClient();
+    const { authHash } = await this.verifyPassword(password);
+    await this.withSessionRetry(() => client.removeSecurityKey(authHash, id));
   }
 
   hasRecoveryKey(): boolean {

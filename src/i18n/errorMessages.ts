@@ -5,6 +5,13 @@
 
 const EXACT: Record<string, string> = {
   'Adresse du serveur invalide': 'Invalid server address',
+  'Clé non utilisée : saisissez plutôt un code de votre application d’authentification': 'Key not used: enter a code from your authenticator app instead',
+  'Clé de sécurité non utilisée : réessayez en la touchant quand elle clignote': 'Security key not used: try again and touch it when it blinks',
+  'Les clés de sécurité ne sont pas prises en charge ici': 'Security keys are not supported here',
+  'Cette clé est déjà enregistrée': 'This key is already registered',
+  'Clé non enregistrée : l’opération a été annulée ou a expiré': 'Key not registered: the operation was cancelled or timed out',
+  'Aucune clé n’a répondu': 'No key responded',
+  'Session expirée : touchez votre clé de sécurité, ou saisissez un code, pour reprendre la synchronisation.': 'Session expired: touch your security key, or enter a code, to resume syncing.',
   'Adresse du serveur requise': 'Server address required',
   'Adresse email invalide': 'Invalid email address',
   'Adresse non prise en charge': 'Unsupported address',
