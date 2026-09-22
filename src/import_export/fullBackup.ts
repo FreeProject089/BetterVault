@@ -221,6 +221,8 @@ export async function applyImport(
   current: UnlockedVaultData,
   options: {
     upload: (payload: Uint8Array) => Promise<{ id: string }>;
+    /** Retire un fichier déjà envoyé quand l'import échoue ensuite : il ne doit pas occuper le quota */
+    discard?: (id: string) => Promise<void>;
     newId: (prefix: string) => string;
     importedSuffix: string;
     onProgress?: (done: number, total: number) => void;
@@ -259,29 +261,37 @@ export async function applyImport(
   let done = 0;
   const skippedFiles: PlannedFile[] = plan.files.filter(f => f.destination === 'refused');
   const credentials: CredentialItem[] = [];
-  for (const credential of credentialsSource) {
-    const attachments: AttachmentMeta[] = [];
-    for (const meta of credential.attachments ?? []) {
-      const plannedFile = destination.get(meta.id);
-      const encoded = backup.files[meta.id];
-      if (!plannedFile || !encoded || plannedFile.destination === 'refused') continue;
-      if (plannedFile.destination === 'server') {
-        const uploaded = await options.upload(fromBase64(encoded));
-        attachments.push({ ...meta, id: uploaded.id });
-      } else {
-        attachments.push({ ...meta, id: newId('att'), data: encoded });
+  const uploadedIds: string[] = [];
+  try {
+    for (const credential of credentialsSource) {
+      const attachments: AttachmentMeta[] = [];
+      for (const meta of credential.attachments ?? []) {
+        const plannedFile = destination.get(meta.id);
+        const encoded = backup.files[meta.id];
+        if (!plannedFile || !encoded || plannedFile.destination === 'refused') continue;
+        if (plannedFile.destination === 'server') {
+          const uploaded = await options.upload(fromBase64(encoded));
+          uploadedIds.push(uploaded.id);
+          attachments.push({ ...meta, id: uploaded.id });
+        } else {
+          attachments.push({ ...meta, id: newId('att'), data: encoded });
+        }
+        // Hors de l'appel : avec « ?. », l'incrément sauterait quand il n'y a pas de suivi
+        done += 1;
+        options.onProgress?.(done, total);
       }
-      // Hors de l'appel : avec « ?. », l'incrément sauterait quand il n'y a pas de suivi
-      done += 1;
-      options.onProgress?.(done, total);
+      credentials.push({
+        ...credential,
+        id: credentialIds.get(credential.id)!,
+        vaultId: vaultIds.get(credential.vaultId)!,
+        ...(credential.folderId ? { folderId: folderIds.get(credential.folderId) } : {}),
+        ...(credential.attachments ? { attachments } : {})
+      });
     }
-    credentials.push({
-      ...credential,
-      id: credentialIds.get(credential.id)!,
-      vaultId: vaultIds.get(credential.vaultId)!,
-      ...(credential.folderId ? { folderId: folderIds.get(credential.folderId) } : {}),
-      ...(credential.attachments ? { attachments } : {})
-    });
+  } catch (err) {
+    // Rien n'est gardé d'un import interrompu : on le relance sans doublon ni fichier orphelin
+    if (options.discard) await Promise.allSettled(uploadedIds.map(id => options.discard!(id)));
+    throw err;
   }
 
   const taskIds = new Map<string, string>();

@@ -151,6 +151,25 @@ describe('Import', () => {
     expect(new TextDecoder().decode(await decryptFile(autreServeur.get(meta.id)!, meta.key))).toBe(new TextDecoder().decode(clair));
   });
 
+  it('retire les fichiers déjà envoyés quand l’import échoue en route', async () => {
+    const { data, serveur } = await coffreAvecFichiers();
+    const { backup } = await buildFullBackup(data, { canExport: () => true, fetchPayload: async m => serveur.get(m.id)! });
+    const autreServeur = new Map<string, Uint8Array>();
+    let envois = 0;
+    await expect(applyImport(backup, planImport(backup, cible()), createEmptyVaultData(), {
+      upload: async payload => {
+        if (++envois === 2) throw new Error('coupure réseau');
+        const id = `srv-orphelin-${envois}`;
+        autreServeur.set(id, payload);
+        return { id };
+      },
+      discard: async id => { autreServeur.delete(id); },
+      newId,
+      importedSuffix: '(importé)'
+    })).rejects.toThrow('coupure réseau');
+    expect(autreServeur.size).toBe(0);
+  });
+
   it('peut être rejoué sans collision', async () => {
     const { data, serveur } = await coffreAvecFichiers();
     const { backup } = await buildFullBackup(data, { canExport: () => true, fetchPayload: async m => serveur.get(m.id)! });

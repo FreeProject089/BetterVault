@@ -671,6 +671,7 @@ ${uri}` : uri;
                 }
               }
             },
+            discard: id => accountService.withCloud(client => client.deleteAttachment(id)),
             newId: prefix => randomId(prefix),
             importedSuffix: tr('(importé)', '(imported)'),
             onProgress: (done, total) => setStatus(`<div class="field-hint">${tr(`Envoi des fichiers : ${done} / ${total}`, `Uploading files: ${done} / ${total}`)}</div>`)
