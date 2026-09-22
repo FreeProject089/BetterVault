@@ -5,6 +5,8 @@
 
 const EXACT: Record<string, string> = {
   'Adresse du serveur invalide': 'Invalid server address',
+  'Ajoutez au moins un champ': 'Add at least one field',
+  'Un type porte déjà ce nom': 'A type already has this name',
   'Clé non utilisée : saisissez plutôt un code de votre application d’authentification': 'Key not used: enter a code from your authenticator app instead',
   'Clé de sécurité non utilisée : réessayez en la touchant quand elle clignote': 'Security key not used: try again and touch it when it blinks',
   'Les clés de sécurité ne sont pas prises en charge ici': 'Security keys are not supported here',

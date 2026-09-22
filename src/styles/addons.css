@@ -3954,3 +3954,18 @@ body.dragging-item .folder-breadcrumb button { outline: 1px dashed var(--border-
 .security-key { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; }
 .security-key-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .security-key-text small { color: var(--text-secondary, var(--muted)); overflow-wrap: anywhere; }
+
+/* Types d'éléments personnalisés */
+.type-card-manage { border-style: dashed; }
+.template-list { list-style: none; margin: 10px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.template-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; }
+.template-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.template-row-text small { color: var(--text-secondary, var(--muted)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.template-fields { list-style: none; margin: 6px 0 10px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.template-field-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 150px) auto 36px; gap: 8px; align-items: center; }
+.check-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
+.required-mark { color: var(--danger, #f85149); }
+@media (max-width: 560px) {
+  .template-field-row { grid-template-columns: minmax(0, 1fr) 36px; }
+  .template-field-row select, .template-field-row .check-inline { grid-column: 1 / 2; }
+}

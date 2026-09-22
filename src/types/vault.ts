@@ -76,6 +76,8 @@ export interface CredentialItem {
   vaultId: string;
   /** Absent sur les coffres d'avant les types : l'élément est alors un identifiant */
   type?: ItemType;
+  /** Type personnalisé dont l'élément a été créé ; ses valeurs sont dans `fields` */
+  templateId?: string;
   /** Dossier de rangement, dans le coffre ; absent = à la racine */
   folderId?: string;
   title: string;
@@ -135,6 +137,24 @@ export interface VaultTypeDef {
   updatedAt: number;
 }
 
+export type TemplateFieldKind = 'text' | 'secret' | 'multiline' | 'date' | 'number' | 'url';
+
+export interface TemplateField {
+  id: string;
+  label: string;
+  kind: TemplateFieldKind;
+  required?: boolean;
+}
+
+/** Type d'élément personnalisé : un nom et la liste des champs à remplir */
+export interface ItemTemplate {
+  id: string;
+  name: string;
+  fields: TemplateField[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 /** Dossier de rangement à l'intérieur d'un coffre ; les dossiers peuvent s'imbriquer */
 export interface FolderDef {
   id: string;
@@ -155,6 +175,7 @@ export interface UnlockedVaultData {
   tagDefs: TagDef[];
   folders: FolderDef[];
   vaultTypes?: VaultTypeDef[];
+  itemTemplates?: ItemTemplate[];
   /** Suppressions synchronisables : id de l'élément → horodatage de suppression */
   deleted: Record<string, number>;
   /** Éléments supprimés récemment, restaurables pendant 30 jours */

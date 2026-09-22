@@ -67,6 +67,8 @@ import { tabIcon } from './ui/tabIcons';
 import { mountStepper, type StepDef } from './ui/stepper';
 import { ProfileStore } from './account/profiles';
 import { securityKeysSectionHtml, wireSecurityKeys } from './ui/securityKeysPanel';
+import { mountTemplateEditor, readTemplateValues, templateCardsHtml, templateFieldsHtml } from './ui/itemTemplatesUi';
+import { checkTemplateValues, mergeTemplateFields } from './store/itemTemplates';
 import { renderVersioning, wireVersioning, renderTrash, type VersionsContext } from './ui/versionsPanel';
 import { expiredTrash } from './store/vaultStore';
 import { TRASH_DAYS } from './account/merge';
@@ -690,6 +692,10 @@ class AppController {
       this.openAuditModal();
     });
 
+    document.getElementById('btn-open-templates')?.addEventListener('click', () => {
+      this.openTemplatesModal();
+    });
+
     document.getElementById('btn-open-trash')?.addEventListener('click', () => {
       this.openTrashModal();
     });
@@ -1234,7 +1240,7 @@ class AppController {
           <div class="record-sub">${this.escapeHtml(this.itemSubtitle(cred))}</div>
         </div>
         <div class="record-badges">
-          ${itemTypeOf(cred.type) === 'login' ? '' : this.typeBadge(itemTypeOf(cred.type))}
+          ${itemTypeOf(cred.type) === 'login' && !cred.templateId ? '' : this.typeBadge(itemTypeOf(cred.type), cred.templateId)}
           ${expiry}
           ${cred.totpSecret ? '<span class="badge badge-accent">2FA</span>' : ''}
           ${cred.passkeys && cred.passkeys.length > 0 ? '<span class="badge">Passkey</span>' : ''}
@@ -1754,7 +1760,7 @@ class AppController {
             <div class="detail-title">${this.escapeHtml(cred.title)}</div>
             <div class="detail-meta">${detailType === 'login'
               ? this.escapeHtml(cred.domain || cred.website || this.tr('Aucun site', 'No website'))
-              : this.typeBadge(detailType)}</div>
+              : this.typeBadge(detailType, cred.templateId)}</div>
             ${this.renderTagChips(cred.tags)}
           </div>
         </div>
@@ -2422,6 +2428,8 @@ class AppController {
           </div>
           <div id="cred-icon-panel" hidden></div>
 
+          <section class="form-section" id="section-template" hidden></section>
+
           <section class="form-section" id="section-login">
             <div class="form-section-title">${SECTION.login}${tr('Connexion', 'Sign-in')}</div>
             <div class="form-row">
@@ -2645,19 +2653,21 @@ class AppController {
     let itemType: ItemType = itemTypeOf(existing?.type);
     // Tant que rien n'est choisi, la modale reste neutre : « identifiant » n'est qu'une présélection
     let typeChosen = isEdit;
+    const templates = vaultStore.getTemplates();
+    let template = existing?.templateId ? templates.find(t => t.id === existing.templateId) : undefined;
 
     const typeGrid = $<HTMLElement>('#cred-type-grid');
     const renderTypeGrid = () => {
       typeGrid.innerHTML = ITEM_TYPES.map(type => {
         const info = ITEM_TYPE_INFO[type];
-        return `<button type="button" class="type-card" data-type="${type}" aria-pressed="${type === itemType}">
+        return `<button type="button" class="type-card" data-type="${type}" aria-pressed="${!template && type === itemType}">
           ${tabIcon(info.icon, 18)}
           <span class="type-card-text">
             <span class="type-card-name">${this.escapeHtml(tr(info.fr, info.en))}</span>
             <span class="type-card-hint">${this.escapeHtml(tr(info.hintFr, info.hintEn))}</span>
           </span>
         </button>`;
-      }).join('');
+      }).join('') + templateCardsHtml(templates, template?.id, tr, value => this.escapeHtml(value));
     };
     const titleInput = $<HTMLInputElement>('#field-title');
     const websiteInput = $<HTMLInputElement>('#field-website');
@@ -2973,6 +2983,9 @@ class AppController {
     /** Montre les sections du type choisi et déplace ce qui change de place */
     const applyType = () => {
       $<HTMLElement>('#section-login').hidden = itemType !== 'login';
+      const templateSection = $<HTMLElement>('#section-template');
+      templateSection.hidden = !template;
+      templateSection.innerHTML = template ? templateFieldsHtml(template, existing?.fields, tr, value => this.escapeHtml(value)) : '';
       $<HTMLElement>('#section-card').hidden = itemType !== 'card';
       $<HTMLElement>('#section-identity').hidden = itemType !== 'identity';
       $<HTMLElement>('#section-ssh').hidden = itemType !== 'sshKey';
@@ -3002,7 +3015,7 @@ class AppController {
       // Le titre ne nomme le type qu'une fois celui-ci choisi, pas sur l'écran de choix
       if (typeChosen) {
         const info = ITEM_TYPE_INFO[itemType];
-        const typeName = tr(info.fr, info.en);
+        const typeName = template?.name ?? tr(info.fr, info.en);
         $<HTMLElement>('.modal-title').textContent = isEdit
           ? tr(`Modifier : ${typeName}`, `Edit ${typeName}`)
           : tr(`Nouveau : ${typeName}`, `New ${typeName}`);
@@ -3012,8 +3025,17 @@ class AppController {
     };
 
     typeGrid.addEventListener('click', event => {
-      const choice = (event.target as HTMLElement).closest<HTMLElement>('[data-type]')?.dataset.type;
+      const target = event.target as HTMLElement;
+      if (target.closest('[data-manage-templates]')) {
+        stopScanner();
+        this.closeModal();
+        this.openTemplatesModal();
+        return;
+      }
+      const templateChoice = target.closest<HTMLElement>('[data-template]')?.dataset.template;
+      const choice = templateChoice ? 'note' : target.closest<HTMLElement>('[data-type]')?.dataset.type;
       if (!choice) return;
+      template = templateChoice ? templates.find(t => t.id === templateChoice) : undefined;
       itemType = itemTypeOf(choice);
       typeChosen = true;
       renderTypeGrid();
@@ -3045,6 +3067,13 @@ class AppController {
         if (month && (month < 1 || month > 12)) {
           $<HTMLInputElement>('#field-card-exp-month').focus();
           return tr('Le mois d’expiration doit être compris entre 01 et 12', 'The expiry month must be between 01 and 12');
+        }
+      }
+      if (template) {
+        const { error } = checkTemplateValues(template, readTemplateValues($<HTMLElement>('#section-template')), tr);
+        if (error) {
+          box.querySelector<HTMLElement>(`[data-tpl-field="${CSS.escape(error.fieldId)}"]`)?.focus();
+          return error.message;
         }
       }
       return undefined;
@@ -3142,10 +3171,12 @@ class AppController {
         card: undefined,
         identity: undefined,
         sshKey: undefined,
-        ...payloadForItemType()
+        ...payloadForItemType(),
+        templateId: template?.id,
+        ...(template ? { fields: mergeTemplateFields(template, readTemplateValues($<HTMLElement>('#section-template')), existing?.fields) } : {})
       };
 
-      const problem = checkCredential({ ...item, fields: existing?.fields }, limits, tr);
+      const problem = checkCredential({ ...item, fields: item.fields ?? existing?.fields }, limits, tr);
       if (problem) return fail(problem);
 
       stopScanner();
@@ -3800,6 +3831,34 @@ class AppController {
   /** À l'ouverture : ce qui dort à la corbeille depuis plus de TRASH_DAYS jours part, fichiers compris */
   private purgeExpiredTrash(): void {
     for (const entry of expiredTrash(vaultStore.getData().trash)) this.purgeTrashEntry(entry.item.id);
+  }
+
+  /** Types d'éléments personnalisés : création, modification, suppression */
+  private openTemplatesModal(): void {
+    const tr = (fr: string, en: string) => this.tr(fr, en);
+    const box = this.openModal(`
+      <div class="modal-header">
+        <div class="modal-title">${tr('Mes types d’éléments', 'My item types')}</div>
+        <button class="modal-close" type="button">${GEN_ICONS.close}</button>
+      </div>
+      <div class="modal-body" data-templates-body></div>
+      <div class="modal-footer">
+        <button type="button" class="btn-primary" data-close>${tr('Fermer', 'Close')}</button>
+      </div>`);
+    mountTemplateEditor(box.querySelector<HTMLElement>('[data-templates-body]')!, {
+      templates: () => vaultStore.getTemplates(),
+      save: input => vaultStore.saveTemplate(input),
+      remove: id => {
+        vaultStore.deleteTemplate(id);
+        this.renderList();
+      },
+      usage: id => vaultStore.getData().credentials.filter(c => c.templateId === id).length,
+      confirm: message => this.confirmDialog({ title: tr('Supprimer ce type ?', 'Delete this type?'), message, confirmLabel: tr('Supprimer', 'Delete'), danger: true }),
+      toast: (message, kind) => this.showToast(message, kind),
+      errorMessage: accountErrorMessage,
+      tr,
+      escape: value => this.escapeHtml(value)
+    });
   }
 
   private openTrashModal(): void {
@@ -7348,9 +7407,10 @@ ${uri}` : uri;
   }
 
   /** Pastille rappelant le type de l'élément */
-  private typeBadge(type: ItemType): string {
+  private typeBadge(type: ItemType, templateId?: string): string {
     const info = ITEM_TYPE_INFO[type];
-    return `<span class="item-type-badge">${tabIcon(info.icon, 13)}${this.escapeHtml(this.tr(info.fr, info.en))}</span>`;
+    const custom = templateId ? vaultStore.getTemplates().find(t => t.id === templateId) : undefined;
+    return `<span class="item-type-badge">${tabIcon(info.icon, 13)}${this.escapeHtml(custom?.name ?? this.tr(info.fr, info.en))}</span>`;
   }
 
   /**

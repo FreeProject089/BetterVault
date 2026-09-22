@@ -36,6 +36,7 @@ export interface Translations {
     audit: string;
     importExport: string;
     trash: string;
+    templates: string;
     shortcuts: string;
     sync: string;
     newVaultTitle: string;
@@ -115,6 +116,7 @@ export const fr: Translations = {
     generator: 'Générateur',
     audit: 'Audit de sécurité',
     trash: 'Corbeille',
+    templates: 'Mes types',
     importExport: 'Importer / exporter',
     shortcuts: 'Raccourcis clavier',
     sync: 'Compte et synchronisation',
@@ -195,6 +197,7 @@ export const en: Translations = {
     generator: 'Generator',
     audit: 'Security audit',
     trash: 'Trash',
+    templates: 'My types',
     importExport: 'Import / export',
     shortcuts: 'Keyboard shortcuts',
     sync: 'Account and sync',

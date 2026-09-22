@@ -1,3 +1,5 @@
+import { MAX_TEMPLATE_FIELDS, MAX_TEMPLATES, normalizeTemplates } from './itemTemplates';
+import type { ItemTemplate, TemplateField } from '../types/vault';
 import type { CredentialItem, FolderDef, Task, TagDef, TrashEntry, UnlockedVaultData, VaultMetadata, VaultTypeDef } from '../types/vault';
 import { capHistory, restoreVersion, resolveConflict, stampVersion, MAX_CONFLICTS, type ItemConflict, type ItemVersion } from './versions';
 import { MAX_TRASH, TRASH_DAYS } from '../account/merge';
@@ -201,6 +203,7 @@ export function normalizeVaultData(input: Partial<UnlockedVaultData> | null | un
     vaultTypes: (Array.isArray(source.vaultTypes) ? source.vaultTypes : [])
       .filter(type => type && typeof type.id === 'string' && typeof type.name === 'string')
       .map(type => ({ id: type.id, name: String(type.name).trim().slice(0, 40), createdAt: type.createdAt ?? now, updatedAt: type.updatedAt ?? now })),
+    itemTemplates: normalizeTemplates(source.itemTemplates, now),
     deleted: source.deleted && typeof source.deleted === 'object' ? { ...source.deleted } : {}
   };
 
@@ -488,6 +491,39 @@ export class VaultStore {
   }
 
   /* ── Types de coffres ─────────────────────────────────────────────── */
+
+  getTemplates(): ItemTemplate[] {
+    return [...(this.data.itemTemplates ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Crée ou met à jour un type d'élément personnalisé */
+  saveTemplate(input: { id?: string; name: string; fields: Array<Omit<TemplateField, 'id'> & { id?: string }> }): ItemTemplate {
+    const templates = this.data.itemTemplates ?? (this.data.itemTemplates = []);
+    const name = input.name.trim().replace(/\s+/g, ' ').slice(0, 40);
+    if (!name) throw new Error('Le nom du type est vide');
+    const fields = input.fields.filter(f => f.label.trim()).slice(0, MAX_TEMPLATE_FIELDS)
+      .map(f => ({ ...f, id: f.id ?? randomId('tfield'), label: f.label.trim().slice(0, 40) }));
+    if (!fields.length) throw new Error('Ajoutez au moins un champ');
+    const clash = templates.find(t => t.id !== input.id && t.name.toLowerCase() === name.toLowerCase());
+    if (clash) throw new Error('Un type porte déjà ce nom');
+    const now = Date.now();
+    const current = input.id ? templates.find(t => t.id === input.id) : undefined;
+    if (!current && templates.length >= MAX_TEMPLATES) throw new Error(`Limite de ${MAX_TEMPLATES} types atteinte`);
+    const template: ItemTemplate = normalizeTemplates([{ id: current?.id ?? randomId('tpl'), name, fields, createdAt: current?.createdAt ?? now, updatedAt: now }])[0];
+    this.data.itemTemplates = current ? templates.map(t => (t.id === current.id ? template : t)) : [...templates, template];
+    this.commit();
+    return template;
+  }
+
+  /** Supprime un type ; les éléments gardent leurs champs, seul le lien au modèle disparaît */
+  deleteTemplate(id: string): void {
+    const templates = this.data.itemTemplates ?? [];
+    if (!templates.some(t => t.id === id)) return;
+    const now = Date.now();
+    this.data.itemTemplates = templates.filter(t => t.id !== id);
+    this.markDeleted(id, now);
+    this.commit();
+  }
 
   getVaultTypes(): VaultTypeDef[] {
     return [...(this.data.vaultTypes ?? [])].sort((a, b) => a.name.localeCompare(b.name));

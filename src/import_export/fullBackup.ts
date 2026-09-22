@@ -314,6 +314,23 @@ export async function applyImport(
   }
   for (const vault of vaults) if (typeIds.has(vault.type)) vault.type = typeIds.get(vault.type)!;
 
+  // Types d'éléments personnalisés : même principe, fusion par nom
+  const templateIds = new Map<string, string>();
+  const currentTemplates = current.itemTemplates ?? [];
+  const itemTemplates = [...currentTemplates];
+  for (const template of backup.data.itemTemplates ?? []) {
+    const existing = currentTemplates.find(t => t.name.toLowerCase() === template.name.toLowerCase());
+    if (existing) templateIds.set(template.id, existing.id);
+    else {
+      const id = newId('tpl');
+      templateIds.set(template.id, id);
+      itemTemplates.push({ ...template, id });
+    }
+  }
+  for (const credential of credentials) {
+    if (credential.templateId) credential.templateId = templateIds.get(credential.templateId);
+  }
+
   return {
     data: {
       ...current,
@@ -322,7 +339,8 @@ export async function applyImport(
       credentials: [...credentials, ...current.credentials],
       tasks: [...tasks, ...current.tasks],
       tagDefs,
-      vaultTypes
+      vaultTypes,
+      itemTemplates
     },
     imported: { vaults: vaults.length, credentials: credentials.length, tasks: tasks.length, files: done },
     skippedFiles,
