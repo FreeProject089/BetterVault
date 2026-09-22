@@ -1,16 +1,15 @@
-import { randomId, TAG_COLORS, vaultStore } from './store/vaultStore';
+import { randomId, vaultStore } from './store/vaultStore';
 import type { CredentialItem, Task } from './types/vault';
 import { extractDomain, getServiceIconSvg } from './icons/serviceIcons';
 import { renderItemIcon, type ItemIcon } from './icons/iconLibrary';
 import { generateTOTP } from './crypto/totpEngine';
-import { calculatePasswordEntropy, generateStrongPassword, generatePassphrase, auditVaultSecurity, checkPasswordPwnedHIBP, HibpUnavailableError, MAX_PASSPHRASE_WORDS, passphraseEntropyBits, secureRandomIndex, type PassphraseCase } from './crypto/vaultCrypto';
-import { exportVaultAsJson, downloadExportFile } from './import_export/importEngine';
-import { encryptExport, MIN_EXPORT_PASSWORD_LENGTH } from './import_export/encryptedExport';
+import { calculatePasswordEntropy, auditVaultSecurity, checkPasswordPwnedHIBP, HibpUnavailableError } from './crypto/vaultCrypto';
+import { downloadExportFile } from './import_export/importEngine';
 import { normalizeTotpInput, parseOtpAuthUri } from './crypto/otpauthUri';
 import { CameraQrScanner, decodeQrFromFile } from './crypto/qrScanner';
 import { AccountService, type SyncStatus } from './account/accountService';
 import { SharedReadOnlyError, SharedVaultManager } from './account/sharedVaults';
-import { setApiLocale, type AccountSession, type SharedMember, type SharedPermission, type SharedRole } from './account/cloudClient';
+import { setApiLocale, type AccountSession, type SharedPermission, type SharedRole } from './account/cloudClient';
 import { decryptFile, encryptFile, formatLimit, localAttachmentBytes, MAX_LOCAL_ATTACHMENT_BYTES, type AttachmentMeta } from './account/attachmentCrypto';
 import { fromBase64, toBase64 } from './account/accountCrypto';
 import { createDeviceStorage } from './platform/storage';
@@ -21,7 +20,6 @@ import type { RecurrenceFrequency, TaskRecurrence } from './types/vault';
 import { accountErrorMessage, DEFAULT_SERVER_URL, mountAuthScreen } from './ui/authScreen';
 import { mountTagInput } from './ui/tagInput';
 import { mountIconPicker } from './ui/iconPicker';
-import { mountColorPicker } from './ui/colorPicker';
 import { mountDateField } from './ui/dateField';
 import { showToast as pushToast } from './ui/toast';
 import { EXPIRY_SOON_DAYS, expiryInfo, renderExpiryBadge } from './ui/expiry';
@@ -34,7 +32,12 @@ import { mountStepper, type StepDef } from './ui/stepper';
 import { ProfileStore } from './account/profiles';
 import { securityKeysSectionHtml, wireSecurityKeys } from './ui/securityKeysPanel';
 import { openImportExportModal } from './ui/importExportModal';
-import { GEN_ICONS } from './ui/icons';
+import { ACTION_ICONS, GEN_ICONS, tagColor, VAULT_ICON } from './ui/icons';
+import { openTagManagerModal } from './ui/tagManagerModal';
+import { openEraseModal } from './ui/eraseModal';
+import { openVaultModal } from './ui/vaultModal';
+import { mountGenerator } from './ui/generator';
+import { registerServices } from './app/services';
 import { loadSavedTheme, parseTheme, PRESET_THEMES, saveTheme, ThemeError, themeTemplate, applyTheme } from './ui/themes';
 import { mountTemplateEditor, readTemplateValues, templateCardsHtml, templateFieldsHtml } from './ui/itemTemplatesUi';
 import { checkTemplateValues, mergeTemplateFields } from './store/itemTemplates';
@@ -56,16 +59,6 @@ import { i18n } from './i18n';
 type ActiveView = 'all-credentials' | '2fa-tokens' | 'tasks';
 type TaskViewMode = 'list' | 'kanban' | 'matrix' | 'calendar';
 
-const ACTION_ICONS = {
-  edit: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>',
-  trash: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14H6L5 6"></path><path d="M10 11v6M14 11v6"></path><path d="M9 6V4h6v2"></path></svg>',
-  task: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>'
-};
-
-function tagColor(color?: string): string {
-  return color && /^#[0-9a-f]{6}$/i.test(color) ? color : '#8b949e';
-}
-
 const formatFileSize = (bytes: number) => i18n.formatBytes(bytes);
 
 /** Types affichables directement dans la fenêtre d'aperçu (le fichier reste déchiffré en mémoire) */
@@ -82,7 +75,6 @@ function previewKind(type: string, name: string): 'image' | 'pdf' | 'text' | 'au
 const isPreviewable = (type: string, name: string) => previewKind(type, name) !== null;
 
 
-const GENERATOR_PREFS_KEY = 'bettervault.generator-prefs';
 const SIDEBAR_COLLAPSED_KEY = 'bettervault.sidebar-collapsed';
 const REMINDER_CHECK_INTERVAL_MS = 30_000;
 const SYNC_INTERVAL_MS = 60_000;
@@ -112,7 +104,6 @@ function saveExpandedFolders(ids: Set<string>): void {
 }
 const AUTOFILL_KEY = 'bettervault.android-autofill';
 
-const VAULT_ICON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
 
 // Créé au démarrage, une fois le stockage de l'appareil chargé (voir la fin du fichier)
 let accountService: AccountService;
@@ -153,7 +144,7 @@ let sharedVaults: SharedVaultManager;
 /* ════════════════════════════════════════════════════════════════════════════
    APP CONTROLLER — Zero-Knowledge Vault Manager
    ════════════════════════════════════════════════════════════════════════════ */
-class AppController {
+export class AppController {
   private activeView: ActiveView = 'all-credentials';
   private shortcuts: ShortcutBindings = loadShortcuts();
   /** Vrai pendant qu'une combinaison est en cours d'enregistrement : les raccourcis sont suspendus */
@@ -168,14 +159,14 @@ class AppController {
   private shiftHeld = false;
   /** Photo de profil affichable (data:, blob: ou https:) */
   private avatarSrc: string | null = null;
-  private selectedItemId: string | null = null;
+  selectedItemId: string | null = null;
   private searchQuery = '';
   private taskViewMode: TaskViewMode = 'list';
   public totpInterval: number | null = null;
   private autoLockTimeout: number | null = null;
   private readonly AUTO_LOCK_DELAY_MS = 5 * 60 * 1000; // 5 minutes d'inactivité
   private clipboardClearTimer: number | null = null;
-  private activeTag: string | null = null;
+  activeTag: string | null = null;
   /** Dossier ouvert dans la barre latérale ; null = tout le coffre */
   private activeFolderId: string | null = null;
   /** Dossiers dépliés dans l'arborescence : préférence d'affichage, gardée sur l'appareil */
@@ -756,7 +747,7 @@ class AppController {
   }
 
   /* ── Sidebar (coffres) ─────────────────────────────────────────────────── */
-  private renderSidebar(): void {
+  renderSidebar(): void {
     const data = vaultStore.getData();
     const vaultListEl = document.getElementById('vault-list');
     if (!vaultListEl) return;
@@ -821,7 +812,7 @@ class AppController {
   }
 
   /* ── List Panel ─────────────────────────────────────────────────────────── */
-  private renderList(): void {
+  renderList(): void {
     const data = vaultStore.getData();
     const container = document.getElementById('items-container');
     const listTitle = document.getElementById('list-view-title');
@@ -1324,7 +1315,7 @@ class AppController {
   }
 
   /* ── Detail Panel ─────────────────────────────────────────────────────── */
-  private renderDetail(id: string | null): void {
+  renderDetail(id: string | null): void {
     const container = document.getElementById('detail-container');
     if (!container) return;
 
@@ -3548,306 +3539,8 @@ class AppController {
     box.querySelector('[data-gen-copy]')?.addEventListener('click', () => void generator.copy());
   }
 
-  /** Générateur réutilisable : modale dédiée ou panneau intégré au formulaire d'identifiant */
   private mountGenerator(host: HTMLElement, options: { onUse?: (value: string) => void } = {}): { copy: () => Promise<void> } {
-    type GeneratorMode = 'password' | 'passphrase' | 'pin';
-    type GeneratorPrefs = {
-      mode: GeneratorMode;
-      length: number;
-      uppercase: boolean;
-      lowercase: boolean;
-      numbers: boolean;
-      symbols: boolean;
-      avoidAmbiguous: boolean;
-      exclude: string;
-      words: number;
-      separator: string;
-      customSeparator: string;
-      wordCase: PassphraseCase;
-      numberDigits: number;
-      includeSymbol: boolean;
-      pinLength: number;
-    };
-    const defaults: GeneratorPrefs = {
-      mode: 'password', length: 20, uppercase: true, lowercase: true, numbers: true, symbols: true, avoidAmbiguous: false, exclude: '',
-      words: 5, separator: '-', customSeparator: '', wordCase: 'title', numberDigits: 2, includeSymbol: false,
-      pinLength: 6
-    };
-    let prefs: GeneratorPrefs = { ...defaults };
-    try {
-      const saved = JSON.parse(localStorage.getItem(GENERATOR_PREFS_KEY) ?? '{}') as Partial<GeneratorPrefs> & { capitalize?: boolean; includeNumber?: boolean };
-      prefs = { ...defaults, ...saved };
-      // Anciennes préférences
-      if (saved.wordCase === undefined && saved.capitalize === false) prefs.wordCase = 'lower';
-      if (saved.numberDigits === undefined && saved.includeNumber === false) prefs.numberDigits = 0;
-    } catch {
-      // Préférences illisibles : valeurs par défaut
-    }
-    const savePrefs = () => {
-      try {
-        localStorage.setItem(GENERATOR_PREFS_KEY, JSON.stringify(prefs));
-      } catch {
-        // Stockage indisponible (navigation privée)
-      }
-    };
-
-    const BOUNDS: Record<'length' | 'words' | 'pinLength', [number, number]> = {
-      length: [8, 128],
-      words: [3, MAX_PASSPHRASE_WORDS],
-      pinLength: [4, 12]
-    };
-
-    const chip = (key: keyof GeneratorPrefs, label: string, hint: string) => `
-      <label class="gen-chip" title="${hint}">
-        <input type="checkbox" data-pref="${key}" ${prefs[key] ? 'checked' : ''}>
-        <span>${label}</span>
-      </label>`;
-    const slider = (key: keyof typeof BOUNDS, label: string) => `
-      <div class="gen-slider-row">
-        <span class="form-label">${label}</span>
-        <input type="range" min="${BOUNDS[key][0]}" max="${BOUNDS[key][1]}" value="${prefs[key]}" data-pref="${key}" aria-label="${label}">
-        <input type="number" class="form-input gen-number" min="${BOUNDS[key][0]}" max="${BOUNDS[key][1]}" value="${prefs[key]}" data-pref="${key}" aria-label="${label}">
-      </div>`;
-    const select = (key: keyof GeneratorPrefs, label: string, choices: Array<[string | number, string]>) => `
-      <div class="form-field">
-        <label class="form-label">${label}</label>
-        <select class="form-input" data-pref="${key}" aria-label="${label}">
-          ${choices.map(([value, text]) => `<option value="${value}" ${String(prefs[key]) === String(value) ? 'selected' : ''}>${text}</option>`).join('')}
-        </select>
-      </div>`;
-
-    host.innerHTML = `
-      <div class="gen">
-        <div class="gen-output-card">
-          <div class="gen-output" data-gen="output" aria-live="polite" title="${this.tr('Cliquer pour copier', 'Click to copy')}"></div>
-          <div class="gen-output-actions">
-            <button type="button" class="icon-btn" data-gen="refresh" title="${this.tr('Régénérer (R)', 'Regenerate (R)')}">${GEN_ICONS.refresh}</button>
-            <button type="button" class="icon-btn" data-gen="copy" title="${this.tr('Copier', 'Copy')}">${GEN_ICONS.copy}</button>
-          </div>
-        </div>
-        <div class="gen-strength">
-          <div class="strength-meter" data-gen="meter">${'<div class="strength-segment"></div>'.repeat(4)}</div>
-          <span class="gen-strength-label" data-gen="strength"></span>
-        </div>
-        <div class="tab-btn-group" role="tablist">
-          <button type="button" class="tab-btn" role="tab" data-mode="password">${tabIcon('password')}<span>${this.tr('Mot de passe', 'Password')}</span></button>
-          <button type="button" class="tab-btn" role="tab" data-mode="passphrase">${tabIcon('passphrase')}<span>${this.tr('Phrase secrète', 'Passphrase')}</span></button>
-          <button type="button" class="tab-btn" role="tab" data-mode="pin">${tabIcon('pin')}<span>${this.tr('Code PIN', 'PIN')}</span></button>
-        </div>
-
-        <div class="gen-section" data-section="password">
-          ${slider('length', this.tr('Longueur', 'Length'))}
-          <div class="gen-chips">
-            ${chip('uppercase', 'A–Z', this.tr('Majuscules', 'Uppercase'))}
-            ${chip('lowercase', 'a–z', this.tr('Minuscules', 'Lowercase'))}
-            ${chip('numbers', '0–9', this.tr('Chiffres', 'Digits'))}
-            ${chip('symbols', '!@#$', this.tr('Symboles', 'Symbols'))}
-            ${chip('avoidAmbiguous', this.tr('Sans ambigus', 'No look-alikes'), this.tr('Exclut 0/O, 1/l/I', 'Excludes 0/O, 1/l/I'))}
-          </div>
-          <div class="form-field">
-            <label class="form-label">${this.tr('Caractères à exclure', 'Characters to exclude')}</label>
-            <input class="form-input" type="text" data-pref="exclude" value="${this.escapeHtml(prefs.exclude)}" placeholder="${this.tr('Ex. : {}[]<>"\'', 'E.g. {}[]<>"\'')}" spellcheck="false" autocomplete="off" style="font-family:var(--font-mono);">
-          </div>
-        </div>
-
-        <div class="gen-section" data-section="passphrase">
-          ${slider('words', this.tr('Mots', 'Words'))}
-          <div class="gen-grid">
-            ${select('separator', this.tr('Séparateur', 'Separator'), [
-              ['-', this.tr('Tiret  -', 'Dash  -')],
-              [' ', this.tr('Espace', 'Space')],
-              ['.', this.tr('Point  .', 'Dot  .')],
-              [',', this.tr('Virgule  ,', 'Comma  ,')],
-              ['_', this.tr('Tiret bas  _', 'Underscore  _')],
-              ['', this.tr('Aucun', 'None')],
-              ['custom', this.tr('Personnalisé', 'Custom')]
-            ])}
-            <div class="form-field" data-custom-separator>
-              <label class="form-label">${this.tr('Séparateur personnalisé', 'Custom separator')}</label>
-              <input class="form-input" type="text" maxlength="5" data-pref="customSeparator" value="${this.escapeHtml(prefs.customSeparator)}" spellcheck="false" autocomplete="off" style="font-family:var(--font-mono);">
-            </div>
-            ${select('wordCase', this.tr('Casse des mots', 'Word case'), [
-              ['lower', this.tr('minuscules', 'lowercase')],
-              ['title', this.tr('Majuscule initiale', 'Capitalized')],
-              ['upper', this.tr('MAJUSCULES', 'UPPERCASE')],
-              ['random', this.tr('Aléatoire', 'Random')]
-            ])}
-            ${select('numberDigits', this.tr('Nombre ajouté', 'Added number'), [
-              [0, this.tr('Aucun', 'None')],
-              [1, this.tr('1 chiffre', '1 digit')],
-              [2, this.tr('2 chiffres', '2 digits')],
-              [3, this.tr('3 chiffres', '3 digits')],
-              [4, this.tr('4 chiffres', '4 digits')]
-            ])}
-          </div>
-          <div class="gen-chips">
-            ${chip('includeSymbol', this.tr('+ symbole', '+ symbol'), this.tr('Ajoute un symbole à la fin', 'Append a symbol'))}
-          </div>
-          <p class="gen-mode-hint">${this.tr('Mots tirés de la liste EFF (7 776 mots) : chaque mot ajoute environ 12,9 bits. Facile à retenir et à taper.', 'Words from the EFF list (7,776 words): each word adds about 12.9 bits. Easy to remember and type.')}</p>
-        </div>
-
-        <div class="gen-section" data-section="pin">
-          ${slider('pinLength', this.tr('Chiffres', 'Digits'))}
-          <p class="gen-mode-hint">${this.tr('Pour un téléphone, une carte ou un cadenas. Trop court pour protéger un compte en ligne.', 'For a phone, a card or a lock. Too short to protect an online account.')}</p>
-        </div>
-
-        ${options.onUse ? `
-          <div class="gen-use-row">
-            <button type="button" class="btn-primary btn-accent" data-gen="use">${this.tr('Utiliser', 'Use')}</button>
-          </div>` : ''}
-      </div>`;
-
-    const query = <T extends HTMLElement = HTMLElement>(selector: string) => host.querySelector(selector) as T;
-    const output = query('[data-gen="output"]');
-    const charsetKeys: Array<keyof GeneratorPrefs> = ['uppercase', 'lowercase', 'numbers', 'symbols'];
-    let value = '';
-
-    const passphraseOptions = () => ({
-      wordCount: prefs.words,
-      separator: prefs.separator === 'custom' ? prefs.customSeparator : prefs.separator,
-      wordCase: prefs.wordCase,
-      includeNumber: prefs.numberDigits > 0,
-      numberDigits: prefs.numberDigits,
-      includeSymbol: prefs.includeSymbol
-    });
-
-    const strength = () => {
-      if (prefs.mode === 'password') return calculatePasswordEntropy(value);
-      const bits = prefs.mode === 'pin' ? Math.round(prefs.pinLength * Math.log2(10)) : passphraseEntropyBits(passphraseOptions());
-      const score = bits >= 75 ? 4 : bits >= 55 ? 3 : bits >= 36 ? 2 : 1;
-      const labels = ['', this.tr('Faible', 'Weak'), this.tr('Moyen', 'Fair'), this.tr('Fort', 'Strong'), this.tr('Excellent', 'Excellent')];
-      const colors = ['', '#DA3633', '#D29922', '#2EA043', '#238636'];
-      return { bits, score, label: labels[score], color: colors[score] };
-    };
-
-    const render = () => {
-      output.innerHTML = Array.from(value).map(ch => {
-        const kind = /[0-9]/.test(ch) ? 'gen-digit' : /[A-Za-z\s]/.test(ch) ? '' : 'gen-symbol';
-        const safe = this.escapeHtml(ch);
-        return kind ? `<span class="${kind}">${safe}</span>` : safe;
-      }).join('');
-      const s = strength();
-      host.querySelectorAll<HTMLElement>('[data-gen="meter"] .strength-segment').forEach((segment, i) => {
-        segment.style.backgroundColor = i < s.score ? s.color : '';
-      });
-      const label = query('[data-gen="strength"]');
-      label.textContent = value ? `${s.label} · ≈ ${s.bits} bits` : '';
-      label.style.color = s.color;
-    };
-
-    const generate = () => {
-      try {
-        if (prefs.mode === 'password') {
-          value = generateStrongPassword({
-            length: prefs.length,
-            uppercase: prefs.uppercase,
-            lowercase: prefs.lowercase,
-            numbers: prefs.numbers,
-            symbols: prefs.symbols,
-            avoidAmbiguous: prefs.avoidAmbiguous,
-            exclude: prefs.exclude
-          });
-        } else if (prefs.mode === 'passphrase') {
-          value = generatePassphrase(passphraseOptions());
-        } else {
-          value = Array.from({ length: prefs.pinLength }, () => String(secureRandomIndex(10))).join('');
-        }
-      } catch {
-        value = '';
-        this.showToast(this.tr('Trop de caractères exclus', 'Too many excluded characters'), 'error');
-      }
-      render();
-      output.classList.remove('gen-flash');
-      void output.offsetWidth;
-      output.classList.add('gen-flash');
-    };
-
-    const syncControls = () => {
-      host.querySelectorAll<HTMLElement>('[data-mode]').forEach(button => {
-        const active = button.dataset.mode === prefs.mode;
-        button.classList.toggle('active', active);
-        button.setAttribute('aria-selected', String(active));
-      });
-      host.querySelectorAll<HTMLElement>('[data-section]').forEach(section => {
-        section.hidden = section.dataset.section !== prefs.mode;
-      });
-      (Object.keys(BOUNDS) as Array<keyof typeof BOUNDS>).forEach(key => {
-        host.querySelectorAll<HTMLInputElement>(`input[data-pref="${key}"]`).forEach(input => { input.value = String(prefs[key]); });
-      });
-      query('[data-custom-separator]').hidden = prefs.separator !== 'custom';
-    };
-
-    host.querySelectorAll<HTMLElement>('[data-mode]').forEach(button => {
-      button.addEventListener('click', () => {
-        prefs.mode = button.dataset.mode as GeneratorMode;
-        syncControls();
-        savePrefs();
-        generate();
-      });
-    });
-
-    host.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-pref]').forEach(control => {
-      const key = control.dataset.pref as keyof GeneratorPrefs;
-      const isNumberField = control instanceof HTMLInputElement && control.type === 'number';
-
-      control.addEventListener('input', () => {
-        if (control instanceof HTMLInputElement && control.type === 'checkbox') {
-          if (charsetKeys.includes(key) && !control.checked && charsetKeys.every(k => k === key || !prefs[k])) {
-            control.checked = true;
-            this.showToast(this.tr('Gardez au moins un type de caractères', 'Keep at least one character type'), 'info', 1800);
-            return;
-          }
-          (prefs as Record<string, unknown>)[key] = control.checked;
-        } else if (key === 'length' || key === 'words' || key === 'pinLength') {
-          const [min, max] = BOUNDS[key];
-          const n = parseInt(control.value, 10);
-          // Saisie en cours dans le champ numérique (ex. « 1 » avant « 16 ») : on attend une valeur valide
-          if (!Number.isFinite(n) || (isNumberField && (n < min || n > max))) return;
-          prefs[key] = Math.min(max, Math.max(min, n));
-        } else if (key === 'numberDigits') {
-          prefs.numberDigits = parseInt(control.value, 10) || 0;
-        } else {
-          (prefs as Record<string, unknown>)[key] = control.value;
-        }
-        if (!isNumberField) syncControls();
-        else host.querySelectorAll<HTMLInputElement>(`input[type="range"][data-pref="${key}"]`).forEach(range => { range.value = control.value; });
-        savePrefs();
-        generate();
-      });
-
-      if (isNumberField) control.addEventListener('change', syncControls);
-    });
-
-    const copy = async () => {
-      if (!value) return;
-      await this.copyToClipboardWithAutoClear(value, this.tr('Copié', 'Copied'), true);
-      const button = query('[data-gen="copy"]');
-      button.classList.add('copied');
-      setTimeout(() => button.classList.remove('copied'), 500);
-    };
-
-    query('[data-gen="refresh"]').addEventListener('click', generate);
-    query('[data-gen="copy"]').addEventListener('click', () => void copy());
-    output.addEventListener('click', () => void copy());
-    if (options.onUse) query('[data-gen="use"]').addEventListener('click', () => { if (value) options.onUse?.(value); });
-
-    host.addEventListener('keydown', e => {
-      const target = e.target as HTMLElement;
-      const typing = target instanceof HTMLSelectElement || (target instanceof HTMLInputElement && ['number', 'text'].includes(target.type));
-      if ((e.key === 'r' || e.key === 'R') && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        e.preventDefault();
-        generate();
-      }
-    });
-    // La touche R fonctionne aussi quand le focus est sur le bouton Copier du pied de modale
-    host.closest('.modal-box')?.querySelector('.modal-footer')?.addEventListener('keydown', e => {
-      const key = (e as KeyboardEvent).key;
-      if (key === 'r' || key === 'R') generate();
-    });
-
-    syncControls();
-    generate();
-    return { copy };
+    return mountGenerator(this, host, options);
   }
 
   /* ── Audit de Sécurité du Coffre ────────────────────────────────────────── */
@@ -4209,7 +3902,7 @@ class AppController {
     this.renderInvitations();
   }
 
-  private reloadWithShared(): void {
+  reloadWithShared(): void {
     const personal = accountService.getLatestData();
     if (!personal) return;
     const activeVaultId = vaultStore.getData().activeVaultId;
@@ -4284,7 +3977,7 @@ class AppController {
     });
   }
 
-  private roleLabel(role: SharedRole): string {
+  roleLabel(role: SharedRole): string {
     const labels: Record<string, string> = {
       owner: this.tr('Propriétaire', 'Owner'),
       admin: this.tr('Administrateur', 'Administrator'),
@@ -5747,235 +5440,8 @@ class AppController {
   }
 
   /* ── Coffres ─────────────────────────────────────────────────────────── */
-  /**
-   * Effacement choisi, en trois temps : ce qui part, la sauvegarde, la confirmation.
-   *
-   * L'ordre n'est pas décoratif. Effacer est sans retour, et une sauvegarde proposée
-   * après coup n'aurait plus rien à sauvegarder : l'étape d'export vient donc avant,
-   * et le bouton d'effacement reste inerte tant qu'aucun fichier n'a été obtenu — ou
-   * que l'on n'a pas déclaré en avoir déjà un.
-   */
   private openEraseModal(): void {
-    const tr = this.tr.bind(this);
-    const data = vaultStore.getData();
-    // Les coffres partagés appartiennent aussi aux autres membres : ils ne sont pas concernés
-    const coffres = data.vaults.filter(v => !v.shared);
-    let sauvegarde: 'chiffre' | 'clair' | 'deja' | null = null;
-
-    const box = this.openModal(`
-      <div class="modal-header">
-        <div class="modal-title">${tr('Effacer mes données', 'Erase my data')}</div>
-        <button class="modal-close" type="button">${GEN_ICONS.close}</button>
-      </div>
-      <div class="stepper-track" data-erase-track></div>
-      <div class="modal-body">
-        <section data-step="choix">
-          <p class="modal-text">${tr('Cochez ce qui doit disparaître de cet appareil et du serveur.', 'Tick what should disappear from this device and from the server.')}</p>
-          <div class="erase-choices">
-            <label class="check-row"><input type="checkbox" data-erase="credentials" checked><span>${tr('Identifiants et codes 2FA', 'Credentials and 2FA codes')}<small data-count="credentials"></small></span></label>
-            <label class="check-row"><input type="checkbox" data-erase="tasks" checked><span>${tr('Tâches', 'Tasks')}<small data-count="tasks"></small></span></label>
-            <label class="check-row"><input type="checkbox" data-erase="folders"><span>${tr('Dossiers', 'Folders')}<small>${tr('Leur contenu remonte d’un niveau s’il en reste', 'Anything left inside moves up one level')}</small></span></label>
-            <label class="check-row"><input type="checkbox" data-erase="tags"><span>${tr('Tags devenus inutilisés', 'Tags left unused')}<small>${tr('Ceux encore portés par un élément restent', 'Those still carried by an item stay')}</small></span></label>
-          </div>
-          <div class="form-field">
-            <label class="form-label">${tr('Dans quels coffres ?', 'In which vaults?')}</label>
-            <div class="erase-choices" data-vault-choices>
-              ${coffres.map(v => `<label class="check-row"><input type="checkbox" data-erase-vault="${this.escapeHtml(v.id)}" checked><span>${this.escapeHtml(v.name)}</span></label>`).join('')}
-            </div>
-          </div>
-          <div class="form-error" data-erase-error role="alert" hidden></div>
-        </section>
-
-        <section data-step="sauvegarde" hidden>
-          <p class="modal-text">${tr('Une fois effacé, rien ne se récupère. Prenez une copie avant.', 'Once erased, nothing comes back. Take a copy first.')}</p>
-          <div class="account-actions">
-            <button type="button" class="btn-primary btn-accent" data-backup="chiffre">${tr('Exporter chiffré', 'Export encrypted')}</button>
-            <button type="button" class="btn-primary" data-backup="clair">${tr('Exporter en clair', 'Export in plain text')}</button>
-          </div>
-          <span class="field-hint">${tr('L’export chiffré demande un mot de passe dédié (Argon2id, AES-256-GCM). L’export en clair se lit par quiconque obtient le fichier.', 'The encrypted export asks for a dedicated password (Argon2id, AES-256-GCM). A plain export is readable by anyone who gets the file.')}</span>
-          <label class="check-row"><input type="checkbox" data-backup-skip><span>${tr('J’ai déjà une sauvegarde', 'I already have a backup')}</span></label>
-          <div class="form-section" data-backup-password hidden>
-            <div class="form-section-title">${tr('Mot de passe de l’export', 'Export password')}</div>
-            <div class="form-row">
-              <input class="form-input" type="password" data-backup-pwd autocomplete="new-password" placeholder="${tr(`Au moins ${MIN_EXPORT_PASSWORD_LENGTH} caractères`, `At least ${MIN_EXPORT_PASSWORD_LENGTH} characters`)}">
-              <button type="button" class="btn-primary btn-accent" data-backup-go>${tr('Chiffrer et enregistrer', 'Encrypt and save')}</button>
-            </div>
-          </div>
-          <div class="notice notice-success" data-backup-done hidden></div>
-          <div class="form-error" data-backup-error role="alert" hidden></div>
-        </section>
-
-        <section data-step="confirmation" hidden>
-          <div class="notice notice-warning" data-erase-summary></div>
-          <p class="modal-text">${tr('Saisissez EFFACER pour confirmer.', 'Type ERASE to confirm.')}</p>
-          <input class="form-input" data-erase-word autocomplete="off" spellcheck="false" placeholder="${tr('EFFACER', 'ERASE')}">
-        </section>
-      </div>
-      <div class="modal-footer" data-erase-footer></div>
-    `);
-
-    const $ = <T extends HTMLElement>(sel: string) => box.querySelector(sel) as T | null;
-    const coche = (nom: string) => !!box.querySelector<HTMLInputElement>(`[data-erase="${nom}"]`)?.checked;
-    const coffresChoisis = () => [...box.querySelectorAll<HTMLInputElement>('[data-erase-vault]')]
-      .filter(i => i.checked).map(i => i.dataset.eraseVault!);
-
-    const peindreCompteurs = () => {
-      const ids = new Set(coffresChoisis());
-      const nbCreds = data.credentials.filter(c => ids.has(c.vaultId)).length;
-      const nbTaches = data.tasks.filter(t => ids.has(t.vaultId)).length;
-      const c = $('[data-count="credentials"]');
-      const t = $('[data-count="tasks"]');
-      if (c) c.textContent = tr(`${nbCreds} élément(s)`, `${nbCreds} item(s)`);
-      if (t) t.textContent = tr(`${nbTaches} tâche(s)`, `${nbTaches} task(s)`);
-    };
-    box.addEventListener('change', peindreCompteurs);
-    peindreCompteurs();
-
-    const erreur = (sel: string, message?: string) => {
-      const el = $(sel);
-      if (!el) return;
-      el.textContent = message ?? '';
-      el.hidden = !message;
-    };
-
-    const contenuAExporter = () => {
-      const ids = new Set(coffresChoisis());
-      return {
-        creds: data.credentials.filter(c => ids.has(c.vaultId)),
-        taches: data.tasks.filter(t => ids.has(t.vaultId))
-      };
-    };
-
-    const marquerSauvegarde = (mode: 'chiffre' | 'clair' | 'deja') => {
-      sauvegarde = mode;
-      const done = $('[data-backup-done]');
-      if (done) {
-        done.hidden = false;
-        done.textContent = mode === 'deja'
-          ? tr('Vous déclarez avoir déjà une sauvegarde.', 'You state you already have a backup.')
-          : tr('Fichier enregistré. Vérifiez qu’il s’ouvre avant de continuer.', 'File saved. Check that it opens before continuing.');
-      }
-    };
-
-    box.querySelector('[data-backup="clair"]')?.addEventListener('click', async () => {
-      const ok = await this.confirmDialog({
-        title: tr('Exporter en clair ?', 'Export in plain text?'),
-        message: tr('Toute personne qui obtient ce fichier pourra lire vos mots de passe, codes 2FA et passkeys.', 'Anyone who gets this file can read your passwords, 2FA codes and passkeys.'),
-        confirmLabel: tr('Exporter', 'Export'),
-        danger: true
-      });
-      if (!ok) return;
-      const { creds, taches } = contenuAExporter();
-      downloadExportFile(exportVaultAsJson(creds, taches), `bettervault-avant-effacement-${new Date().toISOString().slice(0, 10)}.json`, 'application/json');
-      marquerSauvegarde('clair');
-    });
-
-    box.querySelector('[data-backup="chiffre"]')?.addEventListener('click', () => {
-      const panneau = $('[data-backup-password]');
-      if (panneau) panneau.hidden = false;
-      $<HTMLInputElement>('[data-backup-pwd]')?.focus();
-    });
-
-    box.querySelector('[data-backup-go]')?.addEventListener('click', async () => {
-      const mot = $<HTMLInputElement>('[data-backup-pwd]')?.value ?? '';
-      if (mot.length < MIN_EXPORT_PASSWORD_LENGTH) {
-        return erreur('[data-backup-error]', tr(`Le mot de passe doit contenir au moins ${MIN_EXPORT_PASSWORD_LENGTH} caractères`, `The password must be at least ${MIN_EXPORT_PASSWORD_LENGTH} characters`));
-      }
-      erreur('[data-backup-error]');
-      try {
-        const { creds, taches } = contenuAExporter();
-        const fichier = await encryptExport(exportVaultAsJson(creds, taches), mot);
-        downloadExportFile(fichier, `bettervault-avant-effacement-${new Date().toISOString().slice(0, 10)}.encrypted.json`, 'application/json');
-        marquerSauvegarde('chiffre');
-      } catch (err) {
-        erreur('[data-backup-error]', accountErrorMessage(err));
-      }
-    });
-
-    box.querySelector<HTMLInputElement>('[data-backup-skip]')?.addEventListener('change', event => {
-      if ((event.target as HTMLInputElement).checked) marquerSauvegarde('deja');
-      else {
-        sauvegarde = null;
-        const done = $('[data-backup-done]');
-        if (done) done.hidden = true;
-      }
-    });
-
-    const resume = () => {
-      const ids = new Set(coffresChoisis());
-      const parties: string[] = [];
-      if (coche('credentials')) {
-        const n = data.credentials.filter(c => ids.has(c.vaultId)).length;
-        parties.push(tr(`${n} identifiant(s) et code(s) 2FA`, `${n} credential(s) and 2FA code(s)`));
-      }
-      if (coche('tasks')) {
-        const n = data.tasks.filter(t => ids.has(t.vaultId)).length;
-        parties.push(tr(`${n} tâche(s)`, `${n} task(s)`));
-      }
-      if (coche('folders')) {
-        const n = data.folders.filter(f => ids.has(f.vaultId)).length;
-        parties.push(tr(`${n} dossier(s)`, `${n} folder(s)`));
-      }
-      if (coche('tags')) parties.push(tr('les tags devenus inutilisés', 'tags left unused'));
-      const el = $('[data-erase-summary]');
-      if (el) el.textContent = tr(`Seront effacés : ${parties.join(', ')}.`, `Will be erased: ${parties.join(', ')}.`);
-    };
-
-    mountStepper({
-      body: box.querySelector('.modal-body') as HTMLElement,
-      header: box.querySelector('[data-erase-track]') as HTMLElement,
-      footer: box.querySelector('[data-erase-footer]') as HTMLElement,
-      tr,
-      finishLabel: tr('Effacer définitivement', 'Erase permanently'),
-      cancelLabel: tr('Annuler', 'Cancel'),
-      onCancel: () => this.closeModal(),
-      onError: message => this.showToast(message, 'error'),
-      onStepChange: id => { if (id === 'confirmation') resume(); },
-      steps: [
-        {
-          id: 'choix',
-          label: tr('Quoi', 'What'),
-          validate: () => {
-            if (!coche('credentials') && !coche('tasks') && !coche('folders') && !coche('tags')) {
-              return tr('Choisissez au moins une catégorie', 'Pick at least one category');
-            }
-            if (!coffresChoisis().length) return tr('Choisissez au moins un coffre', 'Pick at least one vault');
-            return undefined;
-          }
-        },
-        {
-          id: 'sauvegarde',
-          label: tr('Sauvegarde', 'Backup'),
-          validate: () => sauvegarde ? undefined : tr('Prenez une sauvegarde, ou déclarez en avoir déjà une', 'Take a backup, or state that you already have one')
-        },
-        {
-          id: 'confirmation',
-          label: tr('Confirmation', 'Confirm'),
-          validate: () => {
-            const mot = ($<HTMLInputElement>('[data-erase-word]')?.value ?? '').trim().toUpperCase();
-            return mot === tr('EFFACER', 'ERASE') ? undefined : tr('Saisissez EFFACER pour confirmer', 'Type ERASE to confirm');
-          }
-        }
-      ],
-      onFinish: () => {
-        const bilan = vaultStore.eraseData({
-          vaultIds: coffresChoisis(),
-          credentials: coche('credentials'),
-          tasks: coche('tasks'),
-          folders: coche('folders'),
-          tags: coche('tags')
-        });
-        this.selectedItemId = null;
-        this.renderDetail(null);
-        this.closeModal();
-        this.renderSidebar();
-        this.renderList();
-        this.showToast(tr(
-          `Effacé : ${bilan.credentials} identifiant(s), ${bilan.tasks} tâche(s), ${bilan.folders} dossier(s), ${bilan.tags} tag(s)`,
-          `Erased: ${bilan.credentials} credential(s), ${bilan.tasks} task(s), ${bilan.folders} folder(s), ${bilan.tags} tag(s)`
-        ), 'info', 6000);
-      }
-    });
+    openEraseModal(this);
   }
 
   /**
@@ -6012,562 +5478,8 @@ class AppController {
     box.querySelector('[data-profile-add]')?.addEventListener('click', () => profileActions.addNew());
   }
 
-  private openVaultModal(vaultId?: string): void {
-    const data = vaultStore.getData();
-    const existing = vaultId ? data.vaults.find(v => v.id === vaultId) : undefined;
-    const shared = existing?.shared ? sharedVaults.summary(existing.id) : undefined;
-    const credentialCount = existing ? data.credentials.filter(c => c.vaultId === existing.id).length : 0;
-    const taskCount = existing ? data.tasks.filter(t => t.vaultId === existing.id).length : 0;
-    const limits = accountService.getLimits();
-    const tr = (fr: string, en: string) => this.tr(fr, en);
-    const cloud = accountService.isCloud();
-    const permissions = new Set<SharedPermission>(shared?.role.permissions ?? ['write', 'attachments', 'export', 'manage_members', 'manage_roles', 'delete_vault']);
-    const isOwner = !shared || shared.role.builtin === 'owner';
-    const personalCount = data.vaults.filter(v => !v.shared).length;
-    const typeOption = (type: 'personal' | 'work' | 'team', label: string) =>
-      `<option value="${type}" ${existing?.type === type ? 'selected' : ''}>${label}</option>`;
-
-    if (!existing && remainingCapacity(data, data.activeVaultId, limits).vaults === 0) {
-      this.showToast(tr(`Limite de ${limits.maxVaults} coffres atteinte`, `Limit of ${limits.maxVaults} vaults reached`), 'error');
-      return;
-    }
-
-    let icon: ItemIcon | undefined = existing?.icon;
-    const box = this.openModal(`
-      <div class="modal-header">
-        <div class="modal-title">${existing ? this.escapeHtml(existing.name) : i18n.t.vault.newVaultModalTitle}</div>
-        <button class="modal-close">${GEN_ICONS.close}</button>
-      </div>
-      <div class="modal-body">
-        ${shared ? `
-          <div class="tab-btn-group" role="tablist">
-            <button type="button" class="tab-btn active" data-tab="general" role="tab">${tabIcon('general')}<span>${tr('Général', 'General')}</span></button>
-            <button type="button" class="tab-btn" data-tab="members" role="tab">${tabIcon('members')}<span>${tr('Membres', 'Members')}</span></button>
-            <button type="button" class="tab-btn" data-tab="roles" role="tab">${tabIcon('roles')}<span>${tr('Rôles', 'Roles')}</span></button>
-          </div>` : ''}
-
-        <div data-panel="general" style="display:flex;flex-direction:column;gap:16px;">
-          ${shared ? `<div class="notice">${tr('Coffre partagé par', 'Vault shared by')} <strong>${this.escapeHtml(shared.ownerEmail)}</strong> · ${tr('votre rôle', 'your role')} : <strong>${this.escapeHtml(this.roleLabel(shared.role))}</strong></div>` : ''}
-          <div class="cred-identity">
-            <button type="button" class="cred-icon-button" data-icon-button aria-expanded="false" title="${tr('Choisir une icône', 'Choose an icon')}" aria-label="${tr('Choisir une icône', 'Choose an icon')}" ${permissions.has('write') ? '' : 'disabled'}>
-              <span data-icon-preview style="display:flex;"></span>
-              <span class="cred-icon-edit">${ACTION_ICONS.edit}</span>
-            </button>
-            <div class="form-field">
-              <label class="form-label" for="vault-name">${i18n.t.vault.vaultNameLabel}</label>
-              <input class="form-input cred-title-input" id="vault-name" type="text" maxlength="40" value="${this.escapeHtml(existing?.name ?? '')}" placeholder="${tr('Personnel, Travail, Famille…', 'Personal, Work, Family…')}" autocomplete="off" data-autofocus ${permissions.has('write') ? '' : 'disabled'}>
-            </div>
-          </div>
-          <div data-icon-panel hidden></div>
-          <div class="form-field">
-            <label class="form-label" for="vault-type">${i18n.t.vault.vaultTypeLabel}</label>
-<!-- Un &lt;select&gt; natif n'accueille pas de bouton dans sa liste : la corbeille
-                 se place à côté et vise le type choisi, ce qui évite de répéter la liste
-                 des types sous le champ. -->
-            <div class="select-with-action">
-              <select class="form-input" id="vault-type" ${permissions.has('write') ? '' : 'disabled'}>
-                ${typeOption('personal', i18n.t.common.personal)}
-                ${typeOption('work', i18n.t.common.work)}
-                ${typeOption('team', i18n.t.common.team)}
-                ${vaultStore.getVaultTypes().map(custom => `<option value="${this.escapeHtml(custom.id)}" ${existing?.type === custom.id ? 'selected' : ''}>${this.escapeHtml(custom.name)}</option>`).join('')}
-                <option value="__new__">${tr('＋ Nouveau type…', '＋ New type…')}</option>
-              </select>
-              <button type="button" class="icon-btn" data-delete-selected-type hidden title="${tr('Supprimer ce type', 'Delete this type')}" aria-label="${tr('Supprimer ce type', 'Delete this type')}">${GEN_ICONS.trash}</button>
-            </div>
-            <div class="form-row" data-new-type hidden style="grid-template-columns:minmax(0,1fr) auto;margin-top:8px;">
-              <input class="form-input" id="vault-type-name" maxlength="40" placeholder="${tr('Nom du type (Famille, Association…)', 'Type name (Family, Club…)')}" autocomplete="off">
-              <button type="button" class="btn-primary btn-ghost" data-cancel-type>${tr('Annuler', 'Cancel')}</button>
-            </div>
-          </div>
-
-          ${!existing && cloud ? `
-            <label class="switch-row">
-              <span>${tr('Coffre partagé', 'Shared vault')}<small>${tr('Invitez d’autres comptes de ce serveur et choisissez leur rôle', 'Invite other accounts on this server and pick their role')}</small></span>
-              <input type="checkbox" class="switch" id="vault-shared">
-            </label>` : ''}
-
-          ${existing && !shared && cloud ? `
-            <section class="account-section">
-              <h3 class="account-section-title">${tr('Partager ce coffre', 'Share this vault')}</h3>
-              <p class="modal-text">${tr(`Ses ${credentialCount} identifiant(s) et ${taskCount} tâche(s) deviennent un coffre partagé, chiffré avec une nouvelle clé. Vous en êtes propriétaire.`, `Its ${credentialCount} credential(s) and ${taskCount} task(s) become a shared vault encrypted with a new key. You own it.`)}</p>
-              <div class="account-actions account-actions-end">
-                <button class="btn-primary" data-action="share-existing" ${personalCount <= 1 ? 'disabled' : ''}>${tr('Transformer en coffre partagé', 'Turn into a shared vault')}</button>
-              </div>
-              ${personalCount <= 1 ? `<div class="field-hint">${tr('Gardez au moins un autre coffre personnel.', 'Keep at least one other personal vault.')}</div>` : ''}
-            </section>` : ''}
-
-          ${existing && !shared && data.vaults.filter(v => !v.shared).length > 1 ? `
-            <section class="account-section account-danger">
-              <h3 class="account-section-title">${tr('Supprimer ce coffre', 'Delete this vault')}</h3>
-              <p class="modal-text">${tr(`${credentialCount} identifiant(s) et ${taskCount} tâche(s) seront supprimés.`, `${credentialCount} credential(s) and ${taskCount} task(s) will be deleted.`)}</p>
-              <div class="account-actions account-actions-end">
-                <button class="btn-primary btn-danger" data-action="delete-vault">${tr('Supprimer le coffre', 'Delete vault')}</button>
-              </div>
-            </section>` : ''}
-
-          ${shared ? `
-            <section class="account-section account-danger">
-              <h3 class="account-section-title">${isOwner ? tr('Supprimer le coffre partagé', 'Delete shared vault') : tr('Quitter le coffre', 'Leave vault')}</h3>
-              <p class="modal-text">${isOwner
-                ? tr('Le coffre, ses pièces jointes et l’accès de tous les membres seront supprimés.', 'The vault, its attachments and every member’s access will be deleted.')
-                : tr('Vous perdez l’accès à ce coffre. Un membre autorisé pourra vous réinviter.', 'You lose access to this vault. An authorized member can invite you again.')}</p>
-              <div class="account-actions account-actions-end">
-                ${isOwner
-                  ? (permissions.has('delete_vault') ? `<button class="btn-primary btn-danger" data-action="delete-shared">${tr('Supprimer', 'Delete')}</button>` : '')
-                  : `<button class="btn-primary btn-danger" data-action="leave-shared">${tr('Quitter', 'Leave')}</button>`}
-              </div>
-            </section>` : ''}
-        </div>
-
-        ${shared ? `
-          <div data-panel="members" hidden style="display:flex;flex-direction:column;gap:12px;">
-            ${permissions.has('manage_members') ? `
-              <form class="form-section" data-invite>
-                <div class="form-section-title">${tr('Inviter un compte', 'Invite an account')}</div>
-                <div class="form-row" style="grid-template-columns:minmax(0,1fr) auto;">
-                  <input class="form-input" type="email" data-invite-email placeholder="${tr('Email du compte BetterVault', 'BetterVault account email')}" autocomplete="off">
-                  <button class="btn-primary" type="submit">${tr('Rechercher', 'Look up')}</button>
-                </div>
-                <div data-invite-found hidden></div>
-              </form>` : ''}
-            <div class="member-list" data-members><div class="icon-picker-loading"></div></div>
-          </div>
-
-          <div data-panel="roles" hidden style="display:flex;flex-direction:column;gap:12px;">
-            <p class="modal-text">${tr('Les rôles décident de qui peut modifier, gérer les membres ou supprimer. Toute personne membre peut lire le contenu du coffre.', 'Roles decide who can edit, manage members or delete. Every member can read the vault content.')}</p>
-            <div class="role-list" data-roles></div>
-            ${permissions.has('manage_roles') ? `
-              <form class="form-section" data-role-create>
-                <div class="form-section-title">${tr('Nouveau rôle', 'New role')}</div>
-                <input class="form-input" data-role-name maxlength="40" placeholder="${tr('Nom du rôle', 'Role name')}">
-                <div class="permission-grid" data-role-permissions></div>
-                <div class="account-actions account-actions-end"><button class="btn-primary btn-accent" type="submit">${tr('Créer le rôle', 'Create role')}</button></div>
-              </form>` : ''}
-          </div>` : ''}
-      </div>
-      <div class="modal-footer">
-        <button class="btn-primary" data-close>${i18n.t.common.cancel}</button>
-        ${!shared || permissions.has('write') ? `<button class="btn-primary" id="modal-confirm">${existing ? tr('Enregistrer', 'Save') : i18n.t.vault.createVaultButton}</button>` : ''}
-      </div>
-    `);
-
-    const $ = <T extends HTMLElement>(selector: string) => box.querySelector(selector) as T | null;
-
-    // Onglets
-    box.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(tab => {
-      tab.addEventListener('click', () => {
-        box.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(t => t.classList.toggle('active', t === tab));
-        box.querySelectorAll<HTMLElement>('[data-panel]').forEach(panel => { panel.hidden = panel.dataset.panel !== tab.dataset.tab; });
-        const confirm = $<HTMLButtonElement>('#modal-confirm');
-        if (confirm) confirm.hidden = tab.dataset.tab !== 'general';
-        if (tab.dataset.tab === 'members' || tab.dataset.tab === 'roles') void loadMembers();
-      });
-    });
-
-    // Icône
-    const preview = $<HTMLElement>('[data-icon-preview]')!;
-    const panel = $<HTMLElement>('[data-icon-panel]')!;
-    const iconButton = $<HTMLButtonElement>('[data-icon-button]')!;
-    const renderPreview = () => { preview.innerHTML = icon ? renderItemIcon(icon, 28) : VAULT_ICON.replace(/width="15" height="15"/, 'width="28" height="28"'); };
-    const closePanel = () => {
-      panel.hidden = true;
-      panel.innerHTML = '';
-      panel.className = '';
-      iconButton.setAttribute('aria-expanded', 'false');
-    };
-    iconButton.addEventListener('click', () => {
-      if (!panel.hidden) return closePanel();
-      panel.hidden = false;
-      iconButton.setAttribute('aria-expanded', 'true');
-      mountIconPicker(panel, { tr, current: icon, initialSet: 'lucide', onPick: picked => { icon = picked; renderPreview(); closePanel(); iconButton.focus(); } }).focus();
-    });
-    renderPreview();
-
-    // Types de coffres créés par l'utilisateur : « Nouveau type… » ouvre un champ, les puces en suppriment un
-    const typeSelect = $<HTMLSelectElement>('#vault-type')!;
-    const newTypeRow = box.querySelector('[data-new-type]') as HTMLElement;
-    const newTypeInput = $<HTMLInputElement>('#vault-type-name');
-    const deleteTypeButton = box.querySelector<HTMLButtonElement>('[data-delete-selected-type]');
-    let previousType = typeSelect.value;
-
-    // La corbeille ne concerne que les types créés ici : les trois types fournis restent
-    const paintTypeActions = () => {
-      const custom = vaultStore.getVaultTypes().some(t => t.id === typeSelect.value);
-      if (deleteTypeButton) deleteTypeButton.hidden = !custom || !permissions.has('write');
-    };
-
-    typeSelect.addEventListener('change', () => {
-      const creating = typeSelect.value === '__new__';
-      newTypeRow.hidden = !creating;
-      if (creating) newTypeInput?.focus();
-      else previousType = typeSelect.value;
-      paintTypeActions();
-    });
-    box.querySelector('[data-cancel-type]')?.addEventListener('click', () => {
-      typeSelect.value = previousType;
-      newTypeRow.hidden = true;
-      if (newTypeInput) newTypeInput.value = '';
-      paintTypeActions();
-    });
-    paintTypeActions();
-
-    deleteTypeButton?.addEventListener('click', async () => {
-      const typeId = typeSelect.value;
-      if (!vaultStore.getVaultTypes().some(t => t.id === typeId)) return;
-      const custom = vaultStore.getVaultTypes().find(t => t.id === typeId);
-      const used = vaultStore.getData().vaults.filter(v => v.type === typeId).length;
-      const confirmed = await this.confirmDialog({
-        title: tr('Supprimer ce type ?', 'Delete this type?'),
-        message: used
-          ? tr(`${used} coffre(s) repasseront en « ${i18n.t.common.personal} ».`, `${used} vault(s) will go back to "${i18n.t.common.personal}".`)
-          : tr(`« ${custom?.name ?? ''} » sera retiré de la liste.`, `"${custom?.name ?? ''}" will be removed from the list.`),
-        confirmLabel: tr('Supprimer', 'Delete'),
-        danger: true
-      });
-      if (!confirmed) return;
-      vaultStore.deleteVaultType(typeId);
-      this.closeModal();
-      this.renderSidebar();
-      this.openVaultModal(vaultId);
-    });
-
-    $<HTMLButtonElement>('#modal-confirm')?.addEventListener('click', async event => {
-      const button = event.currentTarget as HTMLButtonElement;
-      const name = ($<HTMLInputElement>('#vault-name')?.value ?? '').trim();
-      let type = typeSelect.value;
-      if (type === '__new__') {
-        const typeName = newTypeInput?.value.trim() ?? '';
-        if (!typeName) {
-          this.showToast(tr('Donnez un nom au nouveau type', 'Name the new type'), 'error');
-          newTypeInput?.focus();
-          return;
-        }
-        try {
-          type = vaultStore.createVaultType(typeName, limits.maxVaultTypes).id;
-        } catch (err) {
-          this.showToast(accountErrorMessage(err), 'error');
-          return;
-        }
-      }
-      if (!name) {
-        this.showToast(tr('Donnez un nom au coffre', 'Give the vault a name'), 'error');
-        return;
-      }
-      if (existing) {
-        vaultStore.updateVault(existing.id, { name, type, icon });
-        this.closeModal();
-        this.showToast(tr('Coffre enregistré', 'Vault saved'), 'success');
-        return;
-      }
-      if ($<HTMLInputElement>('#vault-shared')?.checked) {
-        button.disabled = true;
-        try {
-          const id = await sharedVaults.create(name, type, icon);
-          this.reloadWithShared();
-          vaultStore.setActiveVault(id);
-          this.closeModal();
-          this.showToast(tr(`Coffre partagé ${name} créé. Invitez des membres depuis ses réglages.`, `Shared vault ${name} created. Invite members from its settings.`), 'success', 5000);
-          this.openVaultModal(id);
-        } catch (err) {
-          button.disabled = false;
-          this.showToast(accountErrorMessage(err), 'error');
-        }
-        return;
-      }
-      vaultStore.addVault(name, type, icon);
-      this.selectedItemId = null;
-      this.renderDetail(null);
-      this.closeModal();
-      this.showToast(tr(`Coffre ${name} créé`, `Vault ${name} created`), 'success');
-    });
-
-    $<HTMLButtonElement>('[data-action="share-existing"]')?.addEventListener('click', async event => {
-      if (!existing) return;
-      // « currentTarget » n'est renseigné que pendant la distribution de l'événement :
-      // après la première attente il vaut null. On garde le bouton tout de suite.
-      const button = event.currentTarget as HTMLButtonElement;
-      const confirmed = await this.confirmDialog({
-        title: tr('Transformer en coffre partagé ?', 'Turn into a shared vault?'),
-        message: tr('Le contenu est déplacé dans un coffre partagé. Vous pourrez ensuite inviter des membres.', 'The content moves to a shared vault. You can then invite members.'),
-        confirmLabel: tr('Transformer', 'Convert')
-      });
-      if (!confirmed) return;
-      button.disabled = true;
-      try {
-        const id = await sharedVaults.shareExisting(vaultStore.getData(), existing.id);
-        vaultStore.removeVaultSilently(existing.id);
-        await accountService.flush();
-        this.reloadWithShared();
-        vaultStore.setActiveVault(id);
-        this.closeModal();
-        this.openVaultModal(id);
-      } catch (err) {
-        button.disabled = false;
-        this.showToast(accountErrorMessage(err), 'error');
-      }
-    });
-
-    $<HTMLButtonElement>('[data-action="delete-vault"]')?.addEventListener('click', async () => {
-      if (!existing) return;
-      const confirmed = await this.confirmDialog({
-        title: tr('Supprimer le coffre ?', 'Delete vault?'),
-        message: tr(`« ${existing.name} », ses ${credentialCount} identifiant(s) et ses ${taskCount} tâche(s) seront définitivement supprimés.`, `"${existing.name}", its ${credentialCount} credential(s) and ${taskCount} task(s) will be permanently deleted.`),
-        confirmLabel: tr('Supprimer', 'Delete'),
-        danger: true,
-        skippable: true
-      });
-      if (!confirmed) return;
-      vaultStore.deleteVault(existing.id);
-      this.selectedItemId = null;
-      this.renderDetail(null);
-      this.closeModal();
-      this.showToast(tr('Coffre supprimé', 'Vault deleted'), 'success');
-    });
-
-    const leaveOrDelete = async (kind: 'delete' | 'leave') => {
-      if (!existing) return;
-      const confirmed = await this.confirmDialog({
-        title: kind === 'delete' ? tr('Supprimer le coffre partagé ?', 'Delete shared vault?') : tr('Quitter le coffre ?', 'Leave vault?'),
-        message: kind === 'delete'
-          ? tr(`« ${existing.name} » sera supprimé pour tous ses membres.`, `"${existing.name}" will be deleted for all members.`)
-          : tr(`Vous n’aurez plus accès à « ${existing.name} ».`, `You will no longer have access to "${existing.name}".`),
-        confirmLabel: kind === 'delete' ? tr('Supprimer', 'Delete') : tr('Quitter', 'Leave'),
-        danger: true
-      });
-      if (!confirmed) return;
-      try {
-        if (kind === 'delete') await sharedVaults.deleteVault(existing.id);
-        else await sharedVaults.leave(existing.id);
-        this.selectedItemId = null;
-        this.reloadWithShared();
-        this.renderDetail(null);
-        this.closeModal();
-      } catch (err) {
-        this.showToast(accountErrorMessage(err), 'error');
-      }
-    };
-    $<HTMLButtonElement>('[data-action="delete-shared"]')?.addEventListener('click', () => void leaveOrDelete('delete'));
-    $<HTMLButtonElement>('[data-action="leave-shared"]')?.addEventListener('click', () => void leaveOrDelete('leave'));
-
-    if (!shared || !existing) return;
-
-    /* ── Membres et rôles ── */
-    const PERMISSION_LABELS: Record<SharedPermission, string> = {
-      write: tr('Ajouter et modifier', 'Add and edit'),
-      attachments: tr('Pièces jointes', 'Attachments'),
-      export: tr('Exporter', 'Export'),
-      manage_members: tr('Gérer les membres', 'Manage members'),
-      manage_roles: tr('Gérer les rôles', 'Manage roles'),
-      delete_vault: tr('Supprimer le coffre', 'Delete the vault')
-    };
-    const EDITABLE_PERMISSIONS: SharedPermission[] = ['write', 'attachments', 'export', 'manage_members', 'manage_roles'];
-    let roles: SharedRole[] = [];
-    let members: SharedMember[] = [];
-    const myEmail = accountService.getAccount()?.email ?? '';
-
-    const roleOptions = (selected: string, includeOwner: boolean) => roles
-      .filter(r => includeOwner || r.builtin !== 'owner')
-      .map(r => `<option value="${r.id}" ${r.id === selected ? 'selected' : ''}>${this.escapeHtml(this.roleLabel(r))}</option>`).join('');
-
-    const renderMembers = () => {
-      const host = $<HTMLElement>('[data-members]')!;
-      host.innerHTML = members.map(member => {
-        const role = roles.find(r => r.id === member.roleId);
-        const self = member.email === myEmail;
-        const editable = permissions.has('manage_members') && role?.builtin !== 'owner' && !self;
-        return `
-          <div class="member-row" data-user="${member.userId}">
-            <div class="member-avatar">${this.escapeHtml(member.email.charAt(0).toUpperCase())}</div>
-            <div class="member-main">
-              <div class="member-email">${this.escapeHtml(member.email)}${self ? ` <span class="field-hint">(${tr('vous', 'you')})</span>` : ''}</div>
-              <div class="field-hint">${member.status === 'invited' ? `<span class="status-pill off">${tr('Invitation envoyée', 'Invitation sent')}</span>` : ''}
-                <button type="button" class="link-btn" data-fingerprint="${this.escapeHtml(member.publicKey ?? '')}">${tr('Empreinte de clé', 'Key fingerprint')}</button></div>
-            </div>
-            ${editable
-              ? `<select class="form-input member-role" data-role-select>${roleOptions(member.roleId, isOwner && member.status === 'active')}</select>
-                 <button type="button" class="icon-btn" data-remove title="${tr('Retirer', 'Remove')}" aria-label="${tr('Retirer', 'Remove')}">${ACTION_ICONS.trash}</button>`
-              : `<span class="vault-type-badge shared">${this.escapeHtml(role ? this.roleLabel(role) : '')}</span>`}
-          </div>`;
-      }).join('');
-    };
-
-    const permissionChecks = (selected: SharedPermission[], disabled: boolean) => EDITABLE_PERMISSIONS.map(p => `
-      <label class="check-row"><input type="checkbox" value="${p}" ${selected.includes(p) ? 'checked' : ''} ${disabled ? 'disabled' : ''}> ${PERMISSION_LABELS[p]}</label>`).join('');
-
-    const renderRoles = () => {
-      const host = $<HTMLElement>('[data-roles]')!;
-      host.innerHTML = roles.map(role => {
-        const editable = permissions.has('manage_roles') && !role.builtin;
-        const usedBy = members.filter(m => m.roleId === role.id).length;
-        return `
-          <div class="form-section role-card" data-role="${role.id}">
-            <div class="form-section-head">
-              ${editable
-                ? `<input class="form-input" data-role-rename value="${this.escapeHtml(role.name)}" maxlength="40" style="max-width:240px;">`
-                : `<div class="form-section-title">${this.escapeHtml(this.roleLabel(role))}${role.builtin ? ` <span class="field-hint">${tr('prédéfini', 'built-in')}</span>` : ''}</div>`}
-              <span class="field-hint">${tr(`${usedBy} membre${usedBy > 1 ? 's' : ''}`, `${usedBy} member${usedBy === 1 ? '' : 's'}`)}</span>
-            </div>
-            ${role.builtin === 'owner'
-              ? `<div class="field-hint">${tr('Toutes les permissions, dont la suppression du coffre.', 'All permissions, including deleting the vault.')}</div>`
-              : `<div class="permission-grid">${permissionChecks(role.permissions, !editable)}</div>`}
-            ${role.builtin === 'viewer' ? `<div class="field-hint">${tr('Lecture seule.', 'Read only.')}</div>` : ''}
-            ${editable ? `<div class="account-actions account-actions-end"><button type="button" class="btn-primary btn-ghost" data-role-delete>${tr('Supprimer', 'Delete')}</button><button type="button" class="btn-primary" data-role-save>${tr('Enregistrer', 'Save')}</button></div>` : ''}
-          </div>`;
-      }).join('');
-      const create = $<HTMLElement>('[data-role-permissions]');
-      if (create && !create.childElementCount) create.innerHTML = permissionChecks(['write'], false);
-    };
-
-    const loadMembers = async () => {
-      try {
-        const result = await sharedVaults.members(existing.id);
-        roles = result.roles;
-        members = result.members;
-        renderMembers();
-        renderRoles();
-      } catch (err) {
-        $<HTMLElement>('[data-members]')!.innerHTML = `<div class="notice notice-danger">${this.escapeHtml(accountErrorMessage(err))}</div>`;
-      }
-    };
-
-    // Invitation : recherche du compte, affichage de l'empreinte, choix du rôle
-    const inviteForm = $<HTMLFormElement>('[data-invite]');
-    inviteForm?.addEventListener('submit', async e => {
-      e.preventDefault();
-      const found = $<HTMLElement>('[data-invite-found]')!;
-      const email = $<HTMLInputElement>('[data-invite-email]')!.value.trim();
-      found.hidden = false;
-      found.innerHTML = `<div class="field-hint">${tr('Recherche…', 'Looking up…')}</div>`;
-      try {
-        if (!roles.length) await loadMembers();
-        const user = await sharedVaults.lookup(email);
-        found.innerHTML = `
-          <div class="invite-card">
-            <div><strong>${this.escapeHtml(user.email)}</strong></div>
-            <div class="field-hint">${tr('Empreinte de sa clé : vérifiez-la avec la personne (appel, message) avant d’inviter.', 'Key fingerprint: check it with the person (call, message) before inviting.')}</div>
-            <code class="secret-text">${user.fingerprint}</code>
-            <div class="form-row" style="grid-template-columns:minmax(0,1fr) auto;">
-              <select class="form-input" data-invite-role>${roleOptions(roles.find(r => r.builtin === 'editor')?.id ?? '', false)}</select>
-              <button type="button" class="btn-primary btn-accent" data-invite-send>${tr('Inviter', 'Invite')}</button>
-            </div>
-          </div>`;
-        found.querySelector<HTMLButtonElement>('[data-invite-send]')?.addEventListener('click', async ev => {
-          const button = ev.currentTarget as HTMLButtonElement;
-          button.disabled = true;
-          try {
-            await sharedVaults.invite(existing.id, user, found.querySelector<HTMLSelectElement>('[data-invite-role]')!.value);
-            found.hidden = true;
-            $<HTMLInputElement>('[data-invite-email]')!.value = '';
-            this.showToast(tr(`Invitation envoyée à ${user.email}`, `Invitation sent to ${user.email}`), 'success');
-            await loadMembers();
-          } catch (err) {
-            button.disabled = false;
-            this.showToast(accountErrorMessage(err), 'error');
-          }
-        });
-      } catch (err) {
-        found.innerHTML = `<div class="notice notice-danger">${this.escapeHtml(accountErrorMessage(err))}</div>`;
-      }
-    });
-
-    const membersHost = $<HTMLElement>('[data-members]')!;
-    membersHost.addEventListener('click', async e => {
-      const target = e.target as HTMLElement;
-      const fingerprintButton = target.closest<HTMLButtonElement>('[data-fingerprint]');
-      if (fingerprintButton) {
-        const key = fingerprintButton.dataset.fingerprint;
-        fingerprintButton.textContent = key ? await sharedVaults.fingerprintOf(key) : tr('Pas de clé', 'No key');
-        return;
-      }
-      if (!target.closest('[data-remove]')) return;
-      const userId = target.closest<HTMLElement>('[data-user]')?.dataset.user;
-      const member = members.find(m => m.userId === userId);
-      if (!member) return;
-      const confirmed = await this.confirmDialog({
-        title: tr('Retirer ce membre ?', 'Remove this member?'),
-        message: tr(`${member.email} perd l’accès. Le coffre est rechiffré avec une nouvelle clé pour les membres restants.`, `${member.email} loses access. The vault is re-encrypted with a new key for the remaining members.`),
-        confirmLabel: tr('Retirer', 'Remove'),
-        danger: true
-      });
-      if (!confirmed) return;
-      try {
-        await sharedVaults.removeMember(existing.id, member.userId);
-        this.showToast(tr(`${member.email} retiré, nouvelle clé en place`, `${member.email} removed, new key in place`), 'success');
-        await loadMembers();
-      } catch (err) {
-        this.showToast(accountErrorMessage(err), 'error');
-      }
-    });
-    membersHost.addEventListener('change', async e => {
-      const select = (e.target as HTMLElement).closest<HTMLSelectElement>('[data-role-select]');
-      const userId = select?.closest<HTMLElement>('[data-user]')?.dataset.user;
-      const member = members.find(m => m.userId === userId);
-      const role = roles.find(r => r.id === select?.value);
-      if (!select || !member || !role) return;
-      if (role.builtin === 'owner') {
-        const confirmed = await this.confirmDialog({
-          title: tr('Transférer la propriété ?', 'Transfer ownership?'),
-          message: tr(`${member.email} devient propriétaire. Vous passez administrateur.`, `${member.email} becomes owner. You become administrator.`),
-          confirmLabel: tr('Transférer', 'Transfer'),
-          danger: true
-        });
-        if (!confirmed) {
-          select.value = member.roleId;
-          return;
-        }
-      }
-      try {
-        await sharedVaults.changeRole(existing.id, member.userId, role.id);
-        this.reloadWithShared();
-        if (role.builtin === 'owner') {
-          this.closeModal();
-          this.openVaultModal(existing.id);
-          return;
-        }
-        await loadMembers();
-      } catch (err) {
-        select.value = member.roleId;
-        this.showToast(accountErrorMessage(err), 'error');
-      }
-    });
-
-    const rolesHost = $<HTMLElement>('[data-roles]')!;
-    rolesHost.addEventListener('click', async e => {
-      const target = e.target as HTMLElement;
-      const card = target.closest<HTMLElement>('[data-role]');
-      const roleId = card?.dataset.role;
-      if (!card || !roleId) return;
-      try {
-        if (target.closest('[data-role-save]')) {
-          const name = card.querySelector<HTMLInputElement>('[data-role-rename]')?.value.trim();
-          const selected = [...card.querySelectorAll<HTMLInputElement>('.permission-grid input:checked')].map(i => i.value as SharedPermission);
-          await sharedVaults.updateRole(existing.id, roleId, { name, permissions: selected });
-          this.showToast(tr('Rôle enregistré', 'Role saved'), 'success');
-          await loadMembers();
-        } else if (target.closest('[data-role-delete]')) {
-          await sharedVaults.deleteRole(existing.id, roleId);
-          await loadMembers();
-        }
-      } catch (err) {
-        this.showToast(accountErrorMessage(err), 'error');
-      }
-    });
-
-    $<HTMLFormElement>('[data-role-create]')?.addEventListener('submit', async e => {
-      e.preventDefault();
-      const form = e.currentTarget as HTMLFormElement;
-      const name = form.querySelector<HTMLInputElement>('[data-role-name]')!.value.trim();
-      const selected = [...form.querySelectorAll<HTMLInputElement>('[data-role-permissions] input:checked')].map(i => i.value as SharedPermission);
-      if (!name) return this.showToast(tr('Donnez un nom au rôle', 'Give the role a name'), 'error');
-      try {
-        await sharedVaults.createRole(existing.id, name, selected);
-        form.querySelector<HTMLInputElement>('[data-role-name]')!.value = '';
-        this.showToast(tr(`Rôle ${name} créé`, `Role ${name} created`), 'success');
-        await loadMembers();
-      } catch (err) {
-        this.showToast(accountErrorMessage(err), 'error');
-      }
-    });
+  openVaultModal(vaultId?: string): void {
+    openVaultModal(this, vaultId);
   }
 
   /* ── Dossiers ────────────────────────────────────────────────────────── */
@@ -7022,185 +5934,7 @@ class AppController {
   }
 
   private openTagManagerModal(): void {
-    const tr = (fr: string, en: string) => this.tr(fr, en);
-    let newColor = TAG_COLORS[vaultStore.getTags().length % TAG_COLORS.length];
-
-    const box = this.openModal(`
-      <div class="modal-header">
-        <div class="modal-title">Tags</div>
-        <button class="modal-close">${GEN_ICONS.close}</button>
-      </div>
-      <div class="modal-body">
-        <form class="tag-create" data-tag-create>
-          <div class="form-row" style="grid-template-columns:minmax(0,1fr) auto;">
-            <input class="form-input" id="tag-new-name" maxlength="32" placeholder="${tr('Nom du nouveau tag', 'New tag name')}" aria-label="${tr('Nom du nouveau tag', 'New tag name')}" autocomplete="off" data-autofocus>
-            <button class="btn-primary btn-accent" type="submit">${tr('Ajouter', 'Add')}</button>
-          </div>
-          <div data-new-color></div>
-          <span class="tag-chip tag-create-preview" data-preview><span>${tr('Aperçu', 'Preview')}</span></span>
-        </form>
-        <div class="tag-manager-list" data-tag-list></div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-primary" data-close>${tr('Fermer', 'Close')}</button>
-      </div>
-    `);
-
-    const listEl = box.querySelector('[data-tag-list]') as HTMLElement;
-    const nameInput = box.querySelector('#tag-new-name') as HTMLInputElement;
-    const preview = box.querySelector('[data-preview]') as HTMLElement;
-
-    const updatePreview = () => {
-      preview.style.setProperty('--tag-color', newColor);
-      (preview.firstElementChild as HTMLElement).textContent = nameInput.value.trim() || tr('Aperçu', 'Preview');
-    };
-    const newColorPicker = mountColorPicker(box.querySelector('[data-new-color]') as HTMLElement, {
-      value: newColor,
-      presets: TAG_COLORS,
-      label: tr('Couleur', 'Color'),
-      customLabel: tr('Couleur personnalisée', 'Custom color'),
-      onChange: color => {
-        newColor = color;
-        updatePreview();
-      }
-    });
-    nameInput.addEventListener('input', updatePreview);
-    updatePreview();
-
-    const render = () => {
-      const tags = vaultStore.getTags();
-      if (tags.length === 0) {
-        listEl.innerHTML = `<p class="modal-text">${tr('Aucun tag pour l’instant. Vous pouvez aussi en créer depuis un identifiant ou une tâche.', 'No tags yet. You can also create them from a credential or a task.')}</p>`;
-        return;
-      }
-      listEl.innerHTML = tags.map(tag => {
-        const count = vaultStore.countTagUsage(tag.name);
-        return `
-          <div class="tag-manager-row" data-tag-id="${tag.id}">
-            <button type="button" class="tag-icon-button" data-tag-icon title="${tr('Choisir une icône', 'Choose an icon')}" aria-label="${tr('Icône de', 'Icon for')} ${this.escapeHtml(tag.name)}" aria-expanded="false" style="color:${tagColor(tag.color)};">
-              <span data-tag-icon-preview>${tag.icon ? renderItemIcon(tag.icon, 16) : `<span class="tag-dot" style="background-color:${tagColor(tag.color)};"></span>`}</span>
-            </button>
-            <input class="form-input tag-rename" value="${this.escapeHtml(tag.name)}" maxlength="32" aria-label="${tr('Nom du tag', 'Tag name')}">
-            <span class="tag-usage">${tr(`${count} élément${count > 1 ? 's' : ''}`, `${count} item${count === 1 ? '' : 's'}`)}</span>
-            <button type="button" class="icon-btn tag-delete" title="${tr('Supprimer', 'Delete')}" aria-label="${tr('Supprimer', 'Delete')} ${this.escapeHtml(tag.name)}">${ACTION_ICONS.trash}</button>
-            <div data-color-host></div>
-            <div class="tag-icon-panel" data-tag-icon-panel hidden></div>
-          </div>`;
-      }).join('');
-
-      listEl.querySelectorAll<HTMLElement>('[data-tag-id]').forEach(row => {
-        const tag = tags.find(t => t.id === row.dataset.tagId);
-        if (!tag) return;
-        const iconButton = row.querySelector('[data-tag-icon]') as HTMLButtonElement;
-        const iconPreview = row.querySelector('[data-tag-icon-preview]') as HTMLElement;
-        const iconPanel = row.querySelector('[data-tag-icon-panel]') as HTMLElement;
-        const renderTagIcon = (icon: ItemIcon | undefined, color: string) => {
-          iconButton.style.color = color;
-          iconPreview.innerHTML = icon ? renderItemIcon(icon, 16) : `<span class="tag-dot" style="background-color:${color};"></span>`;
-        };
-
-        mountColorPicker(row.querySelector('[data-color-host]') as HTMLElement, {
-          value: tagColor(tag.color),
-          presets: TAG_COLORS,
-          label: tr(`Couleur de ${tag.name}`, `${tag.name} color`),
-          customLabel: tr('Couleur personnalisée', 'Custom color'),
-          onChange: color => {
-            vaultStore.updateTag(tag.id, { color });
-            renderTagIcon(vaultStore.getTags().find(t => t.id === tag.id)?.icon, color);
-            this.renderSidebar();
-          }
-        });
-
-        iconButton.addEventListener('click', () => {
-          const open = iconPanel.hidden;
-          listEl.querySelectorAll<HTMLElement>('[data-tag-icon-panel]').forEach(panel => { panel.hidden = true; });
-          listEl.querySelectorAll<HTMLElement>('[data-tag-icon]').forEach(button => button.setAttribute('aria-expanded', 'false'));
-          if (!open) return;
-          iconPanel.hidden = false;
-          iconButton.setAttribute('aria-expanded', 'true');
-          mountIconPicker(iconPanel, {
-            tr,
-            current: tag.icon,
-            initialSet: tag.icon?.set ?? 'lucide',
-            initialQuery: tag.name,
-            onPick: picked => {
-              vaultStore.updateTag(tag.id, { icon: picked ?? null });
-              const color = vaultStore.getTags().find(t => t.id === tag.id)?.color ?? tag.color;
-              renderTagIcon(picked, tagColor(color));
-              iconPanel.hidden = true;
-              iconButton.setAttribute('aria-expanded', 'false');
-              iconButton.focus();
-              this.renderSidebar();
-              this.renderList();
-            }
-          }).focus();
-        });
-      });
-    };
-
-    const rowTag = (el: HTMLElement) => {
-      const id = el.closest<HTMLElement>('[data-tag-id]')?.dataset.tagId;
-      return vaultStore.getTags().find(t => t.id === id);
-    };
-
-    listEl.addEventListener('click', async e => {
-      const target = e.target as HTMLElement;
-      if (!target.closest('.tag-delete')) return;
-      const tag = rowTag(target);
-      if (!tag) return;
-      const count = vaultStore.countTagUsage(tag.name);
-      const confirmed = await this.confirmDialog({
-        title: tr('Supprimer le tag ?', 'Delete tag?'),
-        message: tr(`« ${tag.name} » sera retiré de ${count} élément(s). Les éléments sont conservés.`, `"${tag.name}" will be removed from ${count} item(s). The items are kept.`),
-        confirmLabel: tr('Supprimer', 'Delete'),
-        danger: true
-      });
-      if (!confirmed) return;
-      if (this.activeTag === tag.name) this.activeTag = null;
-      vaultStore.deleteTag(tag.id);
-      render();
-    });
-
-    listEl.addEventListener('change', e => {
-      const input = e.target as HTMLInputElement;
-      if (!input.classList.contains('tag-rename')) return;
-      const tag = rowTag(input);
-      if (!tag) return;
-      try {
-        const wasActive = this.activeTag === tag.name;
-        vaultStore.updateTag(tag.id, { name: input.value });
-        if (wasActive) this.activeTag = vaultStore.getTags().find(t => t.id === tag.id)?.name ?? null;
-      } catch (err) {
-        this.showToast(accountErrorMessage(err), 'error');
-      }
-      render();
-    });
-
-    listEl.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && (e.target as HTMLElement).classList.contains('tag-rename')) {
-        e.preventDefault();
-        (e.target as HTMLInputElement).blur();
-      }
-    });
-
-    box.querySelector('[data-tag-create]')?.addEventListener('submit', e => {
-      e.preventDefault();
-      try {
-        const name = nameInput.value;
-        if (vaultStore.getTagByName(name)) throw new Error(tr('Ce tag existe déjà', 'This tag already exists'));
-        vaultStore.createTag(name, newColor);
-        nameInput.value = '';
-        newColor = TAG_COLORS[vaultStore.getTags().length % TAG_COLORS.length];
-        newColorPicker.setValue(newColor);
-        updatePreview();
-        render();
-      } catch (err) {
-        this.showToast(accountErrorMessage(err), 'error');
-      }
-      nameInput.focus();
-    });
-
-    render();
+    openTagManagerModal(this);
   }
 
   private runShortcut(action: ShortcutAction, searchInput: HTMLInputElement | null): void {
@@ -7423,6 +6157,7 @@ createDeviceStorage().then(storage => {
   profileStore.touch();
   accountService = new AccountService({ storage: profileStore.storageFor(), sessionStore: extensionSessionStore() });
   sharedVaults = new SharedVaultManager(accountService);
+registerServices(accountService, sharedVaults);
   new AppController();
 }).catch(err => {
   // Ne jamais démarrer sur un stockage vide : un nouveau compte écraserait le fichier existant
