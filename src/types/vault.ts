@@ -1,3 +1,4 @@
+import type { ItemVersion, ItemConflict } from '../store/versions';
 import type { ItemIcon } from '../icons/iconLibrary';
 import type { CardData, IdentityData, ItemType, SshKeyData } from './itemTypes';
 import type { AttachmentMeta } from '../account/attachmentCrypto';
@@ -45,6 +46,9 @@ export interface Task {
   completedAt?: number;
   createdAt: number;
   updatedAt: number;
+  rev?: string;
+  history?: ItemVersion[];
+  conflicts?: ItemConflict[];
 }
 
 export interface CredentialField {
@@ -97,6 +101,10 @@ export interface CredentialItem {
   expiresAt?: number; // Timestamp d'expiration ou de rappel de renouvellement
   createdAt: number;
   updatedAt: number;
+  /** Version courante, versions précédentes et valeurs concurrentes (store/versions.ts) */
+  rev?: string;
+  history?: ItemVersion[];
+  conflicts?: ItemConflict[];
 }
 
 export interface VaultMetadata {
@@ -149,4 +157,12 @@ export interface UnlockedVaultData {
   vaultTypes?: VaultTypeDef[];
   /** Suppressions synchronisables : id de l'élément → horodatage de suppression */
   deleted: Record<string, number>;
+  /** Éléments supprimés récemment, restaurables pendant 30 jours */
+  trash?: TrashEntry[];
+}
+
+export interface TrashEntry {
+  kind: 'credential' | 'task';
+  item: CredentialItem | Task;
+  deletedAt: number;
 }

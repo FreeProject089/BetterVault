@@ -65,6 +65,10 @@ import { translateError } from './i18n/errorMessages';
 import { tabIcon } from './ui/tabIcons';
 import { mountStepper, type StepDef } from './ui/stepper';
 import { ProfileStore } from './account/profiles';
+import { renderVersioning, wireVersioning, renderTrash, type VersionsContext } from './ui/versionsPanel';
+import { expiredTrash } from './store/vaultStore';
+import { TRASH_DAYS } from './account/merge';
+import type { TrashEntry } from './types/vault';
 import { profileRowsHtml, wireProfileRows, type ProfileActions } from './ui/accountSwitcher';
 import { ACCOUNT_STORAGE_KEYS } from './account/accountService';
 import {
@@ -682,6 +686,10 @@ class AppController {
 
     document.getElementById('btn-open-audit')?.addEventListener('click', () => {
       this.openAuditModal();
+    });
+
+    document.getElementById('btn-open-trash')?.addEventListener('click', () => {
+      this.openTrashModal();
     });
 
     document.getElementById('btn-open-import')?.addEventListener('click', () => {
@@ -1814,6 +1822,8 @@ class AppController {
         ${passkeysHTML}
         `}
 
+        <div data-versioning>${renderVersioning(cred, this.versionsContext('credential', cred.id))}</div>
+
         ${cred.passwordHistory && cred.passwordHistory.length > 0 ? `
           <div class="field-group">
             <div class="section-divider" style="margin-bottom:8px;">${this.tr('Anciens mots de passe', 'Previous passwords')} (${cred.passwordHistory.length})</div>
@@ -1980,10 +1990,7 @@ class AppController {
         skippable: true
       });
       if (confirmed) {
-        // Les fichiers chiffrés de l'identifiant sont retirés du serveur
-        for (const file of cred.attachments ?? []) {
-          if (!file.data) void accountService.withCloud(client => client.deleteAttachment(file.id)).catch(() => undefined);
-        }
+        // L'identifiant part à la corbeille avec ses fichiers : ils ne quittent le serveur qu'à son vidage
         vaultStore.deleteCredential(cred.id);
         this.selectedItemId = null;
         this.renderDetail(null);
@@ -2021,6 +2028,9 @@ class AppController {
     document.getElementById('btn-renew-cred')?.addEventListener('click', () => {
       this.openCreateCredentialModal(cred.id, { renew: true });
     });
+
+    const versioning = document.querySelector<HTMLElement>('[data-versioning]');
+    if (versioning) wireVersioning(versioning, cred, this.versionsContext('credential', cred.id));
 
     document.querySelectorAll('.btn-copy-history').forEach(el => {
       el.addEventListener('click', async (e) => {
@@ -3755,6 +3765,98 @@ class AppController {
   }
 
   /* ── Audit de Sécurité du Coffre ────────────────────────────────────────── */
+  /* ── Versions, conflits, corbeille ─────────────────────────────────── */
+
+  private versionsContext(kind: 'credential' | 'task', id: string): VersionsContext {
+    return {
+      tr: (fr, en) => this.tr(fr, en),
+      esc: value => this.escapeHtml(value),
+      locale: () => i18n.intlLocale(),
+      confirm: options => this.confirmDialog(options),
+      toast: (message, type = 'info') => this.showToast(message, type),
+      restoreVersion: rev => {
+        const ok = vaultStore.restoreItemVersion(kind, id, rev);
+        if (ok) this.renderDetail(id);
+        return ok;
+      },
+      resolveConflict: (conflict, keep) => {
+        vaultStore.resolveItemConflict(kind, id, conflict, keep);
+        this.renderDetail(id);
+      }
+    };
+  }
+
+  /** Supprime pour de bon, fichiers du serveur compris */
+  private purgeTrashEntry(id: string): void {
+    const entry: TrashEntry | null = vaultStore.purgeFromTrash(id);
+    const files = entry && 'attachments' in entry.item ? entry.item.attachments ?? [] : [];
+    for (const file of files) {
+      if (!file.data) void accountService.withCloud(client => client.deleteAttachment(file.id)).catch(() => undefined);
+    }
+  }
+
+  /** À l'ouverture : ce qui dort à la corbeille depuis plus de TRASH_DAYS jours part, fichiers compris */
+  private purgeExpiredTrash(): void {
+    for (const entry of expiredTrash(vaultStore.getData().trash)) this.purgeTrashEntry(entry.item.id);
+  }
+
+  private openTrashModal(): void {
+    const tr = (fr: string, en: string) => this.tr(fr, en);
+    const context = this.versionsContext('credential', '');
+    const box = this.openModal(`
+      <div class="modal-header">
+        <div class="modal-title">${tr('Corbeille', 'Trash')}</div>
+        <button class="modal-close" type="button">${GEN_ICONS.close}</button>
+      </div>
+      <div class="modal-body" data-trash-body></div>
+      <div class="modal-footer">
+        <button type="button" class="btn-primary btn-danger" data-trash-empty>${tr('Vider la corbeille', 'Empty trash')}</button>
+        <button type="button" class="btn-primary" data-close>${tr('Fermer', 'Close')}</button>
+      </div>`);
+    const body = box.querySelector<HTMLElement>('[data-trash-body]')!;
+    const paint = () => {
+      const entries = vaultStore.getTrash();
+      body.innerHTML = renderTrash(entries, context, TRASH_DAYS);
+      (box.querySelector('[data-trash-empty]') as HTMLButtonElement).disabled = !entries.length;
+    };
+    paint();
+
+    body.addEventListener('click', async event => {
+      const target = event.target as HTMLElement;
+      const restore = target.closest<HTMLElement>('[data-trash-restore]')?.dataset.trashRestore;
+      const purge = target.closest<HTMLElement>('[data-trash-purge]')?.dataset.trashPurge;
+      if (restore) {
+        vaultStore.restoreFromTrash(restore);
+        this.showToast(tr('Élément restauré', 'Item restored'), 'success');
+        paint();
+      } else if (purge) {
+        const ok = await this.confirmDialog({
+          title: tr('Supprimer définitivement ?', 'Delete forever?'),
+          message: tr('L’élément et ses fichiers ne pourront plus être récupérés.', 'The item and its files cannot be recovered.'),
+          confirmLabel: tr('Supprimer', 'Delete'),
+          danger: true,
+          skippable: true
+        });
+        if (!ok) return;
+        this.purgeTrashEntry(purge);
+        paint();
+      }
+    });
+
+    box.querySelector('[data-trash-empty]')?.addEventListener('click', async () => {
+      const count = vaultStore.getTrash().length;
+      const ok = await this.confirmDialog({
+        title: tr('Vider la corbeille ?', 'Empty the trash?'),
+        message: tr(`${count} élément(s) et leurs fichiers partiront définitivement.`, `${count} item(s) and their files will be gone for good.`),
+        confirmLabel: tr('Vider', 'Empty'),
+        danger: true
+      });
+      if (!ok) return;
+      for (const entry of [...vaultStore.getTrash()]) this.purgeTrashEntry(entry.item.id);
+      paint();
+    });
+  }
+
   private openAuditModal(): void {
     const data = vaultStore.getData();
     const creds = data.credentials.filter(c => c.vaultId === data.activeVaultId);
@@ -4795,6 +4897,7 @@ ${uri}` : uri;
     vaultStore.load(data);
     vaultStore.setPersistence(snapshot => void accountService.save(sharedVaults.split(snapshot)));
     void this.refreshSharedVaults();
+    this.purgeExpiredTrash();
     this.selectedItemId = null;
     this.activeTag = null;
     (document.getElementById('app') as HTMLElement).hidden = false;

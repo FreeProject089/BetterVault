@@ -1,4 +1,6 @@
-import type { CredentialItem, FolderDef, Task, TagDef, UnlockedVaultData, VaultMetadata, VaultTypeDef } from '../types/vault';
+import type { CredentialItem, FolderDef, Task, TagDef, TrashEntry, UnlockedVaultData, VaultMetadata, VaultTypeDef } from '../types/vault';
+import { capHistory, restoreVersion, resolveConflict, stampVersion, MAX_CONFLICTS, type ItemConflict, type ItemVersion } from './versions';
+import { MAX_TRASH, TRASH_DAYS } from '../account/merge';
 import { cardBrand, EMPTY_CARD, EMPTY_IDENTITY, EMPTY_SSH_KEY, itemTypeOf, type CardData, type IdentityData, type ItemType, type SshKeyData } from '../types/itemTypes';
 import { normalizeItemIcon, type ItemIcon } from '../icons/iconLibrary';
 import { normalizeAttachments } from '../account/attachmentCrypto';
@@ -100,6 +102,50 @@ export function payloadForType(type: ItemType, source: Partial<CredentialItem>):
   return {};
 }
 
+const VERSION_OPS = new Set(['create', 'update', 'merge', 'restore']);
+const FIELD_NAME = /^[A-Za-z][A-Za-z0-9]{0,39}$/;
+const plainObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * Historique et conflits arrivent d'autres appareils ou d'un coffre partagé : on ne
+ * garde que des entrées bien formées, bornées en nombre et en taille.
+ */
+function normalizeVersioning(item: Record<string, unknown>): { rev?: string; history?: ItemVersion[]; conflicts?: ItemConflict[] } {
+  const out: { rev?: string; history?: ItemVersion[]; conflicts?: ItemConflict[] } = {};
+  if (isSafeId(item.rev)) out.rev = item.rev;
+  if (Array.isArray(item.history)) {
+    const history = (item.history as unknown[]).filter((v): v is ItemVersion => plainObject(v)
+      && isSafeId(v.rev) && Number.isFinite(v.at) && VERSION_OPS.has(String(v.op)) && plainObject(v.snapshot));
+    const capped = capHistory(history.map(v => ({ rev: v.rev, at: v.at, op: v.op, snapshot: v.snapshot })));
+    if (capped.length) out.history = capped;
+  }
+  if (Array.isArray(item.conflicts)) {
+    const conflicts = (item.conflicts as unknown[]).filter((c): c is ItemConflict => plainObject(c)
+      && typeof c.field === 'string' && FIELD_NAME.test(c.field) && isSafeId(c.rev) && Number.isFinite(c.at))
+      .slice(-MAX_CONFLICTS)
+      .map(c => ({ field: c.field, value: c.value, rev: c.rev, at: c.at }));
+    if (conflicts.length) out.conflicts = conflicts;
+  }
+  return out;
+}
+
+/**
+ * L'expiration n'a pas lieu ici : une entrée qui disparaît sans passer par
+ * l'application laisserait ses fichiers sur le serveur. C'est l'application qui
+ * purge les entrées de plus de TRASH_DAYS jours, fichiers compris.
+ */
+function normalizeTrash(input: unknown): TrashEntry[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .filter((e): e is TrashEntry => plainObject(e) && (e.kind === 'credential' || e.kind === 'task')
+      && plainObject(e.item) && isSafeId((e.item as { id?: unknown }).id) && Number.isFinite(e.deletedAt))
+    .slice(0, MAX_TRASH);
+}
+
+/** Entrées de corbeille arrivées à expiration */
+export const expiredTrash = (trash: TrashEntry[] | undefined, now = Date.now()) =>
+  (trash ?? []).filter(e => e.deletedAt < now - TRASH_DAYS * 86_400_000);
+
 /** Répare et migre des données de coffre (anciennes versions, imports, synchronisation) */
 export function normalizeVaultData(input: Partial<UnlockedVaultData> | null | undefined, now = Date.now()): UnlockedVaultData {
   const source = input ?? {};
@@ -116,12 +162,13 @@ export function normalizeVaultData(input: Partial<UnlockedVaultData> | null | un
     activeVaultId: source.activeVaultId ?? '',
     // Les icônes viennent aussi d'imports et d'autres appareils : leur SVG est toujours re-nettoyé
     credentials: (Array.isArray(source.credentials) ? source.credentials : []).map(c => {
-      const { icon, attachments, card, identity, sshKey, type, ...rest } = c;
+      const { icon, attachments, card, identity, sshKey, type, rev: _rev, history: _history, conflicts: _conflicts, ...rest } = c;
       const clean = normalizeItemIcon(icon);
       const files = normalizeAttachments(attachments);
       const itemType = itemTypeOf(type);
       return {
         ...rest,
+        ...normalizeVersioning(c as unknown as Record<string, unknown>),
         type: itemType,
         ...payloadForType(itemType, { card, identity, sshKey }),
         ...(clean ? { icon: clean } : {}),
@@ -129,7 +176,11 @@ export function normalizeVaultData(input: Partial<UnlockedVaultData> | null | un
         tags: Array.isArray(c.tags) ? c.tags : []
       };
     }),
-    tasks: (Array.isArray(source.tasks) ? source.tasks : []).map(t => ({ ...t, tags: Array.isArray(t.tags) ? t.tags : [] })),
+    tasks: (Array.isArray(source.tasks) ? source.tasks : []).map(t => {
+      const { rev: _rev, history: _history, conflicts: _conflicts, ...rest } = t;
+      return { ...rest, ...normalizeVersioning(t as unknown as Record<string, unknown>), tags: Array.isArray(t.tags) ? t.tags : [] };
+    }),
+    trash: normalizeTrash(source.trash),
     tagDefs: (Array.isArray(source.tagDefs) ? source.tagDefs : []).map(({ icon, ...tag }) => {
       const clean = normalizeItemIcon(icon);
       return { ...tag, ...(clean ? { icon: clean } : {}) };
@@ -272,9 +323,21 @@ export class VaultStore {
     this.persist = persist;
   }
 
+  /**
+   * État de chaque identifiant et tâche au dernier enregistrement. Sert à repérer ce
+   * qui a changé, pour lui donner une nouvelle version et ranger l'ancienne : ainsi
+   * aucune méthode de modification n'a besoin d'y penser.
+   */
+  private committed = new Map<string, CredentialItem | Task>();
+
+  private snapshotCommitted(): void {
+    this.committed = new Map([...this.data.credentials, ...this.data.tasks].map(item => [item.id, structuredClone(item)]));
+  }
+
   /** Charge des données déchiffrées sans déclencher d'enregistrement */
   load(data: Partial<UnlockedVaultData>): void {
     this.data = normalizeVaultData(data);
+    this.snapshotCommitted();
     this.loaded = true;
     this.emit();
   }
@@ -305,8 +368,81 @@ export class VaultStore {
   }
 
   private commit(): void {
+    const newRev = () => randomId('rev');
+    this.data.credentials = this.data.credentials.map(c => stampVersion(c, this.committed.get(c.id) as CredentialItem | undefined, newRev));
+    this.data.tasks = this.data.tasks.map(t => stampVersion(t, this.committed.get(t.id) as Task | undefined, newRev));
+    this.snapshotCommitted();
     this.persist?.(this.data);
     this.emit();
+  }
+
+  /* ── Corbeille, versions, conflits ─────────────────────────────────── */
+
+  private toTrash(kind: TrashEntry['kind'], item: CredentialItem | Task, now: number): void {
+    const trash = (this.data.trash ?? []).filter(e => e.item.id !== item.id);
+    this.data.trash = [{ kind, item: structuredClone(item), deletedAt: now }, ...trash].slice(0, MAX_TRASH);
+  }
+
+  getTrash(): TrashEntry[] {
+    return this.data.trash ?? [];
+  }
+
+  /**
+   * Remet un élément supprimé. Sa date de modification devient postérieure à la
+   * suppression : les autres appareils, qui connaissent la suppression, le gardent.
+   */
+  restoreFromTrash(id: string): boolean {
+    const entry = this.data.trash?.find(e => e.item.id === id);
+    if (!entry) return false;
+    // Strictement après la suppression connue : même milliseconde, ou horloge en retard
+    // sur l'appareil qui a supprimé, et la fusion supprimerait à nouveau l'élément
+    const now = Math.max(Date.now(), (this.data.deleted[id] ?? 0) + 1, entry.deletedAt + 1);
+    this.data.trash = this.data.trash!.filter(e => e.item.id !== id);
+    if (entry.kind === 'credential') {
+      const item = entry.item as CredentialItem;
+      const vaultId = this.data.vaults.some(v => v.id === item.vaultId) ? item.vaultId : this.data.activeVaultId;
+      this.data.credentials.unshift({ ...item, vaultId, updatedAt: now });
+    } else {
+      const item = entry.item as Task;
+      const vaultId = this.data.vaults.some(v => v.id === item.vaultId) ? item.vaultId : this.data.activeVaultId;
+      this.data.tasks.unshift({ ...item, vaultId, updatedAt: now });
+    }
+    this.commit();
+    return true;
+  }
+
+  /** Supprime pour de bon ; renvoie l'élément pour que l'appelant retire ses fichiers du serveur */
+  purgeFromTrash(id: string): TrashEntry | null {
+    const entry = this.data.trash?.find(e => e.item.id === id) ?? null;
+    if (!entry) return null;
+    this.data.trash = this.data.trash!.filter(e => e.item.id !== id);
+    this.commit();
+    return entry;
+  }
+
+  restoreItemVersion(kind: 'credential' | 'task', id: string, rev: string): boolean {
+    const list = (kind === 'credential' ? this.data.credentials : this.data.tasks) as Array<CredentialItem | Task>;
+    const index = list.findIndex(i => i.id === id);
+    if (index === -1) return false;
+    const restored = restoreVersion(list[index], rev, Date.now(), () => randomId('rev'));
+    if (!restored) return false;
+    list[index] = normalizeVaultData({ ...this.data, [kind === 'credential' ? 'credentials' : 'tasks']: [restored] })[kind === 'credential' ? 'credentials' : 'tasks'][0] as never;
+    // La restauration est déjà une version : l'estampille ne doit pas en ajouter une seconde
+    this.committed.set(id, structuredClone(list[index]));
+    this.persist?.(this.data);
+    this.emit();
+    return true;
+  }
+
+  resolveItemConflict(kind: 'credential' | 'task', id: string, conflict: ItemConflict, keep: 'current' | 'other'): void {
+    const list = (kind === 'credential' ? this.data.credentials : this.data.tasks) as Array<CredentialItem | Task>;
+    const index = list.findIndex(i => i.id === id);
+    if (index === -1) return;
+    const patch = resolveConflict(list[index], conflict, keep);
+    const next = { ...list[index], ...patch, updatedAt: Date.now() } as CredentialItem | Task;
+    if (!patch.conflicts) delete (next as { conflicts?: unknown }).conflicts;
+    list[index] = normalizeVaultData({ ...this.data, [kind === 'credential' ? 'credentials' : 'tasks']: [next] })[kind === 'credential' ? 'credentials' : 'tasks'][0] as never;
+    this.commit();
   }
 
   private markDeleted(id: string, now: number): void {
@@ -440,6 +576,8 @@ export class VaultStore {
 
   deleteCredential(id: string): void {
     const now = Date.now();
+    const item = this.data.credentials.find(c => c.id === id);
+    if (item) this.toTrash('credential', item, now);
     this.data.credentials = this.data.credentials.filter(c => c.id !== id);
     this.data.tasks = this.data.tasks.map(t => t.linkedCredentialId === id ? { ...t, linkedCredentialId: undefined, updatedAt: now } : t);
     this.markDeleted(id, now);
@@ -538,6 +676,8 @@ export class VaultStore {
 
   deleteTask(id: string): void {
     const now = Date.now();
+    const item = this.data.tasks.find(t => t.id === id);
+    if (item) this.toTrash('task', item, now);
     this.data.tasks = this.data.tasks
       .filter(t => t.id !== id)
       .map(t => t.dependsOn?.includes(id) ? { ...t, dependsOn: t.dependsOn.filter(d => d !== id), updatedAt: now } : t);
