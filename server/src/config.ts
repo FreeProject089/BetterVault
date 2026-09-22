@@ -3,6 +3,7 @@ import type { BackupDestination, BackupSettings } from './backup.ts';
 import type { S3Config } from './s3.ts';
 import { billingFromEnv, DEFAULT_BILLING, parseBillingUpdate, publicBilling, type BillingSettings } from './billing.ts';
 import { DEFAULT_LEGAL, legalFromEnv, parseLegalUpdate, type LegalSettings } from './legal.ts';
+import { DEFAULT_PUBLIC_PAGE, parsePublicPage, type PublicPageSettings } from './directory.ts';
 import { avatarsFromEnv, DEFAULT_AVATARS, parseAvatarUpdate, type AvatarSettings } from './avatars.ts';
 
 /**
@@ -52,6 +53,8 @@ export interface ServerSettings {
   backup: BackupSettings;
   billing: BillingSettings;
   legal: LegalSettings;
+  /** Page d'accueil publique (/about) et annuaire de serveurs proposé à l'application */
+  publicPage?: PublicPageSettings;
   avatars: AvatarSettings;
 }
 
@@ -173,6 +176,7 @@ export function settingsFromEnv(env: Env): ServerSettings {
     },
     billing: billingFromEnv(env),
     legal: legalFromEnv(env),
+    publicPage: { ...DEFAULT_PUBLIC_PAGE, landingEnabled: env.LANDING_ENABLED !== 'false' },
     avatars: avatarsFromEnv(env)
   };
 }
@@ -254,6 +258,7 @@ export function parseSettingsUpdate(input: unknown, current: ServerSettings): Se
   }
   if (typeof body.registrationOpen === 'boolean') next.registrationOpen = body.registrationOpen;
   if (typeof body.attachmentsEnabled === 'boolean') next.attachmentsEnabled = body.attachmentsEnabled;
+  if (body.publicPage !== undefined) next.publicPage = parsePublicPage(body.publicPage, current.publicPage ?? DEFAULT_PUBLIC_PAGE);
   if (typeof body.publicUrl === 'string') next.publicUrl = body.publicUrl.trim().replace(/\/+$/, '');
 
   if (body.smtp === null) {

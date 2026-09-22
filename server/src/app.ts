@@ -40,6 +40,7 @@ import { createSmtpMailer, type Mailer, type MailMessage, type SmtpConfig } from
 import { emails, pickLocale, type Locale } from './emails.ts';
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.ts';
 import { createWebauthn, parseRpId, type AssertionInput } from './webauthn.ts';
+import { DEFAULT_PUBLIC_PAGE, publicDirectory, renderLanding } from './directory.ts';
 
 /**
  * API BetterVault : le serveur ne stocke que des données chiffrées côté client.
@@ -74,6 +75,8 @@ export interface AppOptions {
   dbPath?: string | null;
   /** Dossier des modèles de documents légaux */
   legalDir?: string;
+  /** L'application web est servie par ce même serveur (lien « Ouvrir l'application » de /about) */
+  appAvailable?: boolean;
   /** Appels HTTP sortants (Stripe) ; remplaçable dans les tests */
   fetchImpl?: typeof fetch;
   /** Lance la réplication périodique (désactivé dans les tests, qui la déclenchent à la main) */
@@ -864,6 +867,8 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         }
       };
     },
+    // Annuaire de serveurs recommandés par cet hébergeur, lu par l'application avant la connexion
+    'GET /api/v1/directory': async () => ({ status: 200, body: publicDirectory(settings.publicPage ?? DEFAULT_PUBLIC_PAGE) }),
     'GET /api/v1/admin/dashboard': async (req: IncomingMessage): Promise<Reply> => {
       requireAdmin(req);
       return {
@@ -1282,6 +1287,19 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       return htmlReply(renderNotMeDone());
     }),
     route('GET', '/legal', async req => legalPage('privacy', req)),
+    route('GET', '/about', async req => {
+      const page = settings.publicPage ?? DEFAULT_PUBLIC_PAGE;
+      if (!page.landingEnabled) return htmlReply('<!DOCTYPE html><title>404</title><p>Not found</p>', 404);
+      return htmlReply(renderLanding({
+        page,
+        operatorName: settings.legal.operatorName ?? '',
+        registrationOpen: settings.registrationOpen,
+        legalEnabled: settings.legal.enabled,
+        appAvailable: !!options.appAvailable,
+        version: SERVER_VERSION,
+        locale: requestLocale(req) === 'en' ? 'en' : 'fr'
+      }));
+    }),
     route('GET', '/legal/:slug', async (req, params) => legalPage(params.slug, req))
   ];
   backup?.start();

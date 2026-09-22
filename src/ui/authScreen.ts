@@ -1,3 +1,4 @@
+import { wireServerSuggestions } from './serverDirectory';
 import { MIN_MASTER_PASSWORD_LENGTH, type AccountService } from '../account/accountService';
 import { InvalidRecoveryKeyError, WrongPasswordError } from '../account/accountCrypto';
 import { CloudError, isTotpRequired } from '../account/cloudClient';
@@ -477,6 +478,7 @@ export function mountAuthScreen(
   const render = (screen: Screen) => {
     root.innerHTML = `<div class="auth-card">${templates[screen]()}</div>`;
     const card = root.firstElementChild as HTMLElement;
+    if (!card.querySelector('[data-server-field][hidden]')) wireServerSuggestions(card, tr);
     // L'écran précédent est parti avec son parcours et son état
     recoverStepper = null;
     codeDemande = false;

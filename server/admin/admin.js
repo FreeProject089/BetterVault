@@ -36,6 +36,14 @@ const TEXT = {
   publicUrlHint: ['Affichée dans les emails envoyés aux utilisateurs.', 'Shown in emails sent to users.'],
   registrationOpen: ['Inscriptions ouvertes', 'Registration open'],
   attachmentsEnabled: ['Accepter les fichiers joints', 'Accept file attachments'],
+  publicPage: ['Page publique et annuaire', 'Public page and directory'],
+  landingEnabled: ['Page de présentation publique (/about)', 'Public presentation page (/about)'],
+  landingTitle: ['Titre', 'Title'],
+  landingDescription: ['Présentation', 'Description'],
+  landingOpen: ['Voir la page', 'View the page'],
+  directoryEnabled: ['Proposer d’autres serveurs dans l’application', 'Suggest other servers in the app'],
+  directoryServers: ['Serveurs proposés, un par ligne', 'Suggested servers, one per line'],
+  directoryHint: ['Nom | adresse https | région | « officiel » (facultatif). Chaque serveur a ses propres comptes : rien n’est partagé entre eux.', 'Name | https address | region | “official” (optional). Each server has its own accounts: nothing is shared between them.'],
   limits: ['Limites', 'Limits'],
   limitsHint: ['Les coffres sont chiffrés : les applications appliquent ces limites avant l’envoi, le serveur vérifie la taille.', 'Vaults are encrypted: apps enforce these limits before upload, the server checks the size.'],
   smtpHint: ['Sert aux codes de réinitialisation et aux alertes de sécurité. Laissez l’hôte vide pour désactiver les emails.', 'Used for reset codes and security alerts. Leave the host empty to turn emails off.'],
@@ -247,6 +255,12 @@ function fill({ settings }) {
   $('publicUrl').value = settings.publicUrl ?? '';
   $('registrationOpen').checked = settings.registrationOpen;
   $('attachmentsEnabled').checked = settings.attachmentsEnabled !== false;
+  const page = settings.publicPage ?? {};
+  $('landingEnabled').checked = page.landingEnabled !== false;
+  $('landingTitle').value = page.title ?? '';
+  $('landingDescription').value = page.description ?? '';
+  $('directoryEnabled').checked = !!page.directoryEnabled;
+  $('directoryServers').value = (page.servers ?? []).map(s => [s.name, s.url, s.region, s.official ? (fr ? 'officiel' : 'official') : ''].filter((v, i) => i < 3 || v).join(' | ')).join('\n');
   for (const [key] of LIMITS) {
     $(`limit-${key}`).value = MB_FIELDS[key]
       ? Math.round(settings.limits[MB_FIELDS[key]] / 1048576)
@@ -351,6 +365,15 @@ $('settings-form').addEventListener('submit', async event => {
     publicUrl: $('publicUrl').value,
     registrationOpen: $('registrationOpen').checked,
     attachmentsEnabled: $('attachmentsEnabled').checked,
+    publicPage: {
+      landingEnabled: $('landingEnabled').checked,
+      title: $('landingTitle').value,
+      description: $('landingDescription').value,
+      directoryEnabled: $('directoryEnabled').checked,
+      // Une ligne par serveur ; le serveur écarte ce qui n'est pas une adresse https valide
+      servers: $('directoryServers').value.split('\n').map(line => line.split('|').map(part => part.trim())).filter(parts => parts[0] && parts[1])
+        .map(([name, url, region = '', flag = '']) => ({ name, url, region, official: /^(officiel|official)$/i.test(flag) }))
+    },
     limits,
     backup,
     avatars: { uploads: $('avatarUploads').checked, remoteUrls: $('avatarUrls').checked },

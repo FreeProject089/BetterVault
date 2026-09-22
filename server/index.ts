@@ -89,6 +89,7 @@ if (process.env.CLUSTER_SECRET || process.env.CLUSTER_PEERS) {
 }
 const api = createApp({
   db,
+  appAvailable: !!staticDir,
   serverSecret: secret,
   corsOrigins,
   trustProxy: process.env.TRUST_PROXY === 'true',
@@ -146,7 +147,7 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       res.writeHead(400).end();
       return;
     }
-    if (pathname === '/legal' || pathname.startsWith('/legal/')) {
+    if (pathname === '/about' || pathname === '/legal' || pathname.startsWith('/legal/')) {
       void api(req, res);
       return;
     }

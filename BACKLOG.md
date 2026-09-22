@@ -35,9 +35,9 @@ Lot 6 — mise en page
 Lot 7 — serveurs et image
 - [x] Thèmes personnalisés : 3 thèmes intégrés, import d'un fichier, modèle téléchargeable
 - [ ] Administration : documents légaux, site officiel défini dans le code
-- [ ] Annuaire de serveurs, officiels et autres, tout désactivable
+- [x] Annuaire de serveurs, officiels et autres, tout désactivable
 - [x] Grappe de serveurs d'un même opérateur (zones, clés Ed25519, révocation)
-- [ ] Page d'accueil publique
+- [x] Page d'accueil publique (/about), désactivable
 - [x] Administration au logo BetterVault, thème clair / sombre / automatique
 
 Lot 8 — données entre serveurs

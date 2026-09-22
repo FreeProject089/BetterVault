@@ -4028,3 +4028,11 @@ body.dragging-item .folder-breadcrumb button { outline: 1px dashed var(--border-
 .theme-preset { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 6px 12px 6px 6px; border-radius: 999px; border: 1px solid var(--border-subtle); background: var(--p-bg); color: var(--p-fg); font-size: 12px; cursor: pointer; }
 .theme-preset:hover, .theme-preset:focus-visible { border-color: var(--p-accent); }
 .theme-swatch { width: 22px; height: 22px; border-radius: 50%; background: linear-gradient(135deg, var(--p-accent) 50%, var(--p-fg) 50%); }
+
+/* Annuaire : serveurs proposés sous l'adresse du serveur */
+.server-suggestions { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.server-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.server-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--border-subtle); background: var(--bg-tertiary); color: var(--text-primary); font-size: 12px; cursor: pointer; }
+.server-chip span { color: var(--text-secondary); }
+.server-chip[aria-pressed="true"] { border-color: var(--accent); }
+.server-chip .server-chip-badge { color: var(--accent); font-weight: 600; }
