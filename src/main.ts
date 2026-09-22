@@ -1569,7 +1569,7 @@ class AppController {
       document.getElementById('btn-delete-task')?.addEventListener('click', async () => {
         const confirmed = await this.confirmDialog({
           title: this.tr('Supprimer la tâche ?', 'Delete task?'),
-          message: this.tr(`« ${task.title} » sera définitivement supprimée.`, `"${task.title}" will be permanently deleted.`),
+          message: this.tr(`« ${task.title} » ira dans la corbeille, où elle reste 30 jours.`, `"${task.title}" will go to the trash, where it stays for 30 days.`),
           confirmLabel: this.tr('Supprimer', 'Delete'),
           danger: true,
           skippable: true
@@ -1578,7 +1578,7 @@ class AppController {
           vaultStore.deleteTask(task.id);
           this.selectedItemId = null;
           this.renderDetail(null);
-          this.showToast(this.tr('Tâche supprimée', 'Task deleted'), 'info');
+          this.showToast(this.tr('Tâche mise à la corbeille', 'Task moved to trash'), 'info', 6000, this.undoDelete(task.id));
         }
       });
 
@@ -1984,8 +1984,8 @@ class AppController {
       const confirmed = await this.confirmDialog({
         title: this.tr('Supprimer l’identifiant ?', 'Delete credential?'),
         message: this.tr(
-          `« ${cred.title} », son historique et ses passkeys seront définitivement supprimés. Les tâches liées sont conservées.`,
-          `"${cred.title}", its history and passkeys will be permanently deleted. Linked tasks are kept.`
+          `« ${cred.title} » ira dans la corbeille avec son historique et ses fichiers, pendant 30 jours. Les tâches liées sont conservées.`,
+          `"${cred.title}" will go to the trash with its history and files, for 30 days. Linked tasks are kept.`
         ),
         confirmLabel: this.tr('Supprimer', 'Delete'),
         danger: true,
@@ -1996,7 +1996,7 @@ class AppController {
         vaultStore.deleteCredential(cred.id);
         this.selectedItemId = null;
         this.renderDetail(null);
-        this.showToast(this.tr('Identifiant supprimé', 'Credential deleted'), 'info');
+        this.showToast(this.tr('Identifiant mis à la corbeille', 'Credential moved to trash'), 'info', 6000, this.undoDelete(cred.id));
       }
     });
 
@@ -7194,6 +7194,20 @@ ${uri}` : uri;
         this.renderList();
       }
     });
+  }
+
+  /** Action « Annuler » d'une notification de suppression : l'élément revient de la corbeille */
+  private undoDelete(id: string): { label: string; run: () => void } {
+    return {
+      label: this.tr('Annuler', 'Undo'),
+      run: () => {
+        if (!vaultStore.restoreFromTrash(id)) return;
+        this.selectedItemId = id;
+        this.renderSidebar();
+        this.renderList();
+        this.renderDetail(id);
+      }
+    };
   }
 
   /** Création ou renommage d'un dossier */
