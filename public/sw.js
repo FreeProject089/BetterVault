@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bettervault-v4';
+const CACHE_NAME = 'bettervault-v5';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -26,8 +26,11 @@ self.addEventListener('fetch', (event) => {
 
   // Seuls les fichiers de l'application sont mis en cache : jamais l'API (coffre, sessions),
   // ni les pages rendues par le serveur (documents légaux, administration), ni les domaines tiers.
-  const serverRendered = url.pathname === '/legal' || url.pathname.startsWith('/legal/')
-    || url.pathname === '/admin' || url.pathname.startsWith('/admin/');
+  // Ces pages sont mises en page par le serveur, et suivent sa version et la langue
+  // demandée : les garder en cache afficherait une documentation périmée.
+  const serverRendered = ['/legal', '/admin', '/docs', '/about'].some(
+    (base) => url.pathname === base || url.pathname.startsWith(base + '/')
+  );
   if (event.request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/') || serverRendered) return;
 
   event.respondWith(

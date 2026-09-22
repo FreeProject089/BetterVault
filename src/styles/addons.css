@@ -4246,3 +4246,21 @@ input[type="range"]::-webkit-slider-thumb { width: 20px; height: 20px; }
   background: color-mix(in srgb, var(--accent-red) 12%, transparent);
   color: var(--text-primary);
 }
+
+/* ── Tactile (Android, iOS) ───────────────────────────────────────────────
+   Trois réglages qui ne se voient pas mais se sentent : pas de halo gris au
+   toucher, pas d'attente de double-tap avant qu'un bouton réagisse, et pas de
+   « tirer pour rafraîchir » — un rechargement reverrouillerait le coffre. */
+html { -webkit-text-size-adjust: 100%; }
+body { overscroll-behavior-y: contain; }
+button,
+a,
+.nav-item,
+.record-row,
+.type-card,
+.tab-btn,
+label.check,
+.gen-chip {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}

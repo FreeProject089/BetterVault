@@ -13,7 +13,11 @@
     "docs": "uv run --no-project --with-requirements docs/requirements.txt mkdocs serve",
     "docs:build": "uv run --no-project --with-requirements docs/requirements.txt mkdocs build --strict",
     "tauri": "tauri",
-    "test": "vitest run"
+    "test": "vitest run",
+    "tauri:android": "tauri android dev",
+    "tauri:android:build": "tauri android build",
+    "tauri:ios": "tauri ios dev",
+    "tauri:ios:build": "tauri ios build"
   },
   "keywords": [],
   "author": "",
