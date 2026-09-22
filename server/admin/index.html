@@ -49,7 +49,8 @@
         <button type="button" class="tab" data-tab="billing" data-i18n="tabBilling">Offres</button>
         <button type="button" class="tab" data-tab="legal" data-i18n="tabLegal">Documents légaux</button>
         <button type="button" class="tab" data-tab="audit" data-i18n="tabAudit">Journal</button>
-        <button type="button" class="tab" data-tab="cluster" data-i18n="tabCluster">Grappe</button>
+        <button type="button" class="tab" data-tab="backups" data-i18n="backups">Sauvegardes</button>
+          <button type="button" class="tab" data-tab="cluster" data-i18n="tabCluster">Grappe</button>
         <button type="button" class="tab" data-tab="admins" data-i18n="tabAdmins">Administrateurs</button>
       </nav>
 
@@ -142,7 +143,6 @@
           <section class="card wide">
             <h2 data-i18n="backups">Sauvegardes</h2>
             <p class="hint" data-i18n="backupHint">Copie de la base et des pièces jointes vers un stockage S3 (MinIO fourni avec Docker, ou AWS, Backblaze, Scaleway…). Les anciennes copies sont supprimées après la durée de conservation.</p>
-            <p class="status" id="backup-encryption"></p>
             <div class="row">
               <label class="check"><input id="backupEnabled" type="checkbox"> <span data-i18n="backupEnabled">Sauvegardes automatiques</span></label>
             </div>
@@ -150,25 +150,7 @@
               <div class="small"><label for="backupInterval" data-i18n="backupInterval">Toutes les (heures)</label><input id="backupInterval" type="number" min="1"></div>
               <div class="small"><label for="backupRetention" data-i18n="backupRetention">Conservation (jours)</label><input id="backupRetention" type="number" min="1"></div>
             </div>
-            <div class="row">
-              <div><label for="s3Endpoint" data-i18n="s3Endpoint">Adresse S3</label><input id="s3Endpoint" placeholder="http://minio:9000"></div>
-              <div class="small"><label for="s3Region" data-i18n="s3Region">Région</label><input id="s3Region" placeholder="us-east-1"></div>
-            </div>
-            <div class="row">
-              <div><label for="s3Bucket" data-i18n="s3Bucket">Bucket</label><input id="s3Bucket" placeholder="bettervault-backups"></div>
-              <div><label for="s3Prefix" data-i18n="s3Prefix">Préfixe</label><input id="s3Prefix" placeholder="bettervault"></div>
-            </div>
-            <div class="row">
-              <div><label for="s3Access" data-i18n="s3Access">Clé d’accès</label><input id="s3Access" autocomplete="off"></div>
-              <div><label for="s3Secret" data-i18n="s3Secret">Clé secrète</label><input id="s3Secret" type="password" autocomplete="new-password"></div>
-            </div>
-            <label class="check"><input id="s3PathStyle" type="checkbox"> <span data-i18n="s3PathStyle">Adresse par chemin (MinIO, Garage)</span></label>
-            <div class="row test">
-              <button class="btn" type="button" id="backup-test" data-i18n="backupTest">Tester le stockage</button>
-              <button class="btn" type="button" id="backup-run" data-i18n="backupRun">Sauvegarder maintenant</button>
-            </div>
-            <p class="status" id="backup-status" role="status"></p>
-            <div class="runs" id="backup-runs"></div>
+            <p class="hint" data-i18n="backupWhere">Les destinations, l’historique et les restaurations se gèrent dans l’onglet Sauvegardes.</p>
           </section>
         </div>
 
@@ -219,6 +201,10 @@
           <p class="hint" data-i18n="auditHint">Conservé 90 jours. Les comptes sont désignés par un pseudonyme (HMAC) : on peut relier des événements sans connaître l’adresse email.</p>
           <div class="table-wrap"><table class="audit"><thead><tr><th data-i18n="when">Date</th><th data-i18n="event">Événement</th><th data-i18n="subject">Compte</th><th data-i18n="detail">Détails</th></tr></thead><tbody id="audit-rows"></tbody></table></div>
         </section>
+      </section>
+
+      <section data-panel="backups" hidden>
+        <div id="backups-panel"></div>
       </section>
 
       <section data-panel="cluster" hidden>

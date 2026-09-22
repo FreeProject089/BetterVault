@@ -247,3 +247,12 @@ code.fp.big { font-size: 18px; }
 .events li.warn { color: #d29922; }
 @media (pointer: coarse) { .node-actions .btn, .row-split .btn { min-height: 42px; } }
 @media (max-width: 560px) { .node-actions { width: 100%; } .node-actions .btn { flex: 1 1 auto; } }
+
+/* Sauvegardes */
+.meter { margin: 6px 0 2px; max-width: 320px; }
+.meter.warn span { background: #d29922; }
+.meter.fail span { background: #f85149; }
+.restore-facts { margin: 12px 0; padding-left: 18px; line-height: 1.6; }
+.restore-facts .warn { color: #d29922; }
+.restore-choices h3 { margin: 0; font-size: 15px; }
+.restore-choices form { padding: 12px; border: 1px solid var(--border); border-radius: 10px; }

@@ -64,6 +64,7 @@ const TEXT = {
   backupEnabled: ['Sauvegardes automatiques', 'Automatic backups'],
   backupInterval: ['Toutes les (heures)', 'Every (hours)'],
   backupRetention: ['Conservation (jours)', 'Retention (days)'],
+  backupWhere: ['Les destinations, l’historique et les restaurations se gèrent dans l’onglet Sauvegardes.', 'Destinations, history and restores are managed in the Backups tab.'],
   s3Endpoint: ['Adresse S3', 'S3 endpoint'],
   s3Region: ['Région', 'Region'],
   s3Bucket: ['Bucket', 'Bucket'],
@@ -254,18 +255,9 @@ function fill({ settings }) {
   $('avatarUploads').checked = settings.avatars?.uploads !== false;
   $('avatarUrls').checked = settings.avatars?.remoteUrls !== false;
   const backup = settings.backup ?? {};
-  const s3 = backup.s3;
   $('backupEnabled').checked = !!backup.enabled;
   $('backupInterval').value = backup.intervalHours ?? 24;
   $('backupRetention').value = backup.retentionDays ?? 30;
-  $('s3Endpoint').value = s3?.endpoint ?? '';
-  $('s3Region').value = s3?.region ?? '';
-  $('s3Bucket').value = s3?.bucket ?? '';
-  $('s3Prefix').value = s3?.prefix ?? '';
-  $('s3Access').value = s3?.accessKeyId ?? '';
-  $('s3Secret').value = '';
-  $('s3Secret').placeholder = s3?.hasSecret ? t('secretKept') : '';
-  $('s3PathStyle').checked = s3 ? s3.pathStyle !== false : true;
   const smtp = settings.smtp;
   $('smtpHost').value = smtp?.host ?? '';
   $('smtpPort').value = smtp?.port ?? 587;
@@ -349,20 +341,10 @@ $('settings-form').addEventListener('submit', async event => {
     else if (KB_FIELDS[key]) limits[KB_FIELDS[key]] = value * 1024;
     else limits[key] = value;
   }
-  const s3Endpoint = $('s3Endpoint').value.trim();
   const backup = {
     enabled: $('backupEnabled').checked,
     intervalHours: Number($('backupInterval').value),
-    retentionDays: Number($('backupRetention').value),
-    s3: s3Endpoint ? {
-      endpoint: s3Endpoint,
-      region: $('s3Region').value,
-      bucket: $('s3Bucket').value,
-      prefix: $('s3Prefix').value,
-      accessKeyId: $('s3Access').value,
-      secretAccessKey: $('s3Secret').value,
-      pathStyle: $('s3PathStyle').checked
-    } : null
+    retentionDays: Number($('backupRetention').value)
   };
   const host = $('smtpHost').value.trim();
   const body = {
@@ -411,60 +393,6 @@ $('smtp-test').addEventListener('click', async event => {
   }
 });
 
-async function loadBackups() {
-  try {
-    const info = await api('GET', 'backup');
-    $('backup-encryption').textContent = info.encrypted ? t('encryptedOn') : t('encryptedOff');
-    $('backup-encryption').className = `status ${info.encrypted ? 'ok' : 'fail'}`;
-    const locale = fr ? 'fr-FR' : 'en-GB';
-    $('backup-runs').innerHTML = info.runs.length === 0
-      ? `<p class="hint">${t('noRuns')}</p>`
-      : info.runs.map(run => `
-        <div class="run">
-          <span>${new Date(run.startedAt).toLocaleString(locale)}</span>
-          <span class="${run.status === 'success' ? 'ok' : run.status === 'error' ? 'fail' : ''}">${run.status}${run.bytes ? ` · ${formatBytes(run.bytes)}` : ''}</span>
-          <span class="muted">${run.message ? run.message.replace(/</g, '&lt;') : run.files ? `+${run.files} fichier(s)` : ''}</span>
-        </div>`).join('');
-  } catch {
-    $('backup-runs').innerHTML = '';
-  }
-}
-
-$('backup-test').addEventListener('click', async event => {
-  const button = event.currentTarget;
-  button.disabled = true;
-  setStatus($('backup-status'), t('testing'));
-  try {
-    await api('POST', 'backup/test');
-    setStatus($('backup-status'), t('storageOk'), 'ok');
-  } catch (err) {
-    setStatus($('backup-status'), err.status === 400 || err.status === 502 ? `${err.message} — ${t('saveFirst')}` : err.message, 'fail');
-  } finally {
-    button.disabled = false;
-  }
-});
-
-$('backup-run').addEventListener('click', async event => {
-  const button = event.currentTarget;
-  button.disabled = true;
-  setStatus($('backup-status'), t('running'));
-  try {
-    await api('POST', 'backup/run');
-    setStatus($('backup-status'), t('backupDone'), 'ok');
-  } catch (err) {
-    setStatus($('backup-status'), err.message, 'fail');
-  } finally {
-    button.disabled = false;
-    void loadBackups();
-  }
-});
-
-const originalFill = fill;
-fill = data => {
-  originalFill(data);
-  void loadBackups();
-};
-
 /* ── Onglets ─────────────────────────────────────────────────────────── */
 const FORM_TABS = new Set(['settings', 'billing', 'legal']);
 document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => {
@@ -476,6 +404,7 @@ document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', (
   if (name === 'audit') void loadAudit();
   if (name === 'admins') void loadAdmins();
   if (name === 'cluster') void loadCluster();
+  if (name === 'backups') void loadBackups();
 }));
 
 /* ── Administrateurs ───────────────────────────────────────────────────── */
@@ -1204,6 +1133,321 @@ function renderClusterPanel(view) {
   $('cluster-leave')?.addEventListener('click', () => {
     if (confirm(fr ? 'Quitter la grappe ? Ce serveur garde ses données mais ne réplique plus.' : 'Leave the cluster? This server keeps its data but stops replicating.')) {
       void clusterAction('POST', 'cluster/leave', {});
+    }
+  });
+}
+
+/* ── Sauvegardes : destinations, historique, restauration ──────────────── */
+
+const BACKUP_HEALTH = {
+  ok: ['À jour', 'Up to date', 'ok'],
+  late: ['En retard', 'Late', 'warn'],
+  error: ['En erreur', 'Failing', 'fail'],
+  never: ['Jamais sauvegardé', 'Never backed up', 'warn'],
+  disabled: ['Désactivée', 'Disabled', 'warn'],
+  revoked: ['Révoquée', 'Revoked', 'fail']
+};
+const backupBadge = health => {
+  const [f, e, tone] = BACKUP_HEALTH[health] ?? [health, health, 'muted'];
+  return `<span class="badge ${tone}">${fr ? f : e}</span>`;
+};
+const gb = bytes => `${(bytes / 1e9).toFixed(bytes < 1e10 ? 2 : 1)} ${fr ? 'Go' : 'GB'}`;
+
+let backupState = null;
+
+async function loadBackups() {
+  const host = $('backups-panel');
+  try {
+    renderBackups(await api('GET', 'backup'));
+  } catch (err) {
+    host.innerHTML = `<p class="status fail">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+/** Lance une action ; la vue renvoyée redessine l'onglet, l'erreur s'affiche près du bouton */
+async function backupAction(button, method, path, body) {
+  const status = button?.closest('.card')?.querySelector('.status');
+  if (button) button.disabled = true;
+  try {
+    const result = await api(method, path, body);
+    if (result && Array.isArray(result.destinations)) renderBackups(result);
+    return result;
+  } catch (err) {
+    if (status) setStatus(status, err.message, 'fail');
+    else alert(err.message);
+    return null;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function destinationFieldsHtml(d = {}) {
+  return `
+    <div class="grid-2">
+      <div><label for="bd-name">${fr ? 'Nom' : 'Name'}</label><input id="bd-name" required maxlength="40" placeholder="Scaleway Paris" value="${escapeHtml(d.name ?? '')}"></div>
+      <div><label for="bd-region">${fr ? 'Région' : 'Region'}</label><input id="bd-region" maxlength="30" placeholder="fr-par" value="${escapeHtml(d.region ?? '')}"></div>
+      <div><label for="bd-endpoint">${fr ? 'Adresse S3' : 'S3 endpoint'}</label><input id="bd-endpoint" type="url" required placeholder="https://s3.fr-par.scw.cloud" value="${escapeHtml(d.endpoint ?? '')}"></div>
+      <div><label for="bd-bucket">Bucket</label><input id="bd-bucket" required placeholder="bettervault-backups" value="${escapeHtml(d.bucket ?? '')}"></div>
+      <div><label for="bd-prefix">${fr ? 'Préfixe' : 'Prefix'}</label><input id="bd-prefix" placeholder="bettervault" value="${escapeHtml(d.prefix ?? '')}"></div>
+      <div><label for="bd-quota">${fr ? 'Capacité (Go, facultatif)' : 'Capacity (GB, optional)'}</label><input id="bd-quota" type="number" min="0" step="1" value="${d.quotaBytes ? Math.round(d.quotaBytes / 1e9) : ''}"></div>
+      <div><label for="bd-access">${fr ? 'Clé d’accès' : 'Access key'}</label><input id="bd-access" required autocomplete="off"></div>
+      <div><label for="bd-secret">${fr ? 'Clé secrète' : 'Secret key'}</label><input id="bd-secret" type="password" required autocomplete="new-password"></div>
+    </div>
+    <label class="check"><input id="bd-path" type="checkbox" checked> <span>${fr ? 'Adresse par chemin (MinIO, Garage)' : 'Path-style addressing (MinIO, Garage)'}</span></label>`;
+}
+const readDestinationFields = () => ({
+  name: $('bd-name').value.trim(),
+  region: $('bd-region').value.trim(),
+  quotaGb: Number($('bd-quota').value) || 0,
+  s3: {
+    endpoint: $('bd-endpoint').value.trim(),
+    bucket: $('bd-bucket').value.trim(),
+    prefix: $('bd-prefix').value.trim(),
+    region: $('bd-region').value.trim(),
+    accessKeyId: $('bd-access').value.trim(),
+    secretAccessKey: $('bd-secret').value,
+    pathStyle: $('bd-path').checked
+  }
+});
+
+function renderBackups(view) {
+  backupState = view;
+  const host = $('backups-panel');
+  const manage = can('manage');
+  const operate = can('operate');
+  const live = view.destinations.filter(d => d.status === 'active');
+  const nameOf = id => view.destinations.find(d => d.id === id)?.name ?? id;
+
+  const destinationRow = d => {
+    const st = d.state ?? {};
+    const usage = d.usage != null
+      ? `<div class="meter${d.usage > 0.9 ? ' fail' : d.usage > 0.75 ? ' warn' : ''}" role="img" aria-label="${Math.round(d.usage * 100)} %"><span style="width:${Math.min(100, Math.round(d.usage * 100))}%"></span></div>`
+      : '';
+    return `
+    <li class="node-row" data-destination="${escapeHtml(d.id)}">
+      <div class="node-main">
+        <div class="node-title"><strong>${escapeHtml(d.name)}</strong> ${backupBadge(d.health)}</div>
+        <div class="hint">${escapeHtml(d.region)} · ${escapeHtml(d.endpoint)} · ${escapeHtml(d.bucket)}${d.prefix ? `/${escapeHtml(d.prefix)}` : ''}</div>
+        ${d.status === 'revoked' ? `<div class="hint">${fr ? 'Identifiants effacés' : 'Credentials wiped'}${d.replacedBy ? ` · ${fr ? 'remplacée par' : 'replaced by'} ${escapeHtml(nameOf(d.replacedBy))}` : ''}</div>` : `
+        <div class="hint">${fr ? 'Dernière réussite' : 'Last success'} : ${when(st.lastSuccessAt)}${st.snapshots != null ? ` · ${st.snapshots} ${fr ? 'copie(s)' : 'snapshot(s)'}` : ''}${st.usedBytes != null ? ` · ${gb(st.usedBytes)}${d.quotaBytes ? ` / ${gb(d.quotaBytes)}` : ''}` : ''}</div>
+        ${usage}
+        ${st.lastError && (!st.lastSuccessAt || st.lastErrorAt > st.lastSuccessAt) ? `<div class="hint fail">${escapeHtml(st.lastError)} (${when(st.lastErrorAt)}) — ${fr ? 'nouvel essai automatique dans l’heure' : 'automatic retry within the hour'}</div>` : ''}`}
+      </div>
+      <div class="node-actions">
+        ${operate && d.status === 'active' ? `
+          <button class="btn" type="button" data-dst-action="run">${fr ? 'Sauvegarder' : 'Back up'}</button>
+          <button class="btn" type="button" data-dst-action="test">${fr ? 'Tester' : 'Test'}</button>` : ''}
+        ${manage && d.status === 'active' ? `<button class="btn" type="button" data-dst-action="disable">${fr ? 'Désactiver' : 'Disable'}</button>` : ''}
+        ${manage && d.status === 'disabled' ? `<button class="btn" type="button" data-dst-action="enable">${fr ? 'Réactiver' : 'Enable'}</button>` : ''}
+        ${manage && d.status !== 'revoked' ? `<button class="btn danger" type="button" data-dst-action="revoke">${fr ? 'Révoquer' : 'Revoke'}</button>` : ''}
+        ${manage && d.status === 'revoked' ? `<button class="btn danger" type="button" data-dst-action="remove">${fr ? 'Retirer' : 'Remove'}</button>` : ''}
+      </div>
+    </li>`;
+  };
+
+  const runs = view.runs.slice(0, 30);
+  host.innerHTML = `
+    ${!view.available ? `<p class="notice">${fr ? 'Les sauvegardes sont indisponibles sur ce serveur.' : 'Backups are unavailable on this server.'}</p>` : ''}
+    <p class="status ${view.encrypted ? 'ok' : 'fail'}">${view.encrypted ? t('encryptedOn') : t('encryptedOff')}</p>
+    <section class="card">
+      <div class="panel-head">
+        <h2>${fr ? 'Destinations' : 'Destinations'}</h2>
+        ${operate && live.length ? `<button class="btn primary" type="button" id="backup-run-all"${view.running ? ' disabled' : ''}>${view.running ? (fr ? 'Sauvegarde en cours…' : 'Backup running…') : (fr ? 'Tout sauvegarder maintenant' : 'Back up everything now')}</button>` : ''}
+      </div>
+      <p class="hint">${fr
+        ? `Chaque destination reçoit sa propre copie chiffrée, indépendamment des autres et de la grappe. ${view.enabled ? `Automatique toutes les ${view.intervalHours} h, conservée ${view.retentionDays} jours.` : 'Sauvegarde automatique désactivée (Réglages).'}`
+        : `Each destination gets its own encrypted copy, independently of the others and of the cluster. ${view.enabled ? `Automatic every ${view.intervalHours} h, kept ${view.retentionDays} days.` : 'Automatic backups are off (Settings).'}`}</p>
+      ${view.destinations.length
+        ? `<ul class="node-list">${view.destinations.map(destinationRow).join('')}</ul>`
+        : `<p class="hint">${fr ? 'Aucune destination : rien n’est sauvegardé hors de ce serveur.' : 'No destination: nothing is backed up off this server.'}</p>`}
+      <p class="status" role="status"></p>
+    </section>
+
+    ${manage ? `
+    <section class="card">
+      <h2>${fr ? 'Ajouter une destination' : 'Add a destination'}</h2>
+      <p class="hint">${fr ? 'Tout stockage compatible S3 (MinIO, AWS, Backblaze, Scaleway, Garage…). La connexion est testée avant l’enregistrement ; le secret ne ressort jamais du serveur.' : 'Any S3-compatible storage (MinIO, AWS, Backblaze, Scaleway, Garage…). The connection is tested before saving; the secret never leaves the server.'}</p>
+      <form id="backup-add" class="stack">
+        ${destinationFieldsHtml()}
+        <div class="row-end">
+          <button class="btn" type="button" id="backup-add-test">${fr ? 'Tester' : 'Test'}</button>
+          <button class="btn primary" type="submit">${fr ? 'Ajouter' : 'Add'}</button>
+        </div>
+      </form>
+      <p class="status" role="status"></p>
+    </section>
+
+    <section class="card">
+      <h2>${fr ? 'Restaurer' : 'Restore'}</h2>
+      <p class="hint">${fr
+        ? 'Choisissez une copie : un aperçu montre ce qu’elle contient et ce qui est plus récent aujourd’hui. Rien n’est modifié avant votre confirmation, et l’état actuel est d’abord mis de côté.'
+        : 'Pick a copy: a preview shows what it holds and what is newer today. Nothing changes before you confirm, and the current state is set aside first.'}</p>
+      ${view.destinations.every(d => d.status === 'revoked') ? `<p class="hint">${fr ? 'Ajoutez d’abord une destination.' : 'Add a destination first.'}</p>` : `<div class="grid-2">
+        <div><label for="restore-dst">${fr ? 'Destination' : 'Destination'}</label>
+          <select id="restore-dst">${view.destinations.filter(d => d.status !== 'revoked').map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.name)}</option>`).join('')}</select></div>
+        <div><label for="restore-point">${fr ? 'Copie' : 'Snapshot'}</label><select id="restore-point" disabled></select></div>
+      </div>
+      <div class="row-end">
+        <button class="btn" type="button" id="restore-list">${fr ? 'Lister les copies' : 'List snapshots'}</button>
+        <button class="btn primary" type="button" id="restore-preview" disabled>${fr ? 'Aperçu' : 'Preview'}</button>
+      </div>`}
+      <div id="restore-result"></div>
+      <p class="status" role="status"></p>
+    </section>` : ''}
+
+    <section class="card">
+      <h2>${fr ? 'Historique' : 'History'}</h2>
+      ${runs.length === 0 ? `<p class="hint">${t('noRuns')}</p>` : `<div class="runs">${runs.map(run => `
+        <div class="run">
+          <span>${when(run.startedAt)}</span>
+          <span class="${run.status === 'success' ? 'ok' : run.status === 'error' ? 'fail' : ''}">${escapeHtml(run.status)}${run.bytes ? ` · ${formatBytes(run.bytes)}` : ''}</span>
+          <span class="muted">${run.destinationId ? `${escapeHtml(nameOf(run.destinationId))} · ` : ''}${run.message ? escapeHtml(run.message) : run.files ? `+${run.files} ${fr ? 'fichier(s)' : 'file(s)'}` : ''}</span>
+        </div>`).join('')}</div>`}
+    </section>`;
+
+  $('backup-run-all')?.addEventListener('click', e => void backupAction(e.currentTarget, 'POST', 'backup/run', {}));
+
+  host.querySelectorAll('[data-dst-action]').forEach(button => button.addEventListener('click', async () => {
+    const id = button.closest('[data-destination]').dataset.destination;
+    const d = view.destinations.find(x => x.id === id);
+    const status = button.closest('.card').querySelector('.status');
+    const action = button.dataset.dstAction;
+    if (action === 'run') return void backupAction(button, 'POST', 'backup/run', { destinationId: id });
+    if (action === 'test') {
+      setStatus(status, t('testing'));
+      const ok = await backupAction(button, 'POST', 'backup/test', { destinationId: id });
+      if (ok !== null) setStatus(status, `${d.name} : ${t('storageOk')}`, 'ok');
+      return;
+    }
+    if (action === 'enable' || action === 'disable') {
+      return void backupAction(button, 'PATCH', `backup/destinations/${encodeURIComponent(id)}`, { status: action === 'enable' ? 'active' : 'disabled' });
+    }
+    if (action === 'revoke') {
+      const others = view.destinations.filter(x => x.id !== id && x.status === 'active');
+      if (!confirm(fr
+        ? `Révoquer « ${d.name} » ? Ses identifiants sont effacés tout de suite et elle ne recevra plus rien. Pensez aussi à retirer la clé côté fournisseur.`
+        : `Revoke “${d.name}”? Its credentials are wiped now and it will receive nothing more. Also remove the key at the provider.`)) return;
+      let replacedBy;
+      if (others.length) {
+        const pick = prompt(fr
+          ? `Remplacée par (facultatif) : ${others.map((o, i) => `${i + 1}. ${o.name}`).join(' · ')}\nNuméro, ou vide :`
+          : `Replaced by (optional): ${others.map((o, i) => `${i + 1}. ${o.name}`).join(' · ')}\nNumber, or empty:`, '');
+        if (pick === null) return;
+        replacedBy = others[Number(pick) - 1]?.id;
+      }
+      return void backupAction(button, 'POST', `backup/destinations/${encodeURIComponent(id)}/revoke`, replacedBy ? { replacedBy } : {});
+    }
+    if (action === 'remove') {
+      if (!confirm(fr ? `Retirer « ${d.name} » de la liste ? Les copies déjà envoyées restent chez le fournisseur.` : `Remove “${d.name}” from the list? Copies already sent stay at the provider.`)) return;
+      return void backupAction(button, 'DELETE', `backup/destinations/${encodeURIComponent(id)}`);
+    }
+  }));
+
+  const addForm = $('backup-add');
+  if (addForm) {
+    const addStatus = addForm.closest('.card').querySelector('.status');
+    $('backup-add-test').addEventListener('click', async e => {
+      if (!addForm.reportValidity()) return;
+      setStatus(addStatus, t('testing'));
+      const ok = await backupAction(e.currentTarget, 'POST', 'backup/test', { s3: readDestinationFields().s3 });
+      if (ok !== null) setStatus(addStatus, t('storageOk'), 'ok');
+    });
+    addForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      setStatus(addStatus, t('testing'));
+      await backupAction(e.submitter, 'POST', 'backup/destinations', readDestinationFields());
+    });
+  }
+
+  wireRestore();
+}
+
+function wireRestore() {
+  const list = $('restore-list');
+  if (!list) return;
+  const card = list.closest('.card');
+  const status = card.querySelector('.status');
+  const pointSelect = $('restore-point');
+  const previewButton = $('restore-preview');
+  const result = $('restore-result');
+
+  list.addEventListener('click', async () => {
+    list.disabled = true;
+    result.innerHTML = '';
+    setStatus(status, fr ? 'Lecture des copies…' : 'Reading snapshots…');
+    try {
+      const { points } = await api('GET', `backup/destinations/${encodeURIComponent($('restore-dst').value)}/points`);
+      pointSelect.innerHTML = points.map(p => `<option value="${escapeHtml(p.key)}">${when(p.takenAt)} · ${formatBytes(p.bytes)}</option>`).join('');
+      pointSelect.disabled = previewButton.disabled = points.length === 0;
+      setStatus(status, points.length ? '' : (fr ? 'Aucune copie sur cette destination.' : 'No snapshot on this destination.'), points.length ? undefined : 'fail');
+    } catch (err) {
+      setStatus(status, err.message, 'fail');
+    } finally {
+      list.disabled = false;
+    }
+  });
+
+  previewButton.addEventListener('click', async () => {
+    previewButton.disabled = true;
+    setStatus(status, fr ? 'Téléchargement et vérification de la copie…' : 'Downloading and checking the snapshot…');
+    try {
+      const p = await api('POST', 'backup/restore/preview', { destinationId: $('restore-dst').value, key: pointSelect.value });
+      setStatus(status, '');
+      result.innerHTML = `
+        <ul class="restore-facts">
+          <li>${fr ? 'Copie du' : 'Snapshot from'} <strong>${when(p.takenAt)}</strong></li>
+          <li>${p.accounts} ${fr ? 'compte(s)' : 'account(s)'} · ${p.sharedVaults} ${fr ? 'coffre(s) partagé(s)' : 'shared vault(s)'} · ${p.attachments} ${fr ? 'fichier(s)' : 'file(s)'}</li>
+          ${p.newerNow ? `<li class="warn">${p.newerNow} ${fr ? 'compte(s) ont un coffre plus récent aujourd’hui : restaurer le serveur les ramènerait en arrière.' : 'account(s) have a newer vault today: restoring the server would roll them back.'}</li>` : ''}
+          ${p.createdSince ? `<li>${p.createdSince} ${fr ? 'compte(s) créé(s) depuis : ils ne sont pas touchés.' : 'account(s) created since: they are left untouched.'}</li>` : ''}
+        </ul>
+        <div class="grid-2 restore-choices">
+          <form id="restore-account" class="stack">
+            <h3>${fr ? 'Un seul compte' : 'One account'}</h3>
+            <p class="hint">${fr ? 'Recommandé. Le coffre actuel du compte est gardé de côté avant d’être remplacé.' : 'Recommended. The account’s current vault is kept aside before being replaced.'}</p>
+            <label for="restore-email">${fr ? 'Adresse du compte' : 'Account email'}</label>
+            <input id="restore-email" type="email" required autocomplete="off">
+            <button class="btn primary" type="submit">${fr ? 'Restaurer ce compte' : 'Restore this account'}</button>
+          </form>
+          <form id="restore-server" class="stack">
+            <h3>${fr ? 'Tout le serveur' : 'The whole server'}</h3>
+            <p class="hint">${fr ? 'Une copie de sécurité de l’état actuel est faite d’abord. Réglages, administrateurs et grappe ne sont pas touchés.' : 'A safety copy of the current state is taken first. Settings, admins and cluster are left alone.'}</p>
+            <label for="restore-confirm">${fr ? 'Tapez RESTAURER pour confirmer' : 'Type RESTAURER to confirm'}</label>
+            <input id="restore-confirm" required autocomplete="off" pattern="RESTAURER">
+            <button class="btn danger" type="submit">${fr ? 'Restaurer le serveur' : 'Restore the server'}</button>
+          </form>
+        </div>`;
+      $('restore-account').addEventListener('submit', async e => {
+        e.preventDefault();
+        e.submitter.disabled = true;
+        try {
+          const r = await api('POST', 'backup/restore/account', { token: p.token, email: $('restore-email').value.trim() });
+          setStatus(status, r.restored
+            ? (fr ? `Compte restauré (${r.files} fichier(s)). L’ancien coffre est conservé côté serveur.` : `Account restored (${r.files} file(s)). The previous vault is kept on the server.`)
+            : (fr ? 'Ce compte n’existe pas dans cette copie.' : 'This account is not in this snapshot.'), r.restored ? 'ok' : 'fail');
+        } catch (err) {
+          setStatus(status, err.message, 'fail');
+        } finally {
+          e.submitter.disabled = false;
+        }
+      });
+      $('restore-server').addEventListener('submit', async e => {
+        e.preventDefault();
+        e.submitter.disabled = true;
+        try {
+          const r = await api('POST', 'backup/restore/server', { token: p.token, confirm: $('restore-confirm').value });
+          result.innerHTML = '';
+          setStatus(status, fr
+            ? `Serveur restauré : ${r.accounts} compte(s), ${r.files} fichier(s)${r.skipped ? `, ${r.skipped} ignoré(s) car leur adresse sert à un compte plus récent` : ''}. Copie de sécurité : ${r.safetyKey}`
+            : `Server restored: ${r.accounts} account(s), ${r.files} file(s)${r.skipped ? `, ${r.skipped} skipped because a newer account uses their email` : ''}. Safety copy: ${r.safetyKey}`, 'ok');
+        } catch (err) {
+          setStatus(status, err.message, 'fail');
+          e.submitter.disabled = false;
+        }
+      });
+    } catch (err) {
+      setStatus(status, err.message, 'fail');
+    } finally {
+      previewButton.disabled = false;
     }
   });
 }
