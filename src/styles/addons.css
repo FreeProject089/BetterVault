@@ -3903,34 +3903,53 @@ button.shortcut-key:hover { border-color: var(--accent); }
   .template-field-row select, .template-field-row .check-inline { grid-column: 1 / 2; }
 }
 
-/* Barre latérale réduite (ordinateur) : icônes seules, libellé en infobulle */
+/* ── Barre latérale réduite (ordinateur) ──────────────────────────────────
+   Icônes seules, chacune dans une cible carrée de 44 px, le libellé en
+   infobulle. Les groupes restent lisibles grâce à un simple filet. */
 .sidebar-collapse-btn { display: none; }
+
 @media (min-width: 901px) {
   .sidebar-collapse-btn { display: inline-flex; }
-  .app-container.sidebar-collapsed { grid-template-columns: 60px 380px minmax(0, 1fr); }
-  .app-container.sidebar-collapsed.tasks-board { grid-template-columns: 60px minmax(0, 1fr) minmax(340px, 420px); }
-  .sidebar-collapsed .sidebar-header { flex-direction: column; gap: 10px; padding: 12px 8px; }
+  .app-container.sidebar-collapsed { grid-template-columns: 64px 380px minmax(0, 1fr); }
+  .app-container.sidebar-collapsed.tasks-board { grid-template-columns: 64px minmax(0, 1fr) minmax(340px, 420px); }
+
+  .sidebar-collapsed .sidebar-header { flex-direction: column; gap: 8px; padding: 12px 10px; }
+  .sidebar-collapsed .workspace-badge { justify-content: center; }
+  .sidebar-collapsed .sidebar-collapse-btn svg { transform: scaleX(-1); }
+
+  /* Tout ce qui est textuel disparaît : il ne reste que les icônes */
   .sidebar-collapsed .workspace-title,
   .sidebar-collapsed .nav-section-title,
+  .sidebar-collapsed .nav-section-header,
   .sidebar-collapsed .nav-count,
-  .sidebar-collapsed .vault-type-badge,
-  .sidebar-collapsed .nav-item-left > span:not(.nav-item-icon),
-  .sidebar-collapsed .sidebar-nav .icon-btn,
-  .sidebar-collapsed .sidebar-footer .sync-text { display: none !important; }
-  .sidebar-collapsed .sidebar-nav { padding-left: 6px; padding-right: 6px; }
-  .sidebar-collapsed .nav-item { justify-content: center; padding: 9px 0; }
-  .sidebar-collapsed .nav-item-left { flex: 0 0 auto; justify-content: center; }
-  .sidebar-collapsed .sidebar-collapse-btn svg { transform: scaleX(-1); }
-}
-@media (min-width: 901px) {
   .sidebar-collapsed .nav-empty,
+  .sidebar-collapsed .vault-type-badge,
+  .sidebar-collapsed .nav-item-edit,
+  .sidebar-collapsed .nav-item-left > span:not(.nav-item-icon):not(.nav-vault-icon),
+  .sidebar-collapsed .sidebar-nav > div > .icon-btn,
   .sidebar-collapsed .sync-label { display: none !important; }
-  .sidebar-collapsed .sidebar-footer { padding-left: 6px; padding-right: 6px; }
+
+  .sidebar-collapsed .sidebar-nav { padding: 10px 8px; gap: 6px; display: flex; flex-direction: column; }
+  /* Un filet sépare coffres, catégories, tags et outils */
+  .sidebar-collapsed .sidebar-nav > div + div { padding-top: 6px; border-top: 1px solid var(--border-muted); }
+
+  .sidebar-collapsed .nav-item {
+    justify-content: center;
+    min-height: 44px;
+    padding: 0;
+    border-radius: var(--radius-lg);
+  }
+  .sidebar-collapsed .nav-item-left { flex: 0 0 auto; justify-content: center; gap: 0; }
+  .sidebar-collapsed .nav-item-right { display: flex; }
+  .sidebar-collapsed .nav-item.active { box-shadow: inset 2px 0 0 var(--accent); }
+
+  .sidebar-collapsed .sidebar-footer { padding: 8px; }
   .sidebar-collapsed .sidebar-footer > div,
   .sidebar-collapsed .sidebar-footer > div > div { flex-direction: column; gap: 6px !important; }
+  .sidebar-collapsed .sidebar-footer .sync-status,
+  .sidebar-collapsed .sidebar-footer .btn-lang-toggle { min-height: 40px; min-width: 40px; justify-content: center; }
 }
 
-/* Téléphone : zones de toucher d'au moins 40 px dans le menu et les filtres */
 @media (max-width: 900px) {
   .sidebar-footer .btn-lang-toggle,
   .sidebar-footer .sync-status { min-height: 40px; min-width: 40px; }
@@ -3969,3 +3988,136 @@ button.shortcut-key:hover { border-color: var(--accent); }
 .server-chip span { color: var(--text-secondary); }
 .server-chip[aria-pressed="true"] { border-color: var(--accent); }
 .server-chip .server-chip-badge { color: var(--accent); font-weight: 600; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   RYTHME ET MARGES
+   Une seule échelle d'espacement pour toute l'application, et des cibles de
+   toucher confortables. Cette couche est chargée en dernier : elle fixe le
+   rythme sans toucher aux règles d'origine.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  /* Hauteur minimale d'une cible : souris au bureau, doigt sur téléphone */
+  --tap: 34px;
+  --gutter: var(--space-5);
+}
+
+/* ── Fenêtres ─────────────────────────────────────────────────────────── */
+.modal-header { padding: var(--space-4) var(--space-5); gap: var(--space-3); }
+.modal-body { padding: var(--space-5); gap: var(--space-4); }
+.modal-footer { padding: var(--space-3) var(--space-5); gap: var(--space-2); flex-wrap: wrap; }
+.modal-title { line-height: 1.3; }
+
+/* ── Formulaires ──────────────────────────────────────────────────────── */
+.form-field { gap: var(--space-2); }
+.form-row { gap: var(--space-4); }
+.form-section { display: flex; flex-direction: column; gap: var(--space-3); }
+.form-section + .form-section { margin-top: var(--space-2); }
+.form-section-title { display: flex; align-items: center; gap: var(--space-2); }
+.account-section + .account-section { margin-top: var(--space-5); }
+.account-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+.account-actions-end { justify-content: flex-end; }
+
+/* ── Cibles ───────────────────────────────────────────────────────────── */
+.btn-primary { min-height: var(--tap); padding: 0 var(--space-3); }
+.btn-primary.btn-sm { min-height: 28px; padding: 0 var(--space-2); }
+.icon-btn { min-width: var(--tap); min-height: var(--tap); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-md); }
+.form-input, select.form-input { min-height: var(--tap); }
+
+/* ── Colonnes ─────────────────────────────────────────────────────────── */
+.detail-header { padding: var(--space-5) var(--gutter) var(--space-4); }
+.detail-content { padding: var(--space-5) var(--gutter); gap: var(--space-5); }
+.record-row { padding: var(--space-3) var(--space-4); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   TÉLÉPHONE ET PETITES FENÊTRES
+   ══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 900px) {
+  :root { --tap: 44px; --gutter: var(--space-4); }
+
+  /* Les fenêtres deviennent des feuilles ancrées en bas, jusqu'au bord de l'écran */
+  .modal-overlay { align-items: flex-end; padding: 0; }
+  .modal-box, .modal-box.modal-sm, .modal-box.modal-lg {
+    width: 100%;
+    max-width: none;
+    max-height: 92vh;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    border-bottom: none;
+  }
+  .modal-header { padding: var(--space-4); position: sticky; top: 0; z-index: 2; background: var(--bg-secondary); }
+  .modal-body { padding: var(--space-4); gap: var(--space-4); }
+  /* Les actions restent accessibles au pouce, au-dessus de la barre système */
+  .modal-footer {
+    padding: var(--space-3) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+    position: sticky;
+    bottom: 0;
+    background: var(--bg-secondary);
+  }
+  .modal-footer .btn-primary { flex: 1 1 140px; justify-content: center; }
+  .modal-footer-hint { flex: 1 1 100%; margin: 0 0 var(--space-1); }
+
+  /* Une colonne : deux champs côte à côte deviennent illisibles sous 900 px */
+  .form-row { grid-template-columns: minmax(0, 1fr); }
+  /* 16 px : en dessous, le navigateur du téléphone zoome sur le champ au focus */
+  .form-input, select.form-input, textarea.form-input { font-size: 16px; }
+  .account-actions .btn-primary { flex: 1 1 160px; justify-content: center; }
+
+  .record-row { padding: var(--space-3) var(--space-4); min-height: 56px; }
+  .detail-header { padding: var(--space-3) var(--gutter); }
+  .detail-content { padding: var(--space-4) var(--gutter); gap: var(--space-4); }
+  .empty-state { padding: var(--space-6) var(--gutter); }
+
+  /* Les onglets défilent au doigt plutôt que de s'écraser */
+  .tab-btn-group { overflow-x: auto; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
+  .tab-btn-group::-webkit-scrollbar { display: none; }
+  .tab-btn { flex: 0 0 auto; scroll-snap-align: start; min-height: var(--tap); }
+}
+
+/* Fenêtre très étroite (extension, téléphone en colonne serrée) */
+@media (max-width: 420px) {
+  :root { --gutter: var(--space-3); }
+  .modal-header, .modal-body, .modal-footer { padding-left: var(--space-3); padding-right: var(--space-3); }
+  /* Un seul bouton par ligne : plus lisible que deux boutons tronqués */
+  .modal-footer .btn-primary, .account-actions .btn-primary { flex: 1 1 100%; }
+  .type-grid { grid-template-columns: minmax(0, 1fr); }
+  .detail-title { font-size: 17px; }
+}
+
+
+/* Une fenêtre trop courte doit faire défiler son corps, pas écraser ses blocs
+   (la barre d'onglets tombait à 8 px de haut sur téléphone). */
+.modal-body { overflow-y: auto; }
+.modal-body > * { flex-shrink: 0; }
+.tab-btn-group, .account-tabs { flex: 0 0 auto; align-items: stretch; }
+
+@media (max-width: 900px) {
+  /* Menu au doigt : mêmes cibles que le reste de l'application */
+  .sidebar .nav-item { min-height: var(--tap); }
+  .sidebar .icon-btn { min-width: var(--tap); min-height: var(--tap); }
+  /* 10 px était illisible sur un écran de téléphone */
+  .nav-section-title { font-size: 11px; }
+  .vault-type-badge { font-size: 10px; }
+}
+@media (max-width: 900px) {
+  #search-input, .search-wrap input { min-height: var(--tap); }
+}
+
+/* Commandes fines : la croix de fermeture, les curseurs et les cases à cocher
+   doivent rester attrapables au doigt. */
+@media (max-width: 900px) {
+  .modal-close { min-width: var(--tap); min-height: var(--tap); }
+  input[type="range"] { height: var(--tap); }
+  input[type="checkbox"], .switch { min-width: 22px; min-height: 22px; }
+  .check, .check-row, .switch-row, .theme-preset, .server-chip { min-height: var(--tap); }
+}
+input[type="range"]::-webkit-slider-thumb { width: 20px; height: 20px; }
+@media (max-width: 900px) {
+  /* Les puces du générateur sont la vraie cible, pas la case qu'elles portent */
+  .gen-chip { min-height: var(--tap); }
+}
