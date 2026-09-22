@@ -15,16 +15,16 @@ const CHARGE = '"><img src=x onerror=alert(1)>';
 describe('Coffre hostile : identifiants', () => {
   it('remplace un identifiant qui pourrait sortir d’un attribut', () => {
     const data = normalizeVaultData({
-      folders: [{ id: CHARGE, vaultId: 'v1', name: 'Anodin', createdAt: 1, updatedAt: 1 }],
+      vaults: [{ id: CHARGE, name: 'Anodin', type: 'personal', createdAt: 1, updatedAt: 1 }],
       credentials: [{ id: '</script><script>x</script>', vaultId: 'v1', title: 'X', username: '', password: '', website: '', domain: '', tags: [], createdAt: 1, updatedAt: 1 }],
       tagDefs: [{ id: 'tag" onmouseover="x', name: 'Tag', color: '#112233', createdAt: 1, updatedAt: 1 }]
     } as Partial<UnlockedVaultData>);
 
-    expect(isSafeId(data.folders[0].id)).toBe(true);
+    expect(isSafeId(data.vaults[0].id)).toBe(true);
     expect(isSafeId(data.credentials[0].id)).toBe(true);
     expect(isSafeId(data.tagDefs[0].id)).toBe(true);
     // Le contenu, lui, est conservé : on remplace l'identifiant, on ne jette pas l'élément
-    expect(data.folders[0].name).toBe('Anodin');
+    expect(data.vaults[0].name).toBe('Anodin');
     expect(data.credentials[0].title).toBe('X');
   });
 
@@ -32,28 +32,25 @@ describe('Coffre hostile : identifiants', () => {
     const data = normalizeVaultData({
       vaults: [{ id: 'v"1', name: 'Coffre', type: 'personal', createdAt: 1, updatedAt: 1 }],
       activeVaultId: 'v"1',
-      folders: [
-        { id: 'parent<x>', vaultId: 'v"1', name: 'Parent', createdAt: 1, updatedAt: 1 },
-        { id: 'enfant<y>', vaultId: 'v"1', parentId: 'parent<x>', name: 'Enfant', createdAt: 1, updatedAt: 1 }
-      ],
-      credentials: [{ id: 'c<1>', vaultId: 'v"1', folderId: 'parent<x>', title: 'Secret', username: '', password: '', website: '', domain: '', tags: [], createdAt: 1, updatedAt: 1 }],
-      tasks: [{ id: 't<1>', vaultId: 'v"1', title: 'Tache', status: 'todo', priority: 'medium', linkedCredentialId: 'c<1>', dependsOn: [], tags: [], createdAt: 1, updatedAt: 1 }]
+      credentials: [{ id: 'c<1>', vaultId: 'v"1', title: 'Secret', username: '', password: '', website: '', domain: '', tags: [], createdAt: 1, updatedAt: 1 }],
+      tasks: [
+        { id: 't<1>', vaultId: 'v"1', title: 'Tache', status: 'todo', priority: 'medium', linkedCredentialId: 'c<1>', dependsOn: [], tags: [], createdAt: 1, updatedAt: 1 },
+        { id: 't<2>', vaultId: 'v"1', title: 'Suite', status: 'todo', priority: 'medium', dependsOn: ['t<1>'], tags: [], createdAt: 1, updatedAt: 1 }
+      ]
     } as Partial<UnlockedVaultData>);
 
     const vaultId = data.vaults[0].id;
-    const parent = data.folders.find(f => f.name === 'Parent')!;
-    const enfant = data.folders.find(f => f.name === 'Enfant')!;
+    const premiere = data.tasks.find(t => t.title === 'Tache')!;
+    const suite = data.tasks.find(t => t.title === 'Suite')!;
 
     // Le coffre actif suit son coffre
     expect(data.activeVaultId).toBe(vaultId);
-    // Le lien parent/enfant survit au remplacement
-    expect(enfant.parentId).toBe(parent.id);
-    // L'élément reste dans son dossier et dans son coffre
-    expect(data.credentials[0].folderId).toBe(parent.id);
+    // L'élément reste dans son coffre
     expect(data.credentials[0].vaultId).toBe(vaultId);
-    // La tâche pointe toujours vers le bon identifiant
-    expect(data.tasks[0].linkedCredentialId).toBe(data.credentials[0].id);
-    expect(isSafeId(parent.id) && isSafeId(enfant.id) && isSafeId(vaultId)).toBe(true);
+    // La tâche pointe toujours vers le bon identifiant, et la dépendance vers la bonne tâche
+    expect(premiere.linkedCredentialId).toBe(data.credentials[0].id);
+    expect(suite.dependsOn).toEqual([premiere.id]);
+    expect(isSafeId(premiere.id) && isSafeId(suite.id) && isSafeId(vaultId)).toBe(true);
   });
 
   it('laisse intact un identifiant déjà conforme', () => {

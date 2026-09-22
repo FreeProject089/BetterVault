@@ -85,7 +85,6 @@ export function mergeVaultData(local: UnlockedVaultData, remote: UnlockedVaultDa
     credentials,
     tasks,
     tagDefs: newestWins(local.tagDefs ?? [], remote.tagDefs ?? [], deleted),
-    folders: newestWins(local.folders ?? [], remote.folders ?? [], deleted),
     // Absents jusqu'ici : chaque fusion perdait les types de coffre créés par l'utilisateur
     vaultTypes: newestWins(local.vaultTypes ?? [], remote.vaultTypes ?? [], deleted),
     itemTemplates: newestWins(local.itemTemplates ?? [], remote.itemTemplates ?? [], deleted),

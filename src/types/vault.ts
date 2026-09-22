@@ -78,8 +78,6 @@ export interface CredentialItem {
   type?: ItemType;
   /** Type personnalisé dont l'élément a été créé ; ses valeurs sont dans `fields` */
   templateId?: string;
-  /** Dossier de rangement, dans le coffre ; absent = à la racine */
-  folderId?: string;
   title: string;
   username: string;
   password: string;
@@ -155,25 +153,12 @@ export interface ItemTemplate {
   updatedAt: number;
 }
 
-/** Dossier de rangement à l'intérieur d'un coffre ; les dossiers peuvent s'imbriquer */
-export interface FolderDef {
-  id: string;
-  vaultId: string;
-  /** Dossier parent ; absent = à la racine du coffre */
-  parentId?: string;
-  name: string;
-  icon?: ItemIcon;
-  createdAt: number;
-  updatedAt: number;
-}
-
 export interface UnlockedVaultData {
   vaults: VaultMetadata[];
   activeVaultId: string;
   credentials: CredentialItem[];
   tasks: Task[];
   tagDefs: TagDef[];
-  folders: FolderDef[];
   vaultTypes?: VaultTypeDef[];
   itemTemplates?: ItemTemplate[];
   /** Suppressions synchronisables : id de l'élément → horodatage de suppression */

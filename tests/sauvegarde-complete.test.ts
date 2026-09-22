@@ -17,7 +17,6 @@ async function coffreAvecFichiers(): Promise<{ data: UnlockedVaultData; serveur:
   const data = createEmptyVaultData();
   const vaultId = data.activeVaultId;
   data.vaults.push({ id: 'vault-partage', name: 'Équipe', type: 'team', createdAt: 1, updatedAt: 1, shared: { ownerEmail: 'x@exemple.fr', role: { permissions: [] } } } as never);
-  data.folders = [{ id: 'folder-1', vaultId, name: 'Papiers', createdAt: 1, updatedAt: 1 }];
 
   const clair = new TextEncoder().encode('contenu du passeport');
   const surServeur = await encryptFile(clair);
@@ -28,7 +27,7 @@ async function coffreAvecFichiers(): Promise<{ data: UnlockedVaultData; serveur:
   const metaCoffre: AttachmentMeta = { id: 'att-coffre', name: 'note.txt', size: 13, type: 'text/plain', key: dansCoffre.key, data: toBase64(dansCoffre.payload), createdAt: 1 };
 
   data.credentials.push(
-    { id: 'cred-1', vaultId, title: 'Identité', folderId: 'folder-1', tags: ['papiers'], attachments: [metaServeur, metaCoffre], createdAt: 1, updatedAt: 1 } as never,
+    { id: 'cred-1', vaultId, title: 'Identité', tags: ['papiers'], attachments: [metaServeur, metaCoffre], createdAt: 1, updatedAt: 1 } as never,
     { id: 'cred-2', vaultId: 'vault-partage', title: 'Secret d’équipe', tags: [], createdAt: 1, updatedAt: 1 } as never
   );
   data.tasks.push({ id: 'task-1', vaultId, title: 'Renouveler', tags: [], linkedCredentialId: 'cred-1', createdAt: 1, updatedAt: 1 } as never);
@@ -143,7 +142,6 @@ describe('Import', () => {
 
     const identite = out.credentials.find(c => c.title === 'Identité')!;
     expect(identite.id).not.toBe('cred-1');
-    expect(out.folders!.find(f => f.id === identite.folderId)!.name).toBe('Papiers');
     expect(out.tasks[0].linkedCredentialId).toBe(identite.id);
 
     // Le fichier renvoyé sur le nouveau serveur s'ouvre avec la clé d'origine

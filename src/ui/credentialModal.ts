@@ -263,19 +263,6 @@ export function openCreateCredentialModal(app: AppController, existingCredId?: s
               <div id="field-expires"></div>
             </div>
           </div>
-          <div class="form-row">
-            <div class="form-field">
-              <label class="form-label" for="field-folder">${tr('Dossier', 'Folder')}</label>
-              <select class="form-input" id="field-folder">
-                <option value="">${tr('Aucun dossier', 'No folder')}</option>
-                ${vaultStore.getFolders().map(f => {
-                  const path = vaultStore.folderPath(f.id).map(x => x.name).join(' / ');
-                  const selected = (existing?.folderId ?? app.activeFolderId) === f.id;
-                  return `<option value="${f.id}" ${selected ? 'selected' : ''}>${app.escapeHtml(path)}</option>`;
-                }).join('')}
-              </select>
-            </div>
-          </div>
           <label class="switch-row">
             <span>${tr('Favori', 'Favorite')}<small>${tr('Affiché en haut de la liste', 'Shown at the top of the list')}</small></span>
             <input type="checkbox" class="switch" id="field-favorite" ${existing?.isFavorite ? 'checked' : ''}>
@@ -872,7 +859,6 @@ export function openCreateCredentialModal(app: AppController, existingCredId?: s
       tags: tagInput.getTags(),
       isFavorite: $<HTMLInputElement>('#field-favorite').checked,
       expiresAt: expiresDate ? new Date(y, m - 1, d, 12).getTime() : undefined,
-      folderId: $<HTMLSelectElement>('#field-folder').value || undefined,
       icon: chosenIcon,
       // Les champs de l'ancien type sont effacés quand le type change
       card: undefined,

@@ -7,7 +7,7 @@ import { queryCredentials } from '../store/credentialFilters';
 import { i18n } from '../i18n';
 import type { AppController } from '../main';
 
-/** Liste des éléments de la vue active : filtres, tri, glisser-déposer vers un dossier */
+/** Liste des éléments de la vue active : filtres, tri, recherche */
 export function renderList(app: AppController): void {
   const data = vaultStore.getData();
   const container = document.getElementById('items-container');
@@ -23,16 +23,7 @@ export function renderList(app: AppController): void {
   const tagKey = app.activeTag?.toLowerCase();
   const matchesTag = (item: { tags: string[] }) => !tagKey || item.tags.some(t => t.toLowerCase() === tagKey);
 
-  // Un dossier ouvert montre aussi le contenu de ses sous-dossiers
-  const folderIds = app.activeFolderId ? new Set(vaultStore.folderSubtree(app.activeFolderId)) : null;
-  const matchesFolder = (item: { folderId?: string }) =>
-    !folderIds || (!!item.folderId && folderIds.has(item.folderId));
-
-  const folderName = app.activeFolderId ? vaultStore.getFolder(app.activeFolderId)?.name : undefined;
-  const withTag = (title: string) => {
-    const parts = [title, folderName, app.activeTag].filter(Boolean);
-    return parts.join(' · ');
-  };
+  const withTag = (title: string) => [title, app.activeTag].filter(Boolean).join(' · ');
 
   const taskToggle = document.getElementById('task-view-toggle');
   if (taskToggle) {
@@ -318,7 +309,6 @@ export function renderList(app: AppController): void {
 
   const vaultCreds = data.credentials.filter(c =>
     c.vaultId === data.activeVaultId
-    && matchesFolder(c)
     && (app.activeView !== '2fa-tokens' || !!c.totpSecret));
   const creds = queryCredentials(vaultCreds, {
     search: app.searchQuery,
@@ -328,41 +318,6 @@ export function renderList(app: AppController): void {
   });
   app.renderFilterBar(vaultCreds);
 
-  /** Chemin du dossier ouvert, posé en tête de liste une fois celle-ci rendue */
-  const addBreadcrumb = () => {
-    if (!app.activeFolderId) return;
-    container.insertAdjacentHTML('afterbegin', app.renderFolderBreadcrumb());
-    const breadcrumb = container.querySelector('.folder-breadcrumb');
-    breadcrumb?.addEventListener('click', event => {
-      const crumb = (event.target as HTMLElement).closest<HTMLElement>('[data-folder-crumb]');
-      if (!crumb) return;
-      app.activeFolderId = crumb.dataset.folderCrumb || null;
-      app.selectedItemId = null;
-      app.renderSidebar();
-      app.renderList();
-      app.renderDetail(null);
-    });
-
-    // Le fil d'Ariane accepte aussi le dépôt : c'est ce qui permet de ressortir un élément
-    breadcrumb?.querySelectorAll<HTMLElement>('[data-folder-crumb]').forEach(crumb => {
-      crumb.addEventListener('dragover', event => {
-        const drag = event as DragEvent;
-        if (!drag.dataTransfer?.types.includes('text/bettervault-item')) return;
-        drag.preventDefault();
-        drag.dataTransfer.dropEffect = 'move';
-        crumb.classList.add('folder-drop');
-      });
-      crumb.addEventListener('dragleave', () => crumb.classList.remove('folder-drop'));
-      crumb.addEventListener('drop', event => {
-        const drag = event as DragEvent;
-        const id = drag.dataTransfer?.getData('text/bettervault-item');
-        crumb.classList.remove('folder-drop');
-        if (!id) return;
-        drag.preventDefault();
-        app.moveItemToFolder(id, crumb.dataset.folderCrumb || null);
-      });
-    });
-  };
 
   if (creds.length === 0) {
     const filtered = app.credentialFilters.size > 0;
@@ -385,7 +340,6 @@ export function renderList(app: AppController): void {
       app.saveListPrefs();
       app.renderList();
     });
-    addBreadcrumb();
     return;
   }
 
@@ -402,17 +356,6 @@ export function renderList(app: AppController): void {
     const row = document.createElement('div');
     row.className = `record-row ${app.selectedItemId === cred.id ? 'selected' : ''}`;
     row.tabIndex = 0;
-    // Glisser une ligne sur un dossier de la barre latérale l'y range
-    row.draggable = true;
-    row.addEventListener('dragstart', event => {
-      event.dataTransfer?.setData('text/bettervault-item', cred.id);
-      if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
-      document.body.classList.add('dragging-item');
-    });
-    row.addEventListener('dragend', () => {
-      document.body.classList.remove('dragging-item');
-      document.querySelectorAll('.folder-drop').forEach(el => el.classList.remove('folder-drop'));
-    });
     const expiry = renderExpiryBadge(expiryInfo(cred.expiresAt, tr, locale, now), { hideOk: true });
 
     row.innerHTML = `
@@ -441,6 +384,4 @@ export function renderList(app: AppController): void {
     });
     container.appendChild(row);
   });
-
-  addBreadcrumb();
 }

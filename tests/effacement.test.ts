@@ -15,11 +15,9 @@ const prepare = () => {
 
   const cred = store.addCredential({ title: 'Banque', vaultId, tags: ['argent'], password: 'x' } as never);
   store.addCredential({ title: 'Ailleurs', vaultId: autre, tags: [] } as never);
-  const dossier = store.createFolder('Papiers', { vaultId });
-  store.moveToFolder(cred, dossier.id);
   store.addTask({ title: 'Changer le mot de passe', vaultId, tags: [], linkedCredentialId: cred } as never);
 
-  return { store, vaultId, autre, cred, dossier };
+  return { store, vaultId, autre, cred };
 };
 
 describe('eraseData', () => {
@@ -48,15 +46,6 @@ describe('eraseData', () => {
     expect(taches[0].linkedCredentialId).toBeUndefined();
   });
 
-  it('fait remonter d’un niveau ce qui restait dans un dossier effacé', () => {
-    const { store, vaultId } = prepare();
-    // Les dossiers partent, les identifiants restent
-    store.eraseData({ vaultIds: [vaultId], folders: true });
-
-    expect(store.getFolders(vaultId)).toHaveLength(0);
-    const cred = store.getData().credentials.find(c => c.title === 'Banque')!;
-    expect(cred.folderId).toBeUndefined();
-  });
 
   it('ne retire que les tags dont plus rien ne se sert', () => {
     const { store, vaultId } = prepare();
@@ -75,7 +64,7 @@ describe('eraseData', () => {
   it('ne touche à rien quand aucune catégorie n’est demandée', () => {
     const { store, vaultId } = prepare();
     const bilan = store.eraseData({ vaultIds: [vaultId] });
-    expect(bilan).toEqual({ credentials: 0, tasks: 0, folders: 0, tags: 0 });
+    expect(bilan).toEqual({ credentials: 0, tasks: 0, tags: 0 });
     expect(store.getData().credentials).toHaveLength(2);
   });
 });

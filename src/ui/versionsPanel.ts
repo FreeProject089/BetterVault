@@ -27,7 +27,7 @@ function fieldLabel(field: string, tr: VersionsContext['tr']): string {
     website: ['Site', 'Website'], notes: ['Notes', 'Notes'], totpSecret: ['Code 2FA', '2FA code'],
     tags: ['Tags', 'Tags'], fields: ['Champs', 'Fields'], attachments: ['Fichiers', 'Files'],
     card: ['Carte', 'Card'], identity: ['Identité', 'Identity'], sshKey: ['Clé SSH', 'SSH key'],
-    folderId: ['Dossier', 'Folder'], vaultId: ['Coffre', 'Vault'], icon: ['Icône', 'Icon'],
+    vaultId: ['Coffre', 'Vault'], icon: ['Icône', 'Icon'],
     description: ['Description', 'Description'], status: ['Statut', 'Status'], priority: ['Priorité', 'Priority'],
     dueDate: ['Échéance', 'Due date'], subtasks: ['Sous-tâches', 'Subtasks'], passkeys: ['Passkeys', 'Passkeys'],
     isFavorite: ['Favori', 'Favourite'], expiresAt: ['Expiration', 'Expiry']

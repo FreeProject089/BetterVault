@@ -66,28 +66,7 @@ const REMINDER_CHECK_INTERVAL_MS = 30_000;
 const SYNC_INTERVAL_MS = 60_000;
 const LIST_PREFS_KEY = 'bettervault.list-prefs';
 
-/**
- * Dossiers dépliés : simple confort d'affichage, gardé sur l'appareil.
- * Rien de sensible : ce ne sont que des identifiants de dossiers du coffre déverrouillé.
- */
-const EXPANDED_FOLDERS_KEY = 'bettervault-expanded-folders';
 
-function loadExpandedFolders(): string[] {
-  try {
-    const raw = JSON.parse(localStorage.getItem(EXPANDED_FOLDERS_KEY) ?? '[]') as unknown;
-    return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === 'string') : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveExpandedFolders(ids: Set<string>): void {
-  try {
-    localStorage.setItem(EXPANDED_FOLDERS_KEY, JSON.stringify([...ids]));
-  } catch {
-    // Stockage indisponible (navigation privée) : l'arborescence repart repliée
-  }
-}
 const AUTOFILL_KEY = 'bettervault.android-autofill';
 
 
@@ -154,9 +133,7 @@ export class AppController {
   private clipboardClearTimer: number | null = null;
   activeTag: string | null = null;
   /** Dossier ouvert dans la barre latérale ; null = tout le coffre */
-  activeFolderId: string | null = null;
   /** Dossiers dépliés dans l'arborescence : préférence d'affichage, gardée sur l'appareil */
-  private expandedFolders = new Set<string>(loadExpandedFolders());
   private authScreen: { show(): void } | null = null;
   credentialFilters = new Set<CredentialFilter>();
   credentialSort: CredentialSort = 'name';
@@ -688,9 +665,6 @@ export class AppController {
       this.openVaultModal();
     });
 
-    document.getElementById('btn-new-folder')?.addEventListener('click', () => {
-      this.openFolderModal(undefined, this.activeFolderId ?? undefined);
-    });
 
     document.getElementById('btn-manage-tags')?.addEventListener('click', () => {
       this.openTagManagerModal();
@@ -793,7 +767,6 @@ export class AppController {
       vaultListEl.appendChild(li);
     });
 
-    this.renderFolderSidebar();
     this.renderTagSidebar();
   }
 
@@ -2033,141 +2006,8 @@ export class AppController {
 
   /* ── Dossiers ────────────────────────────────────────────────────────── */
 
-  /** Fil d'Ariane du dossier ouvert, affiché en haut de la liste */
-  renderFolderBreadcrumb(): string {
-    if (!this.activeFolderId) return '';
-    const path = vaultStore.folderPath(this.activeFolderId);
-    if (!path.length) return '';
-    return `
-      <nav class="folder-breadcrumb" aria-label="${this.tr('Chemin du dossier', 'Folder path')}">
-        <button type="button" data-folder-crumb="">${this.tr('Tout le coffre', 'Whole vault')}</button>
-        ${path.map(folder => `
-          <span class="folder-breadcrumb-sep" aria-hidden="true">/</span>
-          <button type="button" data-folder-crumb="${folder.id}">${this.escapeHtml(folder.name)}</button>`).join('')}
-      </nav>`;
-  }
 
-  private renderFolderSidebar(): void {
-    const list = document.getElementById('folder-list');
-    if (!list) return;
 
-    const folders = vaultStore.getFolders();
-    if (this.activeFolderId && !folders.some(f => f.id === this.activeFolderId)) this.activeFolderId = null;
-
-    if (folders.length === 0) {
-      list.innerHTML = `<li class="nav-empty">${this.tr('Aucun dossier', 'No folders')}</li>`;
-      return;
-    }
-
-    list.innerHTML = '';
-    const byParent = new Map<string, typeof folders>();
-    for (const folder of folders) {
-      const key = folder.parentId ?? '';
-      byParent.set(key, [...(byParent.get(key) ?? []), folder]);
-    }
-
-    const addLevel = (parentId: string, depth: number) => {
-      for (const folder of byParent.get(parentId) ?? []) {
-        const children = byParent.get(folder.id) ?? [];
-        const expanded = this.expandedFolders.has(folder.id);
-        const active = this.activeFolderId === folder.id;
-
-        const li = document.createElement('li');
-        li.className = `nav-item folder-item ${active ? 'active' : ''}`;
-        li.tabIndex = 0;
-        li.setAttribute('aria-pressed', String(active));
-        li.style.paddingLeft = `${8 + depth * 12}px`;
-        li.innerHTML = `
-          <span class="nav-item-left">
-            ${children.length
-              ? `<button type="button" class="folder-twisty" aria-expanded="${expanded}" data-twisty
-                   aria-label="${expanded ? this.tr('Replier', 'Collapse') : this.tr('Déplier', 'Expand')}">${tabIcon('chevronRight', 12)}</button>`
-              : '<span class="folder-twisty-spacer" aria-hidden="true"></span>'}
-            ${folder.icon ? renderItemIcon(folder.icon, 15) : tabIcon(expanded && children.length ? 'folderOpen' : 'typeFolder', 15)}
-            <span class="folder-name">${this.escapeHtml(folder.name)}</span>
-          </span>
-          <span class="folder-actions">
-            <button type="button" class="icon-btn" data-folder-edit title="${this.tr('Renommer', 'Rename')}" aria-label="${this.tr('Renommer le dossier', 'Rename folder')}">${ACTION_ICONS.edit}</button>
-            <button type="button" class="icon-btn" data-folder-delete title="${this.tr('Supprimer', 'Delete')}" aria-label="${this.tr('Supprimer le dossier', 'Delete folder')}">${ACTION_ICONS.trash}</button>
-          </span>
-          <span class="nav-count">${vaultStore.countFolderItems(folder.id)}</span>`;
-
-        const open = () => {
-          this.activeFolderId = this.activeFolderId === folder.id ? null : folder.id;
-          this.selectedItemId = null;
-          this.renderSidebar();
-          this.renderList();
-          this.renderDetail(null);
-        };
-
-        li.addEventListener('click', event => {
-          const target = event.target as HTMLElement;
-          if (target.closest('[data-twisty]')) {
-            if (expanded) this.expandedFolders.delete(folder.id);
-            else this.expandedFolders.add(folder.id);
-            saveExpandedFolders(this.expandedFolders);
-            this.renderFolderSidebar();
-            return;
-          }
-          if (target.closest('[data-folder-edit]')) return this.openFolderModal(folder.id);
-          if (target.closest('[data-folder-delete]')) return this.confirmDeleteFolder(folder.id);
-          open();
-        });
-        li.addEventListener('keydown', event => {
-          if ((event as KeyboardEvent).key === 'Enter') open();
-        });
-
-        li.addEventListener('dragover', event => {
-          if (!event.dataTransfer?.types.includes('text/bettervault-item')) return;
-          event.preventDefault();
-          event.dataTransfer.dropEffect = 'move';
-          li.classList.add('folder-drop');
-        });
-        li.addEventListener('dragleave', () => li.classList.remove('folder-drop'));
-        li.addEventListener('drop', event => {
-          const id = event.dataTransfer?.getData('text/bettervault-item');
-          li.classList.remove('folder-drop');
-          if (!id) return;
-          event.preventDefault();
-          this.moveItemToFolder(id, folder.id);
-        });
-
-        list.appendChild(li);
-        if (expanded) addLevel(folder.id, depth + 1);
-      }
-    };
-
-    addLevel('', 0);
-  }
-
-  /** Range un élément dans un dossier et propose de revenir en arrière */
-  moveItemToFolder(credentialId: string, folderId: string | null): void {
-    const item = vaultStore.getData().credentials.find(c => c.id === credentialId);
-    const folder = folderId ? vaultStore.getFolder(folderId) : undefined;
-    if (!item || (folderId && !folder)) return;
-    if ((item.folderId ?? null) === folderId) return;
-    if (!this.canEdit(item.vaultId, 'write')) return;
-
-    const previous = item.folderId ?? null;
-    try {
-      vaultStore.moveToFolder(credentialId, folderId);
-    } catch (err) {
-      this.showToast(accountErrorMessage(err), 'error');
-      return;
-    }
-    this.renderSidebar();
-    this.renderList();
-
-    const where = folder ? folder.name : this.tr('la racine du coffre', 'the vault root');
-    this.showToast(this.tr(`${item.title} rangé dans ${where}`, `${item.title} moved to ${where}`), 'success', 5000, {
-      label: this.tr('Annuler', 'Undo'),
-      run: () => {
-        vaultStore.moveToFolder(credentialId, previous);
-        this.renderSidebar();
-        this.renderList();
-      }
-    });
-  }
 
   /** Action « Annuler » d'une notification de suppression : l'élément revient de la corbeille */
   undoDelete(id: string): { label: string; run: () => void } {
@@ -2183,94 +2023,7 @@ export class AppController {
     };
   }
 
-  /** Création ou renommage d'un dossier */
-  private openFolderModal(folderId?: string, parentId?: string): void {
-    const tr = (fr: string, en: string) => this.tr(fr, en);
-    const folder = folderId ? vaultStore.getFolder(folderId) : undefined;
-    const others = vaultStore.getFolders().filter(f => !folderId || !vaultStore.folderSubtree(folderId).includes(f.id));
 
-    const box = this.openModal(`
-      <div class="modal-header">
-        <div class="modal-title">${folder ? tr('Renommer le dossier', 'Rename folder') : tr('Nouveau dossier', 'New folder')}</div>
-        <button class="modal-close" type="button">${GEN_ICONS.close}</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-field">
-          <label class="form-label" for="folder-name">${tr('Nom', 'Name')}</label>
-          <input class="form-input" id="folder-name" type="text" maxlength="60" autocomplete="off"
-            value="${this.escapeHtml(folder?.name ?? '')}" placeholder="${tr('Travail, Banque, Serveurs…', 'Work, Banking, Servers…')}" data-autofocus>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="folder-parent">${tr('Ranger dans', 'Place inside')}</label>
-          <select class="form-input" id="folder-parent">
-            <option value="">${tr('À la racine du coffre', 'At the vault root')}</option>
-            ${others.map(f => `<option value="${f.id}" ${(folder?.parentId ?? parentId) === f.id ? 'selected' : ''}>${this.escapeHtml(vaultStore.folderPath(f.id).map(x => x.name).join(' / '))}</option>`).join('')}
-          </select>
-        </div>
-        <div class="form-error" id="folder-error" role="alert" hidden></div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-primary" type="button" data-close>${tr('Annuler', 'Cancel')}</button>
-        <button class="btn-primary btn-accent" type="button" id="folder-confirm">${folder ? tr('Renommer', 'Rename') : tr('Créer', 'Create')}</button>
-      </div>`);
-
-    const nameInput = box.querySelector('#folder-name') as HTMLInputElement;
-    const parentSelect = box.querySelector('#folder-parent') as HTMLSelectElement;
-    const errorEl = box.querySelector('#folder-error') as HTMLElement;
-
-    const save = () => {
-      errorEl.hidden = true;
-      try {
-        const parent = parentSelect.value || undefined;
-        if (folder) vaultStore.updateFolder(folder.id, { name: nameInput.value, parentId: parent ?? null });
-        else {
-          const created = vaultStore.createFolder(nameInput.value, { parentId: parent });
-          if (parent) {
-            this.expandedFolders.add(parent);
-            saveExpandedFolders(this.expandedFolders);
-          }
-          this.activeFolderId = created.id;
-        }
-        this.closeModal();
-        this.renderSidebar();
-        this.renderList();
-      } catch (err) {
-        errorEl.textContent = accountErrorMessage(err);
-        errorEl.hidden = false;
-        nameInput.focus();
-      }
-    };
-
-    box.querySelector('#folder-confirm')?.addEventListener('click', save);
-    nameInput.addEventListener('keydown', event => {
-      if (event.key === 'Enter') { event.preventDefault(); save(); }
-    });
-  }
-
-  private confirmDeleteFolder(folderId: string): void {
-    const folder = vaultStore.getFolder(folderId);
-    if (!folder) return;
-    const count = vaultStore.countFolderItems(folderId);
-    const tr = (fr: string, en: string) => this.tr(fr, en);
-
-    void this.confirmDialog({
-      title: tr('Supprimer ce dossier ?', 'Delete this folder?'),
-      message: count
-        ? tr(`Les ${count} élément(s) qu'il contient ne sont pas supprimés : ils remontent d'un niveau.`,
-             `The ${count} item(s) inside are not deleted: they move up one level.`)
-        : tr('Ce dossier est vide.', 'This folder is empty.'),
-      confirmLabel: tr('Supprimer', 'Delete'),
-      danger: true,
-      skippable: true
-    }).then(confirmed => {
-      if (!confirmed) return;
-      vaultStore.deleteFolder(folderId);
-      if (this.activeFolderId === folderId) this.activeFolderId = folder.parentId ?? null;
-      this.renderSidebar();
-      this.renderList();
-      this.showToast(tr('Dossier supprimé', 'Folder deleted'), 'success');
-    });
-  }
 
   /* ── Tags ────────────────────────────────────────────────────────────── */
   private renderTagSidebar(): void {

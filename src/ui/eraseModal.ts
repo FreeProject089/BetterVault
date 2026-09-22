@@ -33,7 +33,6 @@ export function openEraseModal(app: AppController): void {
         <div class="erase-choices">
           <label class="check-row"><input type="checkbox" data-erase="credentials" checked><span>${tr('Identifiants et codes 2FA', 'Credentials and 2FA codes')}<small data-count="credentials"></small></span></label>
           <label class="check-row"><input type="checkbox" data-erase="tasks" checked><span>${tr('Tâches', 'Tasks')}<small data-count="tasks"></small></span></label>
-          <label class="check-row"><input type="checkbox" data-erase="folders"><span>${tr('Dossiers', 'Folders')}<small>${tr('Leur contenu remonte d’un niveau s’il en reste', 'Anything left inside moves up one level')}</small></span></label>
           <label class="check-row"><input type="checkbox" data-erase="tags"><span>${tr('Tags devenus inutilisés', 'Tags left unused')}<small>${tr('Ceux encore portés par un élément restent', 'Those still carried by an item stay')}</small></span></label>
         </div>
         <div class="form-field">
@@ -171,10 +170,6 @@ export function openEraseModal(app: AppController): void {
       const n = data.tasks.filter(t => ids.has(t.vaultId)).length;
       parties.push(tr(`${n} tâche(s)`, `${n} task(s)`));
     }
-    if (coche('folders')) {
-      const n = data.folders.filter(f => ids.has(f.vaultId)).length;
-      parties.push(tr(`${n} dossier(s)`, `${n} folder(s)`));
-    }
     if (coche('tags')) parties.push(tr('les tags devenus inutilisés', 'tags left unused'));
     const el = $('[data-erase-summary]');
     if (el) el.textContent = tr(`Seront effacés : ${parties.join(', ')}.`, `Will be erased: ${parties.join(', ')}.`);
@@ -195,7 +190,7 @@ export function openEraseModal(app: AppController): void {
         id: 'choix',
         label: tr('Quoi', 'What'),
         validate: () => {
-          if (!coche('credentials') && !coche('tasks') && !coche('folders') && !coche('tags')) {
+          if (!coche('credentials') && !coche('tasks') && !coche('tags')) {
             return tr('Choisissez au moins une catégorie', 'Pick at least one category');
           }
           if (!coffresChoisis().length) return tr('Choisissez au moins un coffre', 'Pick at least one vault');
@@ -221,7 +216,6 @@ export function openEraseModal(app: AppController): void {
         vaultIds: coffresChoisis(),
         credentials: coche('credentials'),
         tasks: coche('tasks'),
-        folders: coche('folders'),
         tags: coche('tags')
       });
       app.selectedItemId = null;
@@ -230,8 +224,8 @@ export function openEraseModal(app: AppController): void {
       app.renderSidebar();
       app.renderList();
       app.showToast(tr(
-        `Effacé : ${bilan.credentials} identifiant(s), ${bilan.tasks} tâche(s), ${bilan.folders} dossier(s), ${bilan.tags} tag(s)`,
-        `Erased: ${bilan.credentials} credential(s), ${bilan.tasks} task(s), ${bilan.folders} folder(s), ${bilan.tags} tag(s)`
+        `Effacé : ${bilan.credentials} identifiant(s), ${bilan.tasks} tâche(s), ${bilan.tags} tag(s)`,
+        `Erased: ${bilan.credentials} credential(s), ${bilan.tasks} task(s), ${bilan.tags} tag(s)`
       ), 'info', 6000);
     }
   });

@@ -1,6 +1,6 @@
 import { fromBase64, toBase64 } from '../account/accountCrypto';
 import type { AttachmentMeta } from '../account/attachmentCrypto';
-import type { CredentialItem, FolderDef, Task, UnlockedVaultData, VaultMetadata } from '../types/vault';
+import type { CredentialItem, Task, UnlockedVaultData, VaultMetadata } from '../types/vault';
 
 /**
  * Sauvegarde complète : tout ce qu'un compte possède, pour le rouvrir ailleurs.
@@ -93,8 +93,7 @@ export async function buildFullBackup(data: UnlockedVaultData, options: {
         vaults: vaults.map(({ shared: _shared, ...vault }) => vault as VaultMetadata),
         activeVaultId: kept.has(data.activeVaultId) ? data.activeVaultId : vaults[0]?.id ?? data.activeVaultId,
         credentials: withFiles,
-        tasks: data.tasks.filter(t => kept.has(t.vaultId)),
-        folders: (data.folders ?? []).filter(f => kept.has(f.vaultId))
+        tasks: data.tasks.filter(t => kept.has(t.vaultId))
       },
       files
     },
@@ -243,15 +242,6 @@ export async function applyImport(
     return { ...vault, id, name };
   });
 
-  const folderIds = new Map<string, string>();
-  const folders: FolderDef[] = (backup.data.folders ?? [])
-    .filter(f => vaultIds.has(f.vaultId))
-    .map(folder => {
-      const id = newId('folder');
-      folderIds.set(folder.id, id);
-      return { ...folder, id, vaultId: vaultIds.get(folder.vaultId)! };
-    })
-    .map(folder => ({ ...folder, ...(folder.parentId ? { parentId: folderIds.get(folder.parentId) } : {}) }));
 
   const credentialIds = new Map<string, string>();
   const credentialsSource = backup.data.credentials.filter(c => vaultIds.has(c.vaultId));
@@ -284,8 +274,7 @@ export async function applyImport(
         ...credential,
         id: credentialIds.get(credential.id)!,
         vaultId: vaultIds.get(credential.vaultId)!,
-        ...(credential.folderId ? { folderId: folderIds.get(credential.folderId) } : {}),
-        ...(credential.attachments ? { attachments } : {})
+          ...(credential.attachments ? { attachments } : {})
       });
     }
   } catch (err) {
@@ -345,7 +334,6 @@ export async function applyImport(
     data: {
       ...current,
       vaults: [...current.vaults, ...vaults],
-      folders: [...(current.folders ?? []), ...folders],
       credentials: [...credentials, ...current.credentials],
       tasks: [...tasks, ...current.tasks],
       tagDefs,
