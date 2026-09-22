@@ -4121,3 +4121,68 @@ input[type="range"]::-webkit-slider-thumb { width: 20px; height: 20px; }
   /* Les puces du générateur sont la vraie cible, pas la case qu'elles portent */
   .gen-chip { min-height: var(--tap); }
 }
+
+/* ── Icônes du menu ───────────────────────────────────────────────────────
+   Toutes les icônes ont la même épaisseur de trait et le même gabarit : les
+   libellés s'alignent, quelle que soit la largeur du dessin. */
+.nav-item-icon,
+.nav-vault-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  flex: 0 0 20px;
+  color: var(--text-secondary);
+}
+.nav-item.active .nav-item-icon,
+.nav-item.active .nav-vault-icon,
+.nav-item:hover .nav-item-icon,
+.nav-item:hover .nav-vault-icon { color: var(--text-primary); }
+.nav-item.active .nav-item-icon { color: var(--accent); }
+/* Réduite : l'icône est seule, donc un peu plus grande et bien centrée */
+@media (min-width: 901px) {
+  .sidebar-collapsed .nav-item-icon,
+  .sidebar-collapsed .nav-vault-icon { width: 22px; flex-basis: 22px; }
+  .sidebar-collapsed .nav-item-icon svg,
+  .sidebar-collapsed .nav-vault-icon svg { width: 18px; height: 18px; }
+}
+
+/* ── Lisibilité et confort au clic ────────────────────────────────────────
+   Rien sous 11 px. Au-dessus de 900 px, les petits boutons du pied du menu
+   gardent 28 px ; en dessous, la règle téléphone (44 px) prévaut. */
+.nav-section-title { font-size: 11px; }
+.vault-type-badge { font-size: 10px; }
+.section-divider { font-size: 11px; }
+.detail-content a { display: inline-flex; align-items: center; min-height: 24px; }
+
+@media (min-width: 901px) {
+  .sidebar-footer .sync-status,
+  .sidebar-footer .btn-lang-toggle,
+  .sidebar-footer .icon-btn { min-height: 28px; min-width: 28px; }
+}
+
+@media (max-width: 900px) {
+  /* Menu au doigt : tout ce qui se clique fait 44 px, libellés lisibles */
+  .sidebar .icon-btn,
+  .sidebar-footer .sync-status,
+  .sidebar-footer .btn-lang-toggle,
+  .sidebar-footer .icon-btn { min-height: var(--tap); min-width: var(--tap); }
+  .sync-label, .nav-section-title { font-size: 12px; }
+  /* Un lien dans la fiche est aussi une cible : 44 px au doigt */
+  .detail-content a { min-height: var(--tap); }
+  /* Pied du menu : l’état de synchro prend sa propre ligne plutôt que d’être tronqué */
+  .sidebar-footer > div { flex-wrap: wrap; gap: 8px; }
+  .sidebar-footer .sync-status { flex: 1 1 100%; justify-content: flex-start; }
+}
+
+/* ── Barre latérale étroite ───────────────────────────────────────────────
+   La largeur de la barre dépend de la fenêtre. Plutôt que de deviner des
+   seuils d'écran, on mesure la barre elle-même : sous 230 px, l'accessoire
+   (badge du coffre, libellé de synchro) s'efface pour laisser le nom entier. */
+.sidebar { container-type: inline-size; container-name: menu; }
+
+@container menu (max-width: 230px) {
+  .vault-type-badge { display: none; }
+  .sidebar-footer .sync-label { display: none; }
+  .sidebar-footer .sync-status { min-width: 28px; justify-content: center; }
+}
