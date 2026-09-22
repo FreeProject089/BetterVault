@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { lookup } from 'node:dns/promises';
 import { avatarInfo, avatarRoutes, DEFAULT_AVATARS } from './avatars.ts';
 import { localizeMessage, requestLocale } from './messages.ts';
 import {
@@ -1166,6 +1167,24 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
   /* ── Grappe dans l'administration ─────────────────────────────────────── */
 
   /** Un nœud est « hors ligne » quand sa dernière réplication réussie date de plus de trois cycles */
+  /*
+   * Adresse IP d'un nœud, pour la vue d'ensemble de l'administration. La
+   * résolution est asynchrone : on renvoie ce qu'on sait déjà et on met le cache
+   * à jour pour la fois suivante. Une heure de validité suffit, et une panne DNS
+   * laisse simplement l'adresse vide.
+   */
+  const ipCache = new Map<string, { ip: string | null; at: number }>();
+  const hostIp = (host: string): string | null => {
+    const known = ipCache.get(host);
+    if (known && now() - known.at < 3_600_000) return known.ip;
+    ipCache.set(host, { ip: known?.ip ?? null, at: now() });
+    void lookup(host, { family: 0 }).then(
+      result => ipCache.set(host, { ip: result.address, at: now() }),
+      () => ipCache.set(host, { ip: null, at: now() })
+    );
+    return known?.ip ?? null;
+  };
+
   const clusterView = () => {
     const snapshot = trust.snapshot();
     const interval = options.clusterIntervalMs ?? 30_000;
@@ -1183,7 +1202,17 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
             : !peer?.lastOkAt ? (peer?.lastError ? 'error' : 'unknown')
             : peer.lastError ? 'error'
             : now() - peer.lastOkAt > 3 * interval ? 'offline' : 'ok';
-          return { ...node, health, lag, lastOkAt: peer?.lastOkAt ?? null, lastError: peer?.lastError ?? null, lastErrorAt: peer?.lastErrorAt ?? null };
+          const host = (() => {
+            try {
+              return new URL(node.url).host;
+            } catch {
+              return node.url;
+            }
+          })();
+          return {
+            ...node, health, lag, host, ip: hostIp(host.split(':')[0]),
+            lastOkAt: peer?.lastOkAt ?? null, lastError: peer?.lastError ?? null, lastErrorAt: peer?.lastErrorAt ?? null
+          };
         })
       } : null,
       pendingConflicts: clusterReady() ? (db.prepare('SELECT COUNT(*) AS n FROM vault_conflicts').get() as { n: number }).n : 0

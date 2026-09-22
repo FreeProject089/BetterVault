@@ -46,16 +46,30 @@
     </section>
 
     <div id="dashboard" hidden>
-      <nav class="tabs" role="tablist">
-        <button type="button" class="tab active" data-tab="overview" data-i18n="tabOverview">Tableau de bord</button>
-        <button type="button" class="tab" data-tab="settings" data-i18n="tabSettings">Réglages</button>
-        <button type="button" class="tab" data-tab="billing" data-i18n="tabBilling">Offres</button>
-        <button type="button" class="tab" data-tab="legal" data-i18n="tabLegal">Documents légaux</button>
-        <button type="button" class="tab" data-tab="audit" data-i18n="tabAudit">Journal</button>
-        <button type="button" class="tab" data-tab="backups" data-i18n="backups">Sauvegardes</button>
+      <div class="dash">
+      <nav class="tabs" role="tablist" aria-label="Sections de l’administration">
+        <div class="tab-group">
+          <span class="tab-group-title" data-i18n="groupOverview">Aperçu</span>
+          <button type="button" class="tab active" data-tab="overview" data-i18n="tabOverview">Tableau de bord</button>
+          <button type="button" class="tab" data-tab="audit" data-i18n="tabAudit">Journal</button>
+        </div>
+        <div class="tab-group">
+          <span class="tab-group-title" data-i18n="groupConfig">Configuration</span>
+          <button type="button" class="tab" data-tab="settings" data-i18n="tabSettings">Réglages</button>
+          <button type="button" class="tab" data-tab="billing" data-i18n="tabBilling">Offres</button>
+          <button type="button" class="tab" data-tab="legal" data-i18n="tabLegal">Documents légaux</button>
+        </div>
+        <div class="tab-group">
+          <span class="tab-group-title" data-i18n="groupInfra">Infrastructure</span>
+          <button type="button" class="tab" data-tab="backups" data-i18n="backups">Sauvegardes</button>
           <button type="button" class="tab" data-tab="cluster" data-i18n="tabCluster">Grappe</button>
-        <button type="button" class="tab" data-tab="admins" data-i18n="tabAdmins">Administrateurs</button>
+        </div>
+        <div class="tab-group">
+          <span class="tab-group-title" data-i18n="groupAccess">Accès</span>
+          <button type="button" class="tab" data-tab="admins" data-i18n="tabAdmins">Administrateurs</button>
+        </div>
       </nav>
+      <div class="dash-main">
 
       <section data-panel="overview">
         <div class="panel-head">
@@ -271,6 +285,8 @@
           </div>
         </form>
       </dialog>
+      </div>
+      </div>
     </div>
   </main>
   <script type="module" src="/admin/admin.js"></script>

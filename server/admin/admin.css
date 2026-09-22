@@ -51,7 +51,7 @@ body {
 
 [hidden] { display: none !important; }
 
-.shell { max-width: 980px; margin: 0 auto; padding: 24px 16px 48px; }
+.shell { max-width: 1220px; margin: 0 auto; padding: 24px 16px 48px; }
 
 .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; }
@@ -122,10 +122,25 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 0;
 .actions { display: flex; align-items: center; justify-content: flex-end; gap: 16px; }
 .actions .status { margin: 0; }
 
-.tabs { display: flex; gap: 4px; margin-bottom: 16px; padding: 4px; overflow-x: auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
-.tab { flex: 0 0 auto; padding: 7px 14px; border: 0; border-radius: 7px; background: none; color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; }
-.tab:hover { color: var(--text); }
+/* ── Navigation ───────────────────────────────────────────────────────────
+   Écran large : un menu en colonne, sections nommées. Écran étroit : une
+   rangée de pastilles qui défile, les noms de sections en moins. */
+.dash { display: grid; gap: 20px; align-items: start; }
+.tabs { display: flex; gap: 4px; padding: 4px; overflow-x: auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab-group { display: flex; gap: 4px; }
+.tab-group-title { display: none; }
+.tab { flex: 0 0 auto; min-height: 36px; padding: 7px 14px; border: 0; border-radius: 7px; background: none; color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; text-align: left; }
+.tab:hover { color: var(--text); background: var(--field); }
 .tab.active { background: var(--accent); color: var(--accent-text); }
+
+@media (min-width: 1000px) {
+  .dash { grid-template-columns: 216px minmax(0, 1fr); }
+  .tabs { position: sticky; top: 16px; flex-direction: column; gap: 14px; padding: 12px 10px; overflow: visible; }
+  .tab-group { flex-direction: column; gap: 2px; }
+  .tab-group-title { display: block; padding: 0 8px 4px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+  .tab { width: 100%; }
+}
 
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .panel-head h2, .panel-head .hint { margin: 0; }
@@ -281,3 +296,15 @@ code.fp.big { font-size: 18px; }
 }
 .top-actions { display: flex; align-items: center; gap: 8px; }
 .theme-toggle { min-width: 40px; min-height: 36px; }
+/* Carte de la grappe */
+.map-wrap { overflow-x: auto; }
+.cluster-map { width: 100%; min-width: 520px; height: auto; }
+.cluster-map .map-zone { fill: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.cluster-map .map-name { fill: var(--text); font-size: 13px; font-weight: 600; }
+.cluster-map .map-meta { fill: var(--muted); font-size: 11px; }
+.cluster-map .map-lag { fill: #d29922; font-size: 11px; }
+.cluster-map .map-node:focus { outline: none; }
+.cluster-map .map-node:focus circle:first-of-type { stroke-width: 4; }
+.map-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 12px; color: var(--muted); font-size: 12px; }
+.map-key { display: inline-flex; align-items: center; gap: 6px; }
+.map-dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--muted); }

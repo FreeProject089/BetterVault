@@ -15,6 +15,10 @@ const TEXT = {
   wrongCredentials: ['Email, mot de passe ou code incorrect', 'Wrong email, password or code'],
   tabAdmins: ['Administrateurs', 'Administrators'],
   tabCluster: ['Grappe', 'Cluster'],
+  groupOverview: ['Aperçu', 'Overview'],
+  groupConfig: ['Configuration', 'Configuration'],
+  groupInfra: ['Infrastructure', 'Infrastructure'],
+  groupAccess: ['Accès', 'Access'],
   adminsTitle: ['Administrateurs', 'Administrators'],
   adminsHint: ['Lecteur : consulter. Opérateur : lancer synchronisations, sauvegardes et tests. Propriétaire : tout, dont réglages, nœuds, secrets et restaurations.', 'Viewer: read only. Operator: run syncs, backups and tests. Owner: everything, including settings, nodes, secrets and restores.'],
   roleViewer: ['Lecteur', 'Viewer'],
@@ -935,6 +939,92 @@ const readNodeFields = prefix => ({
   url: $(`${prefix}-url`).value.trim()
 });
 
+/* ── Carte de la grappe ──────────────────────────────────────────────────
+   Une rangée par zone : les nœuds y sont posés côte à côte, reliés entre eux
+   par les liens de réplication (la réplication n'a lieu qu'à l'intérieur d'une
+   zone). La couleur dit l'état, l'épaisseur du lien dit s'il sert. */
+
+const MAP_TONE = {
+  self: 'var(--accent)',
+  ok: 'var(--ok)',
+  late: 'var(--accent)',
+  offline: 'var(--danger)',
+  error: 'var(--danger)',
+  unknown: '#d29922',
+  disabled: '#d29922',
+  revoked: 'var(--danger)',
+  'other-zone': 'var(--muted)'
+};
+
+function clusterMap(view) {
+  const nodes = view.cluster.nodes;
+  const zones = [...new Set(nodes.map(n => n.zone))].sort();
+  const width = 640;
+  const rowHeight = 132;
+  const height = zones.length * rowHeight + 16;
+
+  const rows = zones.map((zone, index) => {
+    const inZone = nodes.filter(n => n.zone === zone);
+    const y = index * rowHeight + 70;
+    const step = inZone.length > 1 ? Math.min(200, (width - 140) / (inZone.length - 1)) : 0;
+    const startX = width / 2 - (step * (inZone.length - 1)) / 2;
+    const placed = inZone.map((node, i) => ({ node, x: startX + i * step, y }));
+
+    // Liens : chaque couple de nœuds actifs de la zone se réplique
+    const links = [];
+    for (let a = 0; a < placed.length; a++) {
+      for (let b = a + 1; b < placed.length; b++) {
+        const live = placed[a].node.status === 'active' && placed[b].node.status === 'active';
+        const touche = placed[a].node.self || placed[b].node.self;
+        const casse = [placed[a].node, placed[b].node].some(n => n.health === 'offline' || n.health === 'error');
+        links.push(`<line x1="${placed[a].x}" y1="${placed[a].y}" x2="${placed[b].x}" y2="${placed[b].y}"
+          stroke="${casse ? 'var(--danger)' : live ? 'var(--ok)' : 'var(--border)'}"
+          stroke-width="${touche ? 2 : 1}" stroke-dasharray="${live ? '' : '4 4'}" opacity="${live ? 0.75 : 0.4}"></line>`);
+      }
+    }
+
+    const marks = placed.map(({ node, x, y: ny }) => {
+      const tone = MAP_TONE[node.self ? 'self' : node.health] ?? 'var(--muted)';
+      const retard = node.lag ? `${node.lag}` : '';
+      return `<g class="map-node" tabindex="0" role="img"
+        aria-label="${escapeHtml(`${node.name} · ${node.region} · ${node.host ?? ''} ${node.ip ? `(${node.ip})` : ''}`)}">
+        <title>${escapeHtml([node.name, node.region, node.host, node.ip, node.lastError].filter(Boolean).join(' · '))}</title>
+        <circle cx="${x}" cy="${ny}" r="21" fill="var(--card)" stroke="${tone}" stroke-width="${node.self ? 3 : 2}"></circle>
+        ${node.self ? `<circle cx="${x}" cy="${ny}" r="7" fill="${tone}"></circle>` : ''}
+        ${node.status === 'revoked' ? `<path d="M${x - 9} ${ny - 9} L${x + 9} ${ny + 9} M${x + 9} ${ny - 9} L${x - 9} ${ny + 9}" stroke="var(--danger)" stroke-width="2"></path>` : ''}
+        <text x="${x}" y="${ny + 40}" text-anchor="middle" class="map-name">${escapeHtml(node.name)}</text>
+        <text x="${x}" y="${ny + 55}" text-anchor="middle" class="map-meta">${escapeHtml(node.ip || node.host || node.region)}</text>
+        ${retard ? `<text x="${x + 24}" y="${ny - 18}" class="map-lag">+${escapeHtml(retard)}</text>` : ''}
+      </g>`;
+    }).join('');
+
+    return `
+      <text x="12" y="${y - 34}" class="map-zone">${escapeHtml(zone)}${zone === view.self.zone ? ` · ${fr ? 'ce nœud' : 'this node'}` : ''}</text>
+      <line x1="12" y1="${y - 26}" x2="${width - 12}" y2="${y - 26}" stroke="var(--border)" stroke-width="1" opacity="0.6"></line>
+      ${links.join('')}${marks}`;
+  }).join('');
+
+  const legende = [
+    ['self', fr ? 'ce nœud' : 'this node'],
+    ['ok', fr ? 'synchronisé' : 'in sync'],
+    ['offline', fr ? 'hors ligne ou en erreur' : 'offline or failing'],
+    ['disabled', fr ? 'désactivé' : 'disabled'],
+    ['revoked', fr ? 'révoqué' : 'revoked']
+  ].map(([key, label]) => `<span class="map-key"><span class="map-dot" style="border-color:${MAP_TONE[key]}"></span>${label}</span>`).join('');
+
+  return `
+    <section class="card">
+      <div class="panel-head">
+        <h2>${fr ? 'Vue d’ensemble' : 'Overview'}</h2>
+        <span class="hint">${fr ? 'La réplication reste à l’intérieur d’une zone' : 'Replication stays inside a zone'}</span>
+      </div>
+      <div class="map-wrap">
+        <svg viewBox="0 0 ${width} ${height}" class="cluster-map" role="group" aria-label="${fr ? 'Carte de la grappe' : 'Cluster map'}">${rows}</svg>
+      </div>
+      <div class="map-legend">${legende}</div>
+    </section>`;
+}
+
 function renderClusterPanel(view) {
   const host = $('cluster-panel');
   const cluster = view.cluster;
@@ -1005,7 +1095,7 @@ function renderClusterPanel(view) {
     <li class="node-row" data-node="${escapeHtml(node.id)}">
       <div class="node-main">
         <div class="node-title"><strong>${escapeHtml(node.name)}</strong> ${healthBadge(node.self ? 'self' : node.health)}</div>
-        <div class="hint">${escapeHtml(node.region)} · ${escapeHtml(node.url)}</div>
+        <div class="hint">${escapeHtml(node.region)} · ${escapeHtml(node.url)}${node.ip ? ` · ${escapeHtml(node.ip)}` : ''}</div>
         <div class="hint">${node.self ? (cluster.isRoot ? (fr ? 'Détient la clé racine' : 'Holds the root key') : '')
           : node.zone === view.self.zone && node.status === 'active'
             ? `${fr ? 'Dernière synchro' : 'Last sync'} : ${when(node.lastOkAt)}${node.lag ? ` · ${fr ? 'retard' : 'lag'} : ${node.lag}` : ''}`
@@ -1023,6 +1113,7 @@ function renderClusterPanel(view) {
     </li>`;
 
   host.innerHTML = `
+    ${clusterMap(view)}
     <section class="card">
       <div class="panel-head">
         <h2>${escapeHtml(cluster.name)}</h2>
