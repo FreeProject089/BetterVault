@@ -101,7 +101,7 @@
           </section>
           <section class="card">
             <h2 data-i18n="downloadTitle">Copie chiffrée de la base</h2>
-            <p class="hint" data-i18n="downloadHint">Base complète compressée puis chiffrée (AES-256-GCM, clé dérivée par scrypt). Les coffres restent illisibles sans les mots de passe des utilisateurs. Restauration : node server/tools/decrypt-backup.ts.</p>
+            <p class="hint"><span data-i18n="downloadHint">Base compressée puis chiffrée (AES-256-GCM). Les coffres restent illisibles sans les mots de passe.</span> <a class="aide" href="/docs/deploiement/sauvegardes" target="_blank" rel="noopener" data-i18n="learnMore">En savoir plus</a></p>
             <label for="download-passphrase" data-i18n="passphrase">Phrase de chiffrement (12 caractères minimum)</label>
             <input id="download-passphrase" type="password" autocomplete="new-password" minlength="12">
             <div class="row test"><button class="btn" type="button" id="download-backup" data-i18n="download">Télécharger</button></div>
@@ -174,7 +174,7 @@
 
           <section class="card wide">
             <h2 data-i18n="backups">Sauvegardes</h2>
-            <p class="hint" data-i18n="backupHint">Copie de la base et des pièces jointes vers un stockage S3 (MinIO fourni avec Docker, ou AWS, Backblaze, Scaleway…). Les anciennes copies sont supprimées après la durée de conservation.</p>
+            <p class="hint"><span data-i18n="backupHint">Copie chiffrée de la base et des fichiers vers un stockage S3.</span> <a class="aide" href="/docs/deploiement/sauvegardes" target="_blank" rel="noopener" data-i18n="learnMore">En savoir plus</a></p>
             <div class="row">
               <label class="check"><input id="backupEnabled" type="checkbox"> <span data-i18n="backupEnabled">Sauvegardes automatiques</span></label>
             </div>
@@ -210,7 +210,7 @@
         <div class="grid" data-panel="legal" hidden>
           <section class="card wide">
             <h2 data-i18n="legalTitle">Identité de l’hébergeur</h2>
-            <p class="hint" data-i18n="legalHint">Ces informations complètent les modèles publiés sur /legal (conditions, confidentialité, DPA, mesures de sécurité, sous-traitants). Relisez-les : vous restez responsable de leur contenu.</p>
+            <p class="hint"><span data-i18n="legalHint">Ces informations complètent les documents publiés sur /legal. Vous restez responsable de leur contenu.</span> <a class="aide" href="/docs/deploiement/documents-legaux" target="_blank" rel="noopener" data-i18n="learnMore">En savoir plus</a></p>
             <label class="check"><input id="legalEnabled" type="checkbox"> <span data-i18n="legalEnabled">Publier des documents légaux sur ce serveur</span></label>
             <p class="hint" data-i18n="legalDisabledHint">Décoché, /legal répond 404 et l’application ne demande plus d’accepter de conditions. À réserver à un serveur personnel, sans autre utilisateur.</p>
             <div class="limits" id="legal-fields"></div>

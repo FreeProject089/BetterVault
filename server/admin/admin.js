@@ -73,7 +73,8 @@ const TEXT = {
   version: ['Version du serveur', 'Server version'],
   wrongToken: ['Jeton incorrect', 'Wrong token'],
   backups: ['Sauvegardes', 'Backups'],
-  backupHint: ['Copie de la base et des pièces jointes vers un stockage S3 (MinIO fourni avec Docker, ou AWS, Backblaze, Scaleway…). Les anciennes copies sont supprimées après la durée de conservation.', 'Copies the database and attachments to S3 storage (MinIO bundled with Docker, or AWS, Backblaze, Scaleway…). Old copies are deleted after the retention period.'],
+  backupHint: ['Copie chiffrée de la base et des fichiers vers un stockage S3.', 'Encrypted copy of the database and files to S3-compatible storage.'],
+  learnMore: ['En savoir plus', 'Learn more'],
   backupEnabled: ['Sauvegardes automatiques', 'Automatic backups'],
   backupInterval: ['Toutes les (heures)', 'Every (hours)'],
   backupRetention: ['Conservation (jours)', 'Retention (days)'],
@@ -109,7 +110,7 @@ const TEXT = {
   clusterTitle: ['Grappe de serveurs', 'Server cluster'],
   clusterSync: ['Synchroniser', 'Sync now'],
   downloadTitle: ['Copie chiffrée de la base', 'Encrypted database copy'],
-  downloadHint: ['Base complète compressée puis chiffrée (AES-256-GCM, clé dérivée par scrypt). Les coffres restent illisibles sans les mots de passe des utilisateurs. Restauration : node server/tools/decrypt-backup.ts.', 'Full database, compressed then encrypted (AES-256-GCM, scrypt-derived key). Vaults stay unreadable without users’ passwords. Restore with: node server/tools/decrypt-backup.ts.'],
+  downloadHint: ['Base compressée puis chiffrée (AES-256-GCM). Les coffres restent illisibles sans les mots de passe.', 'Database compressed then encrypted (AES-256-GCM). Vaults stay unreadable without the users’ passwords.'],
   passphrase: ['Phrase de chiffrement (12 caractères minimum)', 'Encryption passphrase (12 characters minimum)'],
   download: ['Télécharger', 'Download'],
   preparing: ['Préparation…', 'Preparing…'],
@@ -127,7 +128,7 @@ const TEXT = {
   addDuration: ['Ajouter une durée', 'Add a duration'],
   durationsHint: ['Une durée par tarif Stripe : mensuel, annuel… Le compte choisit au moment de payer.', 'One duration per Stripe price: monthly, yearly… The account picks one at checkout.'],
   legalTitle: ['Identité de l’hébergeur', 'Operator identity'],
-  legalHint: ['Ces informations complètent les modèles publiés sur /legal (conditions, confidentialité, DPA, mesures de sécurité, sous-traitants). Relisez-les : vous restez responsable de leur contenu.', 'This information fills the templates published at /legal (terms, privacy, DPA, security measures, subprocessors). Review them: you remain responsible for their content.'],
+  legalHint: ['Ces informations complètent les documents publiés sur /legal. Vous restez responsable de leur contenu.', 'This information fills in the documents published on /legal. You remain responsible for their content.'],
   legalEnabled: ['Publier des documents légaux sur ce serveur', 'Publish legal documents on this server'],
   legalDisabledHint: ['Décoché, /legal répond 404 et l’application ne demande plus d’accepter de conditions. À réserver à un serveur personnel, sans autre utilisateur.', 'Unchecked, /legal returns 404 and the app no longer asks anyone to accept terms. For a personal server with no other users.'],
   auditTitle: ['Journal de sécurité', 'Security log'],
@@ -881,6 +882,9 @@ const healthBadge = health => {
   return `<span class="badge ${tone}">${fr ? f : e}</span>`;
 };
 const when = ms => (ms ? new Date(ms).toLocaleString(locale) : '—');
+/** Lien « En savoir plus » vers la documentation servie par ce serveur */
+const aide = page => `<a class="aide" href="/docs/${page}" target="_blank" rel="noopener">${fr ? 'En savoir plus' : 'Learn more'}</a>`;
+
 
 /** Résumé du tableau de bord : ce qui demande une intervention se voit d'un coup d'œil */
 function renderClusterSummary(view) {
@@ -1044,8 +1048,8 @@ function renderClusterPanel(view) {
       <section class="card">
         <h2>${fr ? 'Ce serveur fonctionne seul' : 'This server runs on its own'}</h2>
         <p class="hint">${fr
-          ? 'Une grappe relie plusieurs serveurs de VOTRE infrastructure (par exemple EU-W et EU-E) : chacun garde une copie chiffrée des comptes de sa zone, et prend le relais si un autre tombe. Aucun serveur d’un autre opérateur ne peut y entrer.'
-          : 'A cluster links several servers of YOUR infrastructure (e.g. EU-W and EU-E): each keeps an encrypted copy of its zone’s accounts and takes over if another fails. No server run by someone else can join.'}</p>
+          ? 'Plusieurs serveurs à vous, qui se répliquent par zone et prennent le relais l’un de l’autre.'
+          : 'Several servers of yours, replicating within a zone and taking over for each other.'} ${aide('deploiement/grappe')}</p>
         ${selfLine}
       </section>
       ${manage ? `
@@ -1401,8 +1405,8 @@ function renderBackups(view) {
     <section class="card">
       <h2>${fr ? 'Restaurer' : 'Restore'}</h2>
       <p class="hint">${fr
-        ? 'Choisissez une copie : un aperçu montre ce qu’elle contient et ce qui est plus récent aujourd’hui. Rien n’est modifié avant votre confirmation, et l’état actuel est d’abord mis de côté.'
-        : 'Pick a copy: a preview shows what it holds and what is newer today. Nothing changes before you confirm, and the current state is set aside first.'}</p>
+        ? 'Un aperçu montre ce que contient la copie. Rien ne change avant votre confirmation.'
+        : 'A preview shows what the copy holds. Nothing changes before you confirm.'} ${aide('deploiement/sauvegardes')}</p>
       ${view.destinations.every(d => d.status === 'revoked') ? `<p class="hint">${fr ? 'Ajoutez d’abord une destination.' : 'Add a destination first.'}</p>` : `<div class="grid-2">
         <div><label for="restore-dst">${fr ? 'Destination' : 'Destination'}</label>
           <select id="restore-dst">${view.destinations.filter(d => d.status !== 'revoked').map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.name)}</option>`).join('')}</select></div>

@@ -128,9 +128,11 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 0;
 .dash { display: grid; gap: 20px; align-items: start; }
 .tabs { display: flex; gap: 4px; padding: 4px; overflow-x: auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
 .tabs::-webkit-scrollbar { display: none; }
-.tab-group { display: flex; gap: 4px; }
+/* flex: 0 0 auto — sans quoi les groupes se compriment et leurs boutons
+   débordent les uns sur les autres dans la rangée qui défile. */
+.tab-group { display: flex; gap: 4px; flex: 0 0 auto; }
 .tab-group-title { display: none; }
-.tab { flex: 0 0 auto; min-height: 36px; padding: 7px 14px; border: 0; border-radius: 7px; background: none; color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; text-align: left; }
+.tab { flex: 0 0 auto; min-height: 36px; padding: 7px 14px; border: 0; border-radius: 7px; background: none; color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; text-align: left; white-space: nowrap; }
 .tab:hover { color: var(--text); background: var(--field); }
 .tab.active { background: var(--accent); color: var(--accent-text); }
 
@@ -322,3 +324,7 @@ code.fp.big { font-size: 18px; }
   .row.test { flex-direction: column; align-items: stretch; }
   .top div, .top-actions { flex-wrap: wrap; }
 }
+
+/* Lien « En savoir plus » : discret, à la suite d'une explication courte */
+.aide { color: var(--accent); text-decoration: none; white-space: nowrap; font-weight: 600; }
+.aide:hover { text-decoration: underline; }
