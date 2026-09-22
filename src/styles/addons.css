@@ -3917,7 +3917,7 @@ button.shortcut-key:hover { border-color: var(--accent); }
   .sidebar-collapsed .workspace-badge { justify-content: center; }
   .sidebar-collapsed .sidebar-collapse-btn svg { transform: scaleX(-1); }
 
-  /* Tout ce qui est textuel disparaît : il ne reste que les icônes */
+  /* Décor et compteurs disparaissent : il ne reste que les icônes */
   .sidebar-collapsed .workspace-title,
   .sidebar-collapsed .nav-section-title,
   .sidebar-collapsed .nav-section-header,
@@ -3925,9 +3925,24 @@ button.shortcut-key:hover { border-color: var(--accent); }
   .sidebar-collapsed .nav-empty,
   .sidebar-collapsed .vault-type-badge,
   .sidebar-collapsed .nav-item-edit,
-  .sidebar-collapsed .nav-item-left > span:not(.nav-item-icon):not(.nav-vault-icon),
   .sidebar-collapsed .sidebar-nav > div > .icon-btn,
   .sidebar-collapsed .sync-label { display: none !important; }
+
+  /*
+   * Le nom de l'entrée, lui, reste dans la page : « display: none » le
+   * retirerait de l'arbre d'accessibilité et un lecteur d'écran n'annoncerait
+   * plus rien. Il est donc sorti de l'œil, pas de la machine.
+   */
+  .sidebar-collapsed .nav-item-left > span:not(.nav-item-icon):not(.nav-vault-icon) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    clip-path: inset(50%);
+  }
 
   .sidebar-collapsed .sidebar-nav { padding: 10px 8px; gap: 6px; display: flex; flex-direction: column; }
   /* Un filet sépare coffres, catégories, tags et outils */
