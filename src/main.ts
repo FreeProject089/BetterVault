@@ -666,6 +666,22 @@ class AppController {
       if (item && !item.title) item.title = item.textContent?.replace(/\s+/g, ' ').trim() ?? '';
     });
 
+    // Recto / verso d'une pièce d'identité, depuis la fiche
+    document.addEventListener('click', async event => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-id-scan]');
+      if (!button) return;
+      const meta = vaultStore.getData().credentials.find(c => c.id === this.selectedItemId)?.attachments?.find(a => a.id === button.dataset.idScan);
+      if (!meta) return;
+      button.disabled = true;
+      try {
+        this.openAttachmentPreview(meta, await this.loadAttachment(meta));
+      } catch (err) {
+        this.showToast(accountErrorMessage(err), 'error');
+      } finally {
+        button.disabled = false;
+      }
+    });
+
     document.getElementById('btn-open-templates')?.addEventListener('click', () => {
       this.openTemplatesModal();
     });
@@ -2488,6 +2504,15 @@ class AppController {
                 <input class="form-input mono-field" id="field-id-doc" type="password" maxlength="60" autocomplete="off" value="${attr(existing?.identity?.docNumber)}">
               </div>
             </div>
+            <div class="id-scans" role="group" aria-label="${tr('Scan de la pièce', 'Document scan')}">
+              ${(['front', 'back'] as const).map(side => `
+                <label class="id-scan" data-scan="${side}" tabindex="0">
+                  <input type="file" accept="image/*,application/pdf" capture="environment" hidden data-scan-input="${side}">
+                  <span class="id-scan-title">${side === 'front' ? tr('Recto', 'Front') : tr('Verso', 'Back')}</span>
+                  <span class="id-scan-state" data-scan-state="${side}"></span>
+                </label>`).join('')}
+            </div>
+            <p class="field-hint">${tr('Photo ou PDF, chiffré sur cet appareil avant l’envoi.', 'Photo or PDF, encrypted on this device before upload.')}</p>
             <div class="form-row">
               <div class="form-field">
                 <label class="form-label" for="field-id-email">Email</label>
@@ -2881,9 +2906,58 @@ class AppController {
       renderPendingFiles();
     });
 
+    /* Recto et verso d'une pièce d'identité : un fichier par face, remplacé si on en choisit un autre */
+    const pendingSides: Partial<Record<'front' | 'back', File>> = {};
+    const paintScans = () => {
+      for (const side of ['front', 'back'] as const) {
+        const state = box.querySelector<HTMLElement>(`[data-scan-state="${side}"]`);
+        if (!state) continue;
+        const pending = pendingSides[side];
+        const saved = existing?.attachments?.find(a => a.side === side);
+        state.textContent = pending ? pending.name : saved ? saved.name : tr('Photographier ou choisir', 'Take a photo or choose');
+        state.closest('.id-scan')?.classList.toggle('filled', !!(pending || saved));
+      }
+    };
+    box.querySelectorAll<HTMLInputElement>('[data-scan-input]').forEach(input => input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      input.value = '';
+      if (!file) return;
+      const maxBytes = this.attachmentSizeLimit(existing?.vaultId ?? vaultStore.getData().activeVaultId);
+      if (file.size > maxBytes) return this.showToast(this.attachmentTooLargeMessage(file.name, maxBytes), 'error', 5000);
+      pendingSides[input.dataset.scanInput as 'front' | 'back'] = file;
+      box.querySelectorAll<HTMLElement>('.id-scan').forEach(slot => slot.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      slot.querySelector<HTMLInputElement>('input')?.click();
+    }));
+    paintScans();
+    }));
+    box.querySelectorAll<HTMLElement>('.id-scan').forEach(slot => slot.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      slot.querySelector<HTMLInputElement>('input')?.click();
+    }));
+    paintScans();
+
     /** Envoi des fichiers en attente, une fois l'identifiant enregistré */
     const uploadPendingFiles = async (credentialId: string, vaultId: string) => {
-      if (!pendingFiles.length) return;
+      for (const side of ['front', 'back'] as const) {
+        const file = pendingSides[side];
+        if (!file || itemType !== 'identity') continue;
+        try {
+          const meta = { ...(await this.storeAttachment(file, vaultId)), side };
+          const current = vaultStore.getData().credentials.find(c => c.id === credentialId);
+          const previous = current?.attachments?.find(a => a.side === side);
+          vaultStore.updateCredential(credentialId, { attachments: [...(current?.attachments ?? []).filter(a => a.side !== side), meta] });
+          if (previous) await this.removeAttachment(previous).catch(() => undefined);
+        } catch (err) {
+          this.showToast(`${file.name} : ${accountErrorMessage(err)}`, 'error');
+        }
+      }
+      if (!pendingFiles.length) {
+        if (this.selectedItemId === credentialId) this.renderDetail(credentialId);
+        return;
+      }
       for (const file of pendingFiles) {
         try {
           const meta = await this.storeAttachment(file, vaultId);
@@ -6729,6 +6803,18 @@ class AppController {
   }
 
   /** Pastille rappelant le type de l'élément */
+  /** Recto et verso d'une pièce d'identité : ouverts à la demande, déchiffrés sur l'appareil */
+  private identityScans(cred: CredentialItem): string {
+    const scans = (['front', 'back'] as const)
+      .map(side => ({ side, meta: cred.attachments?.find(a => a.side === side) }))
+      .filter(s => s.meta);
+    if (!scans.length) return '';
+    return `<div class="id-scan-buttons">${scans.map(({ side, meta }) => `
+      <button type="button" class="btn-primary" data-id-scan="${this.escapeHtml(meta!.id)}">
+        ${side === 'front' ? this.tr('Voir le recto', 'View front') : this.tr('Voir le verso', 'View back')}
+      </button>`).join('')}</div>`;
+  }
+
   private typeBadge(type: ItemType, templateId?: string): string {
     const info = ITEM_TYPE_INFO[type];
     const custom = templateId ? vaultStore.getTemplates().find(t => t.id === templateId) : undefined;
@@ -6791,7 +6877,8 @@ class AppController {
         this.detailField(tr('Numéro de pièce', 'Document number'), id.docNumber, { secret: true, mono: true }),
         this.detailField('Email', id.email),
         this.detailField(tr('Téléphone', 'Phone'), id.phone),
-        this.detailField(tr('Adresse', 'Address'), [id.address, place, id.country].filter(Boolean).join(', '))
+        this.detailField(tr('Adresse', 'Address'), [id.address, place, id.country].filter(Boolean).join(', ')),
+        this.identityScans(cred)
       ].join('');
     }
 

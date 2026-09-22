@@ -24,6 +24,8 @@ export interface AttachmentMeta {
   key: string;
   /** Contenu chiffré (base64) quand le fichier est gardé dans le coffre au lieu du serveur */
   data?: string;
+  /** Face d'une pièce d'identité scannée (recto ou verso) */
+  side?: 'front' | 'back';
   createdAt: number;
 }
 
@@ -89,6 +91,7 @@ export function normalizeAttachments(input: unknown): AttachmentMeta[] | undefin
     key: a.key,
     // Seul du base64 est accepté : un import ne peut pas glisser autre chose dans le coffre
     ...(typeof a.data === 'string' && /^[A-Za-z0-9+/=]*$/.test(a.data) ? { data: a.data } : {}),
+    ...(a.side === 'front' || a.side === 'back' ? { side: a.side } : {}),
     createdAt: Number(a.createdAt) || Date.now()
   }));
   return list.length ? list : undefined;

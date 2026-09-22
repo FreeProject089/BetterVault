@@ -100,3 +100,15 @@ describe('Enregistrement d’un compte synchronisé', () => {
     expect(personal.trash).toHaveLength(1);
   });
 });
+
+describe('Pièce d’identité : recto et verso', () => {
+  it('garde la face d’un fichier et ignore une valeur inconnue', async () => {
+    const { normalizeAttachments } = await import('../src/account/attachmentCrypto');
+    const out = normalizeAttachments([
+      { id: 'att-recto0001', name: 'recto.jpg', size: 10, type: 'image/jpeg', key: 'k', side: 'front', createdAt: 1 },
+      { id: 'att-autre0001', name: 'x.jpg', size: 10, type: 'image/jpeg', key: 'k', side: '<img onerror=alert(1)>', createdAt: 1 }
+    ])!;
+    expect(out[0].side).toBe('front');
+    expect('side' in out[1]).toBe(false);
+  });
+});

@@ -4013,3 +4013,12 @@ body.dragging-item .folder-breadcrumb button { outline: 1px dashed var(--border-
   /* Le menu du téléphone glisse déjà : pas de bouton de réduction ici */
   .sidebar-collapse-btn { display: none !important; }
 }
+
+/* Pièce d'identité : recto et verso */
+.id-scans { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
+.id-scan { display: flex; flex-direction: column; justify-content: center; gap: 4px; min-height: 76px; padding: 10px 12px; border: 1px dashed var(--border-subtle); border-radius: var(--radius-md); cursor: pointer; }
+.id-scan:hover, .id-scan:focus-within { border-color: var(--accent); }
+.id-scan.filled { border-style: solid; }
+.id-scan-title { font-size: 12px; font-weight: 600; }
+.id-scan-state { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.id-scan-buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
