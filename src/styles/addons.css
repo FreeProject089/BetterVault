@@ -4178,7 +4178,12 @@ input[type="range"]::-webkit-slider-thumb { width: 20px; height: 20px; }
 /* ── Barre latérale étroite ───────────────────────────────────────────────
    La largeur de la barre dépend de la fenêtre. Plutôt que de deviner des
    seuils d'écran, on mesure la barre elle-même : sous 230 px, l'accessoire
-   (badge du coffre, libellé de synchro) s'efface pour laisser le nom entier. */
+   (badge du coffre, libellé de synchro) s'efface pour laisser le nom entier.
+
+   Attention : « container-type » crée un contexte d'empilement. Un menu ou une
+   bulle en « position: fixed » monté À L'INTÉRIEUR de la barre s'y retrouverait
+   enfermé, donc sous le voile du menu mobile. Les fenêtres, les bulles et les
+   notifications se montent sur « document.body » : gardez-le ainsi. */
 .sidebar { container-type: inline-size; container-name: menu; }
 
 @container menu (max-width: 230px) {

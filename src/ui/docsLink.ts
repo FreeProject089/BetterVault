@@ -15,8 +15,14 @@ export function docsUrl(page: string): string | null {
   if (!PAGE.test(page)) return null;
   const serveur = accountService.getAccount()?.serverUrl;
   if (serveur) return `${serveur.replace(/\/+$/, '')}/docs/${page}`;
-  // Application servie par un serveur BetterVault : le chemin relatif suffit
-  return globalThis.location?.protocol?.startsWith('http') ? `/docs/${page}` : null;
+  /*
+   * Application servie par un serveur BetterVault : le chemin relatif suffit.
+   * La webview de bureau sert aussi du http (tauri.localhost) mais n'embarque
+   * pas la documentation : sans compte synchronisé, on n'affiche pas de lien.
+   */
+  const hote = globalThis.location?.hostname ?? '';
+  const surServeur = globalThis.location?.protocol?.startsWith('http') && !hote.endsWith('tauri.localhost') && !('__TAURI__' in globalThis);
+  return surServeur ? `/docs/${page}` : null;
 }
 
 /** Lien prêt à insérer, ou chaîne vide s'il n'y a pas de documentation joignable */

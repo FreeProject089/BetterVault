@@ -83,7 +83,7 @@ export function renderMarkdown(markdown: string): string {
     return `\n@@BLOC${blocks.length - 1}@@\n`;
   });
 
-  return markdownToHtml(text).replace(/<p>@@BLOC(\d+)@@<\/p>/g, (_, i: string) => blocks[Number(i)]);
+  return markdownToHtml(text).replace(/<p>@@BLOC(\d+)@@<\/p>/g, (entier, i: string) => blocks[Number(i)] ?? entier);
 }
 
 export interface DocsContext {

@@ -99,7 +99,7 @@ function inline(text: string): string {
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/_([^_]+)_/g, '<em>$1</em>')
-    .replace(/\[([^\]]+)\]\(((?:https?:\/\/|\/|mailto:)[^)\s]+)\)/g, '<a href="$2">$1</a>');
+    .replace(/\[([^\]]+)\]\(((?:https?:\/\/|\/(?!\/)|mailto:)[^)\s]+)\)/g, '<a href="$2">$1</a>');
 }
 
 /** Markdown restreint (titres, listes, tableaux, paragraphes) : suffisant pour les modèles, sans HTML brut */
