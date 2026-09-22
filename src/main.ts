@@ -1,9 +1,8 @@
 import { randomId, vaultStore } from './store/vaultStore';
-import type { CredentialItem, Task } from './types/vault';
+import type { CredentialItem } from './types/vault';
 import { extractDomain, getServiceIconSvg } from './icons/serviceIcons';
 import { renderItemIcon, type ItemIcon } from './icons/iconLibrary';
 import { generateTOTP } from './crypto/totpEngine';
-import { calculatePasswordEntropy } from './crypto/vaultCrypto';
 import { downloadExportFile } from './import_export/importEngine';
 import { AccountService, type SyncStatus } from './account/accountService';
 import { SharedReadOnlyError, SharedVaultManager } from './account/sharedVaults';
@@ -13,10 +12,9 @@ import { fromBase64, toBase64 } from './account/accountCrypto';
 import { createDeviceStorage } from './platform/storage';
 import { isTauri, openExternal } from './platform/tauriBridge';
 import type { UnlockedVaultData } from './types/vault';
-import { EisenhowerQuadrant, describeRecurrence, getDependents, getDueReminders, getEisenhowerQuadrant, getOpenBlockers, planTaskCompletion } from './tasks/taskEngine';
+import { getDueReminders } from './tasks/taskEngine';
 import { accountErrorMessage, mountAuthScreen } from './ui/authScreen';
 import { showToast as pushToast } from './ui/toast';
-import { expiryInfo, renderExpiryBadge } from './ui/expiry';
 import { printRecoveryKey, recoveryKeyFile } from './ui/recoveryKey';
 import { secretGridHtml } from './ui/secretDisplay';
 import { translateError } from './i18n/errorMessages';
@@ -29,6 +27,8 @@ import { openEraseModal } from './ui/eraseModal';
 import { openVaultModal } from './ui/vaultModal';
 import { mountGenerator } from './ui/generator';
 import { registerServices } from './app/services';
+import { renderList } from './ui/listView';
+import { renderDetail } from './ui/detailView';
 import { openCreateTaskModal } from './ui/taskModal';
 import { openAuditModal } from './ui/auditModal';
 import { openShortcutsModal } from './ui/shortcutsModal';
@@ -36,7 +36,7 @@ import { openAccountModal } from './ui/accountModal';
 import { openCreateCredentialModal } from './ui/credentialModal';
 import { loadSavedTheme, saveTheme, applyTheme } from './ui/themes';
 import { mountTemplateEditor } from './ui/itemTemplatesUi';
-import { renderVersioning, wireVersioning, renderTrash, type VersionsContext } from './ui/versionsPanel';
+import { renderTrash, type VersionsContext } from './ui/versionsPanel';
 import { expiredTrash } from './store/vaultStore';
 import { TRASH_DAYS } from './account/merge';
 import type { TrashEntry } from './types/vault';
@@ -44,7 +44,7 @@ import { profileRowsHtml, wireProfileRows, type ProfileActions } from './ui/acco
 import { ACCOUNT_STORAGE_KEYS } from './account/accountService';
 import { formatCardNumber, itemTypeOf, ITEM_TYPE_INFO, type ItemType } from './types/itemTypes';
 import { bindingFromEvent, isPlainKey, loadShortcuts, SHORTCUT_ORDER, type ShortcutAction, type ShortcutBindings } from './ui/shortcuts';
-import { CREDENTIAL_FILTERS, countByFilter, queryCredentials, type CredentialFilter, type CredentialSort } from './store/credentialFilters';
+import { CREDENTIAL_FILTERS, countByFilter, type CredentialFilter, type CredentialSort } from './store/credentialFilters';
 import { activeTabHost, extensionSessionStore, extensionSurface, fillActiveTab, matchesSite, openFullTab, openSidePanel } from './extension/surface';
 import { biometricStore, isAndroidApp, nativeCall, type DeviceSecretStore } from './platform/biometric';
 import { i18n } from './i18n';
@@ -153,8 +153,8 @@ export class AppController {
   /** Photo de profil affichable (data:, blob: ou https:) */
   avatarSrc: string | null = null;
   selectedItemId: string | null = null;
-  private searchQuery = '';
-  private taskViewMode: TaskViewMode = 'list';
+  searchQuery = '';
+  taskViewMode: TaskViewMode = 'list';
   public totpInterval: number | null = null;
   private autoLockTimeout: number | null = null;
   private readonly AUTO_LOCK_DELAY_MS = 5 * 60 * 1000; // 5 minutes d'inactivité
@@ -166,7 +166,7 @@ export class AppController {
   private expandedFolders = new Set<string>(loadExpandedFolders());
   private authScreen: { show(): void } | null = null;
   credentialFilters = new Set<CredentialFilter>();
-  private credentialSort: CredentialSort = 'name';
+  credentialSort: CredentialSort = 'name';
   /** Faux pour une fenêtre qui ne doit pas se fermer par Échap ou clic sur le fond (clé de secours) */
   private modalDismissible = true;
   private readonly deviceStore: DeviceSecretStore | null = biometricStore();
@@ -500,7 +500,7 @@ export class AppController {
     }
   }
 
-  private saveListPrefs(): void {
+  saveListPrefs(): void {
     try {
       localStorage.setItem(LIST_PREFS_KEY, JSON.stringify({ filters: [...this.credentialFilters], sort: this.credentialSort }));
     } catch {
@@ -806,444 +806,11 @@ export class AppController {
 
   /* ── List Panel ─────────────────────────────────────────────────────────── */
   renderList(): void {
-    const data = vaultStore.getData();
-    const container = document.getElementById('items-container');
-    const listTitle = document.getElementById('list-view-title');
-    if (!container) return;
-
-    container.innerHTML = '';
-
-    // La colonne centrale s'élargit pour les vues tâches en tableau ; la navigation reflète la vue active
-    document.getElementById('app')?.classList.toggle('tasks-board', this.activeView === 'tasks' && this.taskViewMode !== 'list');
-    document.querySelectorAll<HTMLElement>('[data-view]').forEach(item => item.classList.toggle('active', item.dataset.view === this.activeView));
-
-    const tagKey = this.activeTag?.toLowerCase();
-    const matchesTag = (item: { tags: string[] }) => !tagKey || item.tags.some(t => t.toLowerCase() === tagKey);
-
-    // Un dossier ouvert montre aussi le contenu de ses sous-dossiers
-    const folderIds = this.activeFolderId ? new Set(vaultStore.folderSubtree(this.activeFolderId)) : null;
-    const matchesFolder = (item: { folderId?: string }) =>
-      !folderIds || (!!item.folderId && folderIds.has(item.folderId));
-
-    const folderName = this.activeFolderId ? vaultStore.getFolder(this.activeFolderId)?.name : undefined;
-    const withTag = (title: string) => {
-      const parts = [title, folderName, this.activeTag].filter(Boolean);
-      return parts.join(' · ');
-    };
-
-    const taskToggle = document.getElementById('task-view-toggle');
-    if (taskToggle) {
-      taskToggle.style.display = this.activeView === 'tasks' ? 'flex' : 'none';
-    }
-
-    if (this.activeView === 'tasks') {
-      const filterBar = document.getElementById('filter-bar');
-      if (filterBar) filterBar.hidden = true;
-      if (listTitle) listTitle.textContent = withTag(i18n.t.tasks.title);
-      let tasks = data.tasks.filter(t => t.vaultId === data.activeVaultId && matchesTag(t));
-
-      if (this.searchQuery) {
-        tasks = tasks.filter(t =>
-          t.title.toLowerCase().includes(this.searchQuery) ||
-          (t.description && t.description.toLowerCase().includes(this.searchQuery))
-        );
-      }
-
-      if (tasks.length === 0) {
-        container.innerHTML = `
-          <div class="empty-state">
-            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <polyline points="9 11 12 14 22 4"></polyline>
-              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
-            </svg>
-            <div class="empty-state-title">${i18n.t.tasks.emptyTasksTitle}</div>
-            <div class="empty-state-sub">${i18n.t.tasks.emptyTasksSub}</div>
-          </div>`;
-        return;
-      }
-
-      // Mode Kanban
-      if (this.taskViewMode === 'kanban') {
-        const statuses: Array<{ key: Task['status']; label: string; dot: string }> = [
-          { key: 'todo', label: i18n.t.tasks.statusTodo, dot: 'var(--text-muted)' },
-          { key: 'in_progress', label: i18n.t.tasks.statusInProgress, dot: 'var(--accent-blue)' },
-          { key: 'blocked', label: i18n.t.tasks.statusBlocked, dot: 'var(--accent-red)' },
-          { key: 'completed', label: i18n.t.tasks.statusCompleted, dot: 'var(--accent-green)' }
-        ];
-
-        const kanbanWrapper = document.createElement('div');
-        kanbanWrapper.className = 'kanban-container';
-
-        statuses.forEach(col => {
-          const colTasks = tasks.filter(t => t.status === col.key);
-          const colEl = document.createElement('div');
-          colEl.className = 'kanban-column';
-          colEl.innerHTML = `
-            <div class="kanban-col-title" style="display:flex;justify-content:space-between;align-items:center;">
-              <span style="display:flex;align-items:center;gap:6px;">
-                <span style="color:${col.dot};font-size:10px;">●</span>
-                ${col.label}
-              </span>
-              <span style="font-size:10px;opacity:0.7;">${colTasks.length}</span>
-            </div>
-            <div class="kanban-cards-box" style="display:flex;flex-direction:column;gap:8px;"></div>
-          `;
-
-          const cardsBox = colEl.querySelector('.kanban-cards-box') as HTMLElement;
-          colTasks.forEach(task => {
-            const card = document.createElement('div');
-            card.className = `kanban-card ${this.selectedItemId === task.id ? 'selected' : ''}`;
-            const prioLabel = (i18n.t.common as any)[task.priority] || task.priority;
-            card.innerHTML = `
-              <div class="kanban-card-title" title="${this.escapeHtml(task.title)}">${this.escapeHtml(task.title)}</div>
-              <div class="kanban-card-meta">
-                <span class="badge priority-${task.priority}">${prioLabel.toUpperCase()}</span>
-                <span>${i18n.formatRelativeDate(task.dueDate || '')}</span>
-              </div>
-            `;
-            card.addEventListener('click', () => {
-              this.selectedItemId = task.id;
-              this.renderList();
-              this.renderDetail(task.id);
-              document.getElementById('detail-container')?.classList.add('mobile-active');
-            });
-            cardsBox.appendChild(card);
-          });
-
-          kanbanWrapper.appendChild(colEl);
-        });
-
-        container.appendChild(kanbanWrapper);
-        return;
-      }
-
-      // Mode Matrice d'Eisenhower
-      if (this.taskViewMode === 'matrix') {
-        const quadrants: Array<{ key: EisenhowerQuadrant; title: string; sub: string; color: string }> = [
-          { key: 'do', title: this.tr('Faire maintenant', 'Do now'), sub: this.tr('Urgent et important', 'Urgent & important'), color: 'var(--accent-red)' },
-          { key: 'plan', title: this.tr('Planifier', 'Schedule'), sub: this.tr('Important, non urgent', 'Important, not urgent'), color: 'var(--accent-blue)' },
-          { key: 'delegate', title: this.tr('Déléguer', 'Delegate'), sub: this.tr('Urgent, peu important', 'Urgent, less important'), color: 'var(--accent-orange)' },
-          { key: 'eliminate', title: this.tr('Plus tard', 'Later'), sub: this.tr('Ni urgent ni important', 'Neither urgent nor important'), color: 'var(--text-muted)' }
-        ];
-        const openTasks = tasks.filter(t => t.status !== 'completed');
-        const grid = document.createElement('div');
-        grid.className = 'eisenhower-grid';
-
-        quadrants.forEach(q => {
-          const quadrantTasks = openTasks.filter(t => getEisenhowerQuadrant(t) === q.key);
-          const cell = document.createElement('div');
-          cell.className = 'eisenhower-cell';
-          cell.style.borderTopColor = q.color;
-          cell.innerHTML = `
-            <div class="eisenhower-cell-header">
-              <div>
-                <div class="eisenhower-cell-title" style="color:${q.color};">${q.title}</div>
-                <div class="eisenhower-cell-sub">${q.sub}</div>
-              </div>
-              <span class="eisenhower-count">${quadrantTasks.length}</span>
-            </div>
-            <div class="eisenhower-cell-body"></div>
-          `;
-          const body = cell.querySelector('.eisenhower-cell-body') as HTMLElement;
-          if (quadrantTasks.length === 0) {
-            body.innerHTML = `<div class="eisenhower-empty">${this.tr('Aucune tâche', 'No tasks')}</div>`;
-          }
-          quadrantTasks.forEach(task => {
-            const card = document.createElement('div');
-            card.className = `kanban-card ${this.selectedItemId === task.id ? 'selected' : ''}`;
-            card.innerHTML = `
-              <div class="kanban-card-title" title="${this.escapeHtml(task.title)}">${this.escapeHtml(task.title)}</div>
-              <div class="kanban-card-meta">
-                <span class="badge priority-${task.priority}">${task.priority.toUpperCase()}</span>
-                ${task.status === 'blocked' ? `<span class="badge" style="color:var(--accent-red);">${this.tr('BLOQUÉE', 'BLOCKED')}</span>` : ''}
-                <span>${task.dueDate ? i18n.formatRelativeDate(task.dueDate) : ''}</span>
-              </div>
-            `;
-            card.addEventListener('click', () => {
-              this.selectedItemId = task.id;
-              this.renderList();
-              this.renderDetail(task.id);
-              document.getElementById('detail-container')?.classList.add('mobile-active');
-            });
-            body.appendChild(card);
-          });
-          grid.appendChild(cell);
-        });
-
-        container.appendChild(grid);
-        return;
-      }
-
-      // Mode Calendrier / Échéances (Timeline)
-      if (this.taskViewMode === 'calendar') {
-        const timelineWrapper = document.createElement('div');
-        timelineWrapper.className = 'calendar-timeline-container';
-
-        const todayStr = new Date().toISOString().slice(0, 10);
-        const overdueTasks: Task[] = [];
-        const todayTasks: Task[] = [];
-        const upcomingTasks: Task[] = [];
-        const noDueDateTasks: Task[] = [];
-
-        tasks.forEach(t => {
-          if (!t.dueDate) {
-            noDueDateTasks.push(t);
-          } else if (t.dueDate < todayStr && t.status !== 'completed') {
-            overdueTasks.push(t);
-          } else if (t.dueDate === todayStr) {
-            todayTasks.push(t);
-          } else {
-            upcomingTasks.push(t);
-          }
-        });
-
-        // Tri par date croissante
-        upcomingTasks.sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''));
-
-        const groups = [
-          { title: i18n.t.common.overdue, tasks: overdueTasks, color: 'var(--accent-red)', count: overdueTasks.length },
-          { title: i18n.t.common.today, tasks: todayTasks, color: 'var(--accent-orange)', count: todayTasks.length },
-          { title: i18n.t.common.upcoming, tasks: upcomingTasks, color: 'var(--accent-blue)', count: upcomingTasks.length },
-          { title: i18n.t.common.noDueDate, tasks: noDueDateTasks, color: 'var(--text-muted)', count: noDueDateTasks.length }
-        ];
-
-        groups.forEach(grp => {
-          if (grp.tasks.length === 0 && grp.title === 'En retard / Dépassées') return; // Ne pas encombrer si rien en retard
-
-          const groupEl = document.createElement('div');
-          groupEl.className = 'timeline-group';
-          groupEl.innerHTML = `
-            <div class="timeline-group-header" style="color: ${grp.color};">
-              <span style="display:flex;align-items:center;gap:6px;">
-                <span style="width:7px;height:7px;border-radius:50%;background-color:${grp.color};"></span>
-                ${grp.title}
-              </span>
-              <span style="opacity:0.7;">${grp.count}</span>
-            </div>
-            <div class="timeline-items-list"></div>
-          `;
-
-          const listEl = groupEl.querySelector('.timeline-items-list') as HTMLElement;
-          grp.tasks.forEach(task => {
-            const row = document.createElement('div');
-            row.className = `timeline-task-row ${this.selectedItemId === task.id ? 'selected' : ''}`;
-            const isDone = task.status === 'completed';
-
-            row.innerHTML = `
-              <div style="display:flex;align-items:center;gap:10px;min-width:0;flex:1;">
-                <span style="color:${isDone ? 'var(--accent-green)' : 'var(--text-muted)'};">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                    ${isDone ? '<polyline points="20 6 9 17 4 12"></polyline>' : '<circle cx="12" cy="12" r="9"></circle>'}
-                  </svg>
-                </span>
-                <span style="font-size:12px;font-weight:500;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${isDone ? 'text-decoration:line-through;opacity:0.5;' : ''}">
-                  ${task.title}
-                </span>
-              </div>
-              <div style="display:flex;align-items:center;gap:8px;font-size:11px;font-family:var(--font-mono);color:var(--text-muted);">
-                <span class="badge priority-${task.priority}">${task.priority.toUpperCase()}</span>
-                <span>${task.dueDate || '—'}</span>
-              </div>
-            `;
-
-            row.addEventListener('click', () => {
-              this.selectedItemId = task.id;
-              this.renderList();
-              this.renderDetail(task.id);
-              document.getElementById('detail-container')?.classList.add('mobile-active');
-            });
-
-            listEl.appendChild(row);
-          });
-
-          timelineWrapper.appendChild(groupEl);
-        });
-
-        container.appendChild(timelineWrapper);
-        return;
-      }
-
-      // Mode Liste
-      const priorityOrder: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
-      const sorted = [...tasks].sort((a, b) => {
-        if (a.status === 'completed' && b.status !== 'completed') return 1;
-        if (b.status === 'completed' && a.status !== 'completed') return -1;
-        return (priorityOrder[a.priority] ?? 2) - (priorityOrder[b.priority] ?? 2);
-      });
-
-      sorted.forEach(task => {
-        const row = document.createElement('div');
-        row.className = `record-row ${this.selectedItemId === task.id ? 'selected' : ''}`;
-        const isDone = task.status === 'completed';
-        const isInProgress = task.status === 'in_progress';
-        const dotColor = isDone ? 'var(--accent-green)' : isInProgress ? 'var(--accent-blue)' : 'var(--text-muted)';
-        const iconBg = isDone ? '35,134,54' : isInProgress ? 'var(--accent-rgb)' : '110,118,129';
-
-        const statusSub = isInProgress ? i18n.t.tasks.statusInProgress : i18n.t.common.noDueDate;
-        row.innerHTML = `
-          <div class="record-icon" style="color:${dotColor};background-color:rgba(${iconBg},0.1);">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <polyline points="9 11 12 14 22 4"></polyline>
-              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
-            </svg>
-          </div>
-          <div class="record-info">
-            <div class="record-title" title="${this.escapeHtml(task.title)}" style="${isDone ? 'text-decoration:line-through;opacity:0.5;' : ''}">${this.escapeHtml(task.title)}</div>
-            <div class="record-sub">${task.dueDate ? i18n.formatRelativeDate(task.dueDate) : statusSub}</div>
-          </div>
-          <div class="record-badges">
-            ${task.status === 'blocked' ? `<span class="badge" style="color:var(--accent-red);border-color:rgba(218,54,51,0.4);" title="${this.tr('Bloquée par des dépendances', 'Blocked by dependencies')}">${this.tr('BLOQ', 'BLK')}</span>` : ''}
-            ${task.recurrence ? `<span class="badge" style="color:var(--accent-purple);" title="${describeRecurrence(task.recurrence, i18n.getLocale() === 'fr' ? 'fr' : 'en')}">${this.tr('RÉC', 'REC')}</span>` : ''}
-            ${task.reminderAt && !task.reminderSent && task.status !== 'completed' ? `<span class="badge" style="color:var(--accent-orange);" title="${new Date(task.reminderAt).toLocaleString(i18n.intlLocale())}">${this.tr('RAP', 'REM')}</span>` : ''}
-            <span class="badge priority-${task.priority}">${task.priority.charAt(0).toUpperCase()}</span>
-          </div>
-        `;
-
-        row.addEventListener('click', () => {
-          this.selectedItemId = task.id;
-          this.renderList();
-          this.renderDetail(task.id);
-          document.getElementById('detail-container')?.classList.add('mobile-active');
-        });
-        container.appendChild(row);
-      });
-      return;
-    }
-
-    // Vue Credentials ou 2FA
-    if (listTitle) listTitle.textContent = withTag(this.activeView === '2fa-tokens' ? i18n.t.nav.twoFactorTokens : i18n.t.credentials.title);
-
-    const vaultCreds = data.credentials.filter(c =>
-      c.vaultId === data.activeVaultId
-      && matchesFolder(c)
-      && (this.activeView !== '2fa-tokens' || !!c.totpSecret));
-    const creds = queryCredentials(vaultCreds, {
-      search: this.searchQuery,
-      filters: this.credentialFilters,
-      sort: this.credentialSort,
-      tag: this.activeTag
-    });
-    this.renderFilterBar(vaultCreds);
-
-    /** Chemin du dossier ouvert, posé en tête de liste une fois celle-ci rendue */
-    const addBreadcrumb = () => {
-      if (!this.activeFolderId) return;
-      container.insertAdjacentHTML('afterbegin', this.renderFolderBreadcrumb());
-      const breadcrumb = container.querySelector('.folder-breadcrumb');
-      breadcrumb?.addEventListener('click', event => {
-        const crumb = (event.target as HTMLElement).closest<HTMLElement>('[data-folder-crumb]');
-        if (!crumb) return;
-        this.activeFolderId = crumb.dataset.folderCrumb || null;
-        this.selectedItemId = null;
-        this.renderSidebar();
-        this.renderList();
-        this.renderDetail(null);
-      });
-
-      // Le fil d'Ariane accepte aussi le dépôt : c'est ce qui permet de ressortir un élément
-      breadcrumb?.querySelectorAll<HTMLElement>('[data-folder-crumb]').forEach(crumb => {
-        crumb.addEventListener('dragover', event => {
-          const drag = event as DragEvent;
-          if (!drag.dataTransfer?.types.includes('text/bettervault-item')) return;
-          drag.preventDefault();
-          drag.dataTransfer.dropEffect = 'move';
-          crumb.classList.add('folder-drop');
-        });
-        crumb.addEventListener('dragleave', () => crumb.classList.remove('folder-drop'));
-        crumb.addEventListener('drop', event => {
-          const drag = event as DragEvent;
-          const id = drag.dataTransfer?.getData('text/bettervault-item');
-          crumb.classList.remove('folder-drop');
-          if (!id) return;
-          drag.preventDefault();
-          this.moveItemToFolder(id, crumb.dataset.folderCrumb || null);
-        });
-      });
-    };
-
-    if (creds.length === 0) {
-      const filtered = this.credentialFilters.size > 0;
-      const title = filtered
-        ? this.tr('Aucun identifiant pour ces filtres', 'No credentials match these filters')
-        : this.searchQuery ? i18n.t.common.noResultsTitle : i18n.t.common.emptyVaultTitle;
-      const sub = filtered ? '' : this.searchQuery ? i18n.t.common.noResultsSub : i18n.t.common.emptyVaultSub;
-      container.innerHTML = `
-        <div class="empty-state">
-          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-          </svg>
-          <div class="empty-state-title">${title}</div>
-          ${sub ? `<div class="empty-state-sub">${sub}</div>` : ''}
-          ${filtered ? `<button class="btn-primary" type="button" data-action="reset-filters">${this.tr('Retirer les filtres', 'Clear filters')}</button>` : ''}
-        </div>`;
-      container.querySelector('[data-action="reset-filters"]')?.addEventListener('click', () => {
-        this.credentialFilters.clear();
-        this.saveListPrefs();
-        this.renderList();
-      });
-      addBreadcrumb();
-      return;
-    }
-
-    if (!this.selectedItemId && creds.length > 0) {
-      this.selectedItemId = creds[0].id;
-      this.renderDetail(creds[0].id);
-    }
-
-    const now = Date.now();
-    const locale = this.dateLocale();
-    const tr = (fr: string, en: string) => this.tr(fr, en);
-
-    creds.forEach(cred => {
-      const row = document.createElement('div');
-      row.className = `record-row ${this.selectedItemId === cred.id ? 'selected' : ''}`;
-      row.tabIndex = 0;
-      // Glisser une ligne sur un dossier de la barre latérale l'y range
-      row.draggable = true;
-      row.addEventListener('dragstart', event => {
-        event.dataTransfer?.setData('text/bettervault-item', cred.id);
-        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
-        document.body.classList.add('dragging-item');
-      });
-      row.addEventListener('dragend', () => {
-        document.body.classList.remove('dragging-item');
-        document.querySelectorAll('.folder-drop').forEach(el => el.classList.remove('folder-drop'));
-      });
-      const expiry = renderExpiryBadge(expiryInfo(cred.expiresAt, tr, locale, now), { hideOk: true });
-
-      row.innerHTML = `
-        <div class="record-icon">${this.credentialIcon(cred)}</div>
-        <div class="record-info">
-          <div class="record-title">${cred.isFavorite ? `<span class="record-fav" title="${this.tr('Favori', 'Favorite')}">★</span>` : ''}${this.escapeHtml(cred.title)}</div>
-          <div class="record-sub">${this.escapeHtml(this.itemSubtitle(cred))}</div>
-        </div>
-        <div class="record-badges">
-          ${itemTypeOf(cred.type) === 'login' && !cred.templateId ? '' : this.typeBadge(itemTypeOf(cred.type), cred.templateId)}
-          ${expiry}
-          ${cred.totpSecret ? '<span class="badge badge-accent">2FA</span>' : ''}
-          ${cred.passkeys && cred.passkeys.length > 0 ? '<span class="badge">Passkey</span>' : ''}
-        </div>
-      `;
-
-      const open = () => {
-        this.selectedItemId = cred.id;
-        this.renderList();
-        this.renderDetail(cred.id);
-        document.getElementById('detail-container')?.classList.add('mobile-active');
-      };
-      row.addEventListener('click', open);
-      row.addEventListener('keydown', e => {
-        if (e.key === 'Enter') open();
-      });
-      container.appendChild(row);
-    });
-
-    addBreadcrumb();
+    renderList(this);
   }
 
   /* ── Filtres et tri de la liste ─────────────────────────────────────── */
-  private renderFilterBar(creds: CredentialItem[]): void {
+  renderFilterBar(creds: CredentialItem[]): void {
     const bar = document.getElementById('filter-bar');
     if (!bar) return;
     const counts = countByFilter(creds);
@@ -1309,806 +876,11 @@ export class AppController {
 
   /* ── Detail Panel ─────────────────────────────────────────────────────── */
   renderDetail(id: string | null): void {
-    const container = document.getElementById('detail-container');
-    if (!container) return;
-
-    if (!id) {
-      container.innerHTML = `
-        <div class="detail-empty">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-          </svg>
-          <p>${i18n.t.common.emptySelection}</p>
-        </div>`;
-      return;
-    }
-
-    const data = vaultStore.getData();
-
-    /* ─── Cas 1 : Tâche ─────────────────────────────────────────────────── */
-    const task = data.tasks.find(t => t.id === id);
-    if (task) {
-      const linkedCred = task.linkedCredentialId
-        ? data.credentials.find(c => c.id === task.linkedCredentialId)
-        : null;
-
-      const statusColors: Record<string, string> = {
-        todo: 'var(--text-muted)',
-        in_progress: 'var(--accent-blue)',
-        completed: 'var(--accent-green)',
-        blocked: 'var(--accent-red)'
-      };
-      const statusLabels: Record<string, string> = {
-        todo: i18n.t.tasks.statusTodo,
-        in_progress: i18n.t.tasks.statusInProgress,
-        completed: i18n.t.tasks.statusCompleted,
-        blocked: i18n.t.tasks.statusBlocked
-      };
-
-      const locale = i18n.getLocale() === 'fr' ? 'fr' : 'en';
-      const blockers = getOpenBlockers(task, data.tasks);
-      const dependencyTasks = (task.dependsOn ?? [])
-        .map(depId => data.tasks.find(t => t.id === depId))
-        .filter((t): t is Task => !!t);
-      const dependents = getDependents(task.id, data.tasks);
-      const taskLinkRow = (t: Task) => `
-        <div class="field-box dep-task-row" data-task-id="${t.id}" style="cursor:pointer;margin-bottom:6px;">
-          <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-            <span style="font-size:10px;color:${statusColors[t.status]};">&#9679;</span>
-            <span style="font-size:13px;font-weight:500;${t.status === 'completed' ? 'text-decoration:line-through;opacity:0.5;' : ''}">${this.escapeHtml(t.title)}</span>
-          </div>
-          <span style="font-size:11px;color:${statusColors[t.status]};">${statusLabels[t.status]}</span>
-        </div>`;
-
-      const planningHTML = `
-        ${task.recurrence ? `
-          <div class="field-group">
-            <div class="field-label">${this.tr('Récurrence', 'Recurrence')}</div>
-            <div class="field-box"><span class="field-val">${describeRecurrence(task.recurrence, locale)}</span></div>
-          </div>` : ''}
-        ${task.reminderAt ? `
-          <div class="field-group">
-            <div class="field-label">${this.tr('Rappel', 'Reminder')}</div>
-            <div class="field-box">
-              <span class="field-val">${new Date(task.reminderAt).toLocaleString(i18n.intlLocale())}</span>
-              ${task.reminderSent ? `<span class="badge">${this.tr('ENVOYÉ', 'SENT')}</span>` : ''}
-            </div>
-          </div>` : ''}
-        ${dependencyTasks.length ? `
-          <div class="field-group">
-            <div class="section-divider" style="margin-bottom:8px;">${this.tr('Dépend de', 'Depends on')} (${dependencyTasks.length - blockers.length}/${dependencyTasks.length})</div>
-            ${blockers.length ? `
-              <div style="padding:8px 12px;margin-bottom:8px;background:rgba(218,54,51,0.1);border:1px solid rgba(218,54,51,0.3);border-radius:var(--radius-md);color:var(--accent-red);font-size:12px;">
-                ${this.tr(`${blockers.length} prérequis à terminer avant de clore cette tâche.`, `${blockers.length} prerequisite(s) must be completed first.`)}
-              </div>` : ''}
-            ${dependencyTasks.map(taskLinkRow).join('')}
-          </div>` : ''}
-        ${dependents.length ? `
-          <div class="field-group">
-            <div class="section-divider" style="margin-bottom:8px;">${this.tr('Bloque', 'Blocks')} (${dependents.length})</div>
-            ${dependents.map(taskLinkRow).join('')}
-          </div>` : ''}
-      `;
-
-      container.innerHTML = `
-        <div class="detail-header">
-          <div class="detail-header-left">
-            <button class="detail-mobile-back" id="btn-detail-back" title="${i18n.t.common.close}">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="19" y1="12" x2="5" y2="12"></line>
-                <polyline points="12 19 5 12 12 5"></polyline>
-              </svg>
-              <span>${i18n.t.common.close}</span>
-            </button>
-            <div class="detail-main-icon" style="color:${statusColors[task.status] || 'var(--text-secondary)'};">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="9 11 12 14 22 4"></polyline>
-                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
-              </svg>
-            </div>
-            <div>
-              <div class="detail-title">${this.escapeHtml(task.title)}</div>
-              <div class="detail-meta">${this.tr('Créée le', 'Created')} ${new Date(task.createdAt).toLocaleDateString(i18n.intlLocale())}</div>
-              ${this.renderTagChips(task.tags)}
-            </div>
-          </div>
-          <div class="detail-actions">
-            <button class="btn-primary ${task.status === 'completed' ? '' : 'btn-accent'}" id="btn-toggle-task-status">
-              ${task.status === 'completed' ? this.tr('Rouvrir', 'Reopen') : this.tr('Terminer', 'Complete')}
-            </button>
-            ${this.renderActionMenu([
-              { id: 'btn-edit-task', label: this.tr('Modifier', 'Edit'), icon: ACTION_ICONS.edit },
-              'separator',
-              { id: 'btn-delete-task', label: this.tr('Supprimer', 'Delete'), icon: ACTION_ICONS.trash, danger: true }
-            ])}
-          </div>
-        </div>
-
-        <div class="detail-content">
-          <div class="field-group">
-            <div class="field-label">${this.tr('Statut et priorité', 'Status and priority')}</div>
-            <div class="field-box">
-              <span class="field-val" style="color:${statusColors[task.status]};">${statusLabels[task.status] || task.status}</span>
-              <span class="badge priority-${task.priority}">${task.priority.toUpperCase()}</span>
-            </div>
-          </div>
-
-          ${task.dueDate ? `
-            <div class="field-group">
-              <div class="field-label">${this.tr('Échéance', 'Due date')}</div>
-              <div class="field-box"><span class="field-val">${task.dueDate}</span></div>
-            </div>
-          ` : ''}
-
-          ${planningHTML}
-
-          ${task.description ? `
-            <div class="field-group">
-              <div class="section-divider" style="margin-bottom:8px;">Description</div>
-              <div class="field-box" style="white-space:pre-wrap;line-height:1.6;">${this.escapeHtml(task.description)}</div>
-            </div>
-          ` : ''}
-
-          ${linkedCred ? `
-            <div class="field-group">
-              <div class="section-divider" style="margin-bottom:8px;">${this.tr('Identifiant lié', 'Linked credential')}</div>
-              <div class="field-box" style="cursor:pointer;" id="btn-goto-linked-cred">
-                <div style="display:flex;align-items:center;gap:10px;">
-                  <span style="display:flex;">${this.credentialIcon(linkedCred)}</span>
-                  <span class="field-val" style="font-weight:600;">${this.escapeHtml(linkedCred.title)}</span>
-                </div>
-                <span style="font-size:11px;color:var(--accent-blue);">${this.tr('Ouvrir', 'Open')} →</span>
-              </div>
-            </div>
-          ` : ''}
-
-          <!-- Sous-tâches Checklist -->
-          <div class="field-group">
-            <div class="section-divider" style="margin-bottom:8px;">
-              Sous-tâches (${(task.subtasks || []).filter(s => s.isDone).length}/${(task.subtasks || []).length})
-            </div>
-            <div class="subtask-list" id="subtask-container">
-              ${(task.subtasks || []).map(s => `
-                <div class="subtask-item">
-                  <label class="subtask-left">
-                    <input type="checkbox" class="subtask-checkbox" data-subtask-id="${s.id}" ${s.isDone ? 'checked' : ''}>
-                    <span class="subtask-title ${s.isDone ? 'done' : ''}">${this.escapeHtml(s.title)}</span>
-                  </label>
-                  <button class="icon-btn btn-del-subtask" data-subtask-id="${s.id}" title="${this.tr('Supprimer', 'Delete')}" style="color:var(--text-muted);padding:2px 4px;">
-                    ✕
-                  </button>
-                </div>
-              `).join('')}
-            </div>
-            <div class="subtask-add-row">
-              <input class="form-input" id="input-new-subtask" type="text" placeholder="${this.tr('Ajouter une étape…', 'Add a step…')}" style="flex:1;font-size:12px;padding:6px 10px;">
-              <button class="btn-primary" id="btn-add-subtask" style="font-size:11px;padding:6px 12px;">${this.tr('Ajouter', 'Add')}</button>
-            </div>
-          </div>
-
-          <div class="field-group">
-            <div class="section-divider" style="margin-bottom:8px;">Notes</div>
-            <textarea class="note-editor" id="task-notes" placeholder="${this.tr('Notes sur cette tâche…', 'Notes about this task…')}">${this.escapeHtml(task.notes || '')}</textarea>
-            <div style="display:flex;justify-content:flex-end;margin-top:6px;">
-              <button class="btn-primary" id="btn-save-task-notes" style="font-size:11px;padding:5px 14px;">${this.tr('Enregistrer', 'Save')}</button>
-            </div>
-          </div>
-        </div>
-      `;
-
-      this.bindActionMenus(container);
-
-      document.getElementById('btn-detail-back')?.addEventListener('click', () => {
-        document.getElementById('detail-container')?.classList.remove('mobile-active');
-      });
-
-      document.getElementById('btn-toggle-task-status')?.addEventListener('click', () => {
-        if (task.status === 'completed') {
-          const reopenedStatus = getOpenBlockers(task, vaultStore.getData().tasks).length > 0 ? 'blocked' : 'todo';
-          vaultStore.updateTask(task.id, { status: reopenedStatus, completedAt: undefined });
-          this.showToast(this.tr('Tâche rouverte', 'Task reopened'), 'success');
-          return;
-        }
-
-        const plan = planTaskCompletion(task, vaultStore.getData().tasks);
-        if (plan.blockers.length > 0) {
-          const names = plan.blockers.map(b => `"${b.title}"`).join(', ');
-          this.showToast(`${this.tr('Terminez d’abord', 'Complete first')} : ${names}`, 'error', 5000);
-          return;
-        }
-
-        vaultStore.updateTask(task.id, plan.updates);
-        plan.unblockedIds.forEach(unblockedId => vaultStore.updateTask(unblockedId, { status: 'todo' }));
-        if (plan.nextOccurrence) {
-          vaultStore.addTask(plan.nextOccurrence);
-          this.showToast(`${this.tr('Tâche terminée — prochaine occurrence le', 'Task completed — next occurrence on')} ${plan.nextOccurrence.dueDate}`, 'success', 4000);
-        } else {
-          this.showToast(this.tr('Tâche terminée', 'Task completed'), 'success');
-        }
-      });
-
-      document.querySelectorAll('.dep-task-row').forEach(el => {
-        el.addEventListener('click', () => {
-          const targetId = (el as HTMLElement).dataset.taskId;
-          if (!targetId) return;
-          this.selectedItemId = targetId;
-          this.renderList();
-          this.renderDetail(targetId);
-        });
-      });
-
-      document.getElementById('btn-goto-linked-cred')?.addEventListener('click', () => {
-        if (linkedCred) {
-          this.activeView = 'all-credentials';
-          this.selectedItemId = linkedCred.id;
-          this.renderList();
-          this.renderDetail(linkedCred.id);
-        }
-      });
-
-      document.getElementById('btn-edit-task')?.addEventListener('click', () => {
-        this.openCreateTaskModal(undefined, task.id);
-      });
-
-      document.getElementById('btn-delete-task')?.addEventListener('click', async () => {
-        const confirmed = await this.confirmDialog({
-          title: this.tr('Supprimer la tâche ?', 'Delete task?'),
-          message: this.tr(`« ${task.title} » ira dans la corbeille, où elle reste 30 jours.`, `"${task.title}" will go to the trash, where it stays for 30 days.`),
-          confirmLabel: this.tr('Supprimer', 'Delete'),
-          danger: true,
-          skippable: true
-        });
-        if (confirmed) {
-          vaultStore.deleteTask(task.id);
-          this.selectedItemId = null;
-          this.renderDetail(null);
-          this.showToast(this.tr('Tâche mise à la corbeille', 'Task moved to trash'), 'info', 6000, this.undoDelete(task.id));
-        }
-      });
-
-      // Gestion des Sous-tâches
-      const currentSubtasks = [...(task.subtasks || [])];
-
-      document.getElementById('btn-add-subtask')?.addEventListener('click', () => {
-        const inputEl = document.getElementById('input-new-subtask') as HTMLInputElement;
-        const text = inputEl?.value.trim();
-        if (text) {
-          const newSub = { id: 'sub-' + Math.random().toString(36).substring(2, 8), title: text, isDone: false };
-          vaultStore.updateTask(task.id, { subtasks: [...currentSubtasks, newSub] });
-          this.renderDetail(task.id);
-        }
-      });
-
-      document.getElementById('input-new-subtask')?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') (document.getElementById('btn-add-subtask') as HTMLButtonElement)?.click();
-      });
-
-      document.querySelectorAll('.subtask-checkbox').forEach(el => {
-        el.addEventListener('change', (e) => {
-          const subId = (e.target as HTMLElement).dataset.subtaskId;
-          const isDone = (e.target as HTMLInputElement).checked;
-          const updated = currentSubtasks.map(s => s.id === subId ? { ...s, isDone } : s);
-          vaultStore.updateTask(task.id, { subtasks: updated });
-          this.renderDetail(task.id);
-        });
-      });
-
-      document.querySelectorAll('.btn-del-subtask').forEach(el => {
-        el.addEventListener('click', (e) => {
-          const subId = (e.currentTarget as HTMLElement).dataset.subtaskId;
-          const updated = currentSubtasks.filter(s => s.id !== subId);
-          vaultStore.updateTask(task.id, { subtasks: updated });
-          this.renderDetail(task.id);
-        });
-      });
-
-      document.getElementById('btn-save-task-notes')?.addEventListener('click', () => {
-        const notesEl = document.getElementById('task-notes') as HTMLTextAreaElement;
-        if (notesEl) {
-          vaultStore.updateTask(task.id, { notes: notesEl.value } as Partial<Task>);
-          this.showToast(this.tr('Notes enregistrées', 'Notes saved'), 'success');
-        }
-      });
-      return;
-    }
-
-    /* ─── Cas 2 : Credential ─────────────────────────────────────────────── */
-    const cred = data.credentials.find(c => c.id === id);
-    if (!cred) return;
-
-    const detailType = itemTypeOf(cred.type);
-    const entropy = calculatePasswordEntropy(cred.password);
-    const linkedTasks = data.tasks.filter(t => t.linkedCredentialId === cred.id);
-
-    // Jauge de force (4 segments)
-    const strengthHTML = [0, 1, 2, 3]
-      .map(i => `<div class="strength-segment" style="background-color:${i < entropy.score ? entropy.color : 'var(--bg-hover)'}"></div>`)
-      .join('');
-
-    // Tâches liées
-    const linkedTasksHTML = linkedTasks.length > 0
-      ? linkedTasks.map(t => `
-          <div class="field-box linked-task-row" data-task-id="${t.id}" style="cursor:pointer;">
-            <div style="display:flex;align-items:center;gap:8px;">
-              <span style="font-size:10px;color:${t.status === 'completed' ? 'var(--accent-green)' : 'var(--text-muted)'};">&#9679;</span>
-              <span style="font-size:13px;font-weight:500;${t.status === 'completed' ? 'text-decoration:line-through;opacity:0.5;' : ''}">${t.title}</span>
-            </div>
-            <span class="badge priority-${t.priority}">${t.priority.charAt(0).toUpperCase()}</span>
-          </div>`).join('')
-      : `<div style="font-size:12px;color:var(--text-muted);padding:6px 0;">${this.tr('Aucune tâche liée', 'No linked tasks')}</div>`;
-
-    // Passkeys HTML
-    const passkeysHTML = cred.passkeys && cred.passkeys.length > 0 ? `
-      <div class="field-group">
-        <div class="field-label">Passkeys (${cred.passkeys.length})</div>
-        ${cred.passkeys.map(pk => `
-          <div class="field-box" style="margin-bottom:6px;">
-            <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-blue)" stroke-width="2">
-                <path d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5z"></path>
-              </svg>
-              <span class="field-val">${this.escapeHtml(pk.rpId)} &middot; ${this.escapeHtml(pk.userName || '—')}</span>
-            </div>
-            <span style="display:flex;gap:4px;">
-              ${pk.privateKey ? `<span class="badge" style="color:var(--accent-green);" title="${this.tr('Clé privée présente : exportable (CXF / KeePass)', 'Private key present: exportable (CXF / KeePass)')}">${this.tr('CLÉ', 'KEY')}</span>` : ''}
-              <span class="badge" style="color:var(--accent-blue);">FIDO2</span>
-            </span>
-          </div>`).join('')}
-      </div>` : '';
-
-    // TOTP Card HTML
-    const totpHTML = cred.totpSecret ? `
-      <div class="field-group">
-        <div class="field-label">${this.tr('Code 2FA', '2FA code')}</div>
-        <div class="totp-card" id="detail-totp-container" style="cursor:pointer;" title="${this.tr('Cliquer pour copier', 'Click to copy')}">
-          <div>
-            <div class="totp-code-display" id="detail-totp-code">--- ---</div>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${this.tr('Cliquer pour copier', 'Click to copy')}</div>
-          </div>
-          <div class="totp-timer-ring">
-            <svg width="42" height="42" viewBox="0 0 36 36">
-              <circle cx="18" cy="18" r="15.915" fill="none" stroke="var(--bg-tertiary)" stroke-width="3"></circle>
-              <circle id="totp-circle-meter" cx="18" cy="18" r="15.915" fill="none" stroke="var(--accent-blue)" stroke-width="3"
-                stroke-dasharray="100 100" stroke-dashoffset="0" stroke-linecap="round" transform="rotate(-90 18 18)"></circle>
-            </svg>
-            <div class="totp-timer-sec" id="detail-totp-seconds" style="position:absolute;">30</div>
-          </div>
-        </div>
-      </div>` : '';
-
-    // Website HTML
-    const websiteHTML = cred.website ? `
-      <div class="field-group">
-        <div class="field-label">${this.tr('Site web', 'Website')}</div>
-        <div class="field-box">
-          <a href="${this.escapeHtml(this.safeHref(cred.website))}" target="_blank" rel="noopener noreferrer"
-            style="color:var(--accent-blue);text-decoration:none;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;">
-            ${this.escapeHtml(cred.website)}
-          </a>
-          <div class="field-actions">
-            <button class="icon-btn" title="${this.tr('Copier le lien', 'Copy link')}" id="btn-copy-url">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-              </svg>
-            </button>
-          </div>
-        </div>
-      </div>` : '';
-
-    const favFill = cred.isFavorite ? 'currentColor' : 'none';
-    const favColor = cred.isFavorite ? 'var(--accent-orange)' : 'var(--text-muted)';
-    const favTitle = cred.isFavorite ? 'Retirer des favoris' : 'Ajouter aux favoris';
-
-    // Expiration : carte dont la couleur et la barre indiquent l'urgence
-    let expiryAlertHTML = '';
-    const expiry = expiryInfo(cred.expiresAt, (fr, en) => this.tr(fr, en), this.dateLocale());
-    if (expiry) {
-      const title = expiry.state === 'expired'
-        ? this.tr('Mot de passe expiré', 'Password expired')
-        : expiry.state === 'ok' ? this.tr('Renouvellement prévu', 'Renewal planned') : this.tr('À renouveler bientôt', 'Renew soon');
-      const elapsed = expiry.days <= 0 ? 100 : Math.max(6, Math.min(100, 100 - (expiry.days / 30) * 100));
-      expiryAlertHTML = `
-        <div class="expiry-card expiry-${expiry.state}">
-          <span class="expiry-card-icon">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-          </span>
-          <div class="expiry-card-text">
-            <div class="expiry-card-title">${title}</div>
-            <div class="expiry-card-sub">${expiry.long}</div>
-            ${expiry.state !== 'ok' ? `<div class="expiry-card-bar"><span style="width:${elapsed}%"></span></div>` : ''}
-          </div>
-          ${expiry.state !== 'ok' ? `<button class="btn-primary" type="button" id="btn-renew-cred">${this.tr('Renouveler', 'Renew')}</button>` : ''}
-        </div>
-      `;
-    }
-
-    container.innerHTML = `
-      <div class="detail-header">
-        <div class="detail-header-left">
-          <button class="detail-mobile-back" id="btn-detail-back-cred" title="${this.tr('Retour', 'Back')}">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="19" y1="12" x2="5" y2="12"></line>
-              <polyline points="12 19 5 12 12 5"></polyline>
-            </svg>
-            <span>${this.tr('Retour', 'Back')}</span>
-          </button>
-          <div class="detail-main-icon">${this.credentialIcon(cred, 24)}</div>
-          <div>
-            <div class="detail-title">${this.escapeHtml(cred.title)}</div>
-            <div class="detail-meta">${detailType === 'login'
-              ? this.escapeHtml(cred.domain || cred.website || this.tr('Aucun site', 'No website'))
-              : this.typeBadge(detailType, cred.templateId)}</div>
-            ${this.renderTagChips(cred.tags)}
-          </div>
-        </div>
-        <div class="detail-actions">
-          <button class="icon-btn" id="btn-toggle-fav" title="${favTitle}" aria-pressed="${!!cred.isFavorite}"
-            style="color:${favColor};border:1px solid var(--border-subtle);padding:6px;border-radius:var(--radius-md);">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="${favFill}" stroke="currentColor" stroke-width="2">
-              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-            </svg>
-          </button>
-          <button class="btn-primary" id="btn-edit-cred">${ACTION_ICONS.edit}<span>${this.tr('Modifier', 'Edit')}</span></button>
-          ${this.renderActionMenu([
-            { id: 'btn-add-task-for-cred', label: this.tr('Créer une tâche liée', 'Create linked task'), icon: ACTION_ICONS.task },
-            'separator',
-            { id: 'btn-delete-cred', label: this.tr('Supprimer', 'Delete'), icon: ACTION_ICONS.trash, danger: true }
-          ])}
-        </div>
-      </div>
-
-      <div class="detail-content">
-        ${expiryAlertHTML}
-        ${this.renderTypeDetail(cred)}
-        ${detailType !== 'login' ? '' : `
-        ${totpHTML}
-
-        <div class="field-group">
-          <div class="field-label">${this.tr('Identifiant', 'Username')}</div>
-          <div class="field-box">
-            <span class="field-val" id="text-username">${cred.username ? this.escapeHtml(cred.username) : '—'}</span>
-            <div class="field-actions">
-              <button class="icon-btn" title="${this.tr('Copier', 'Copy')}" id="btn-copy-username">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div class="field-group">
-          <div style="display:flex;justify-content:space-between;align-items:center;">
-            <span class="field-label">${this.tr('Mot de passe', 'Password')}</span>
-            <span style="font-size:11px;color:${entropy.color};font-weight:600;">${entropy.label} &middot; ${entropy.bits} bits</span>
-          </div>
-          <div class="field-box">
-            <span class="field-val" id="text-password" style="font-family:var(--font-mono);letter-spacing:1px;">&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;</span>
-            <div class="field-actions">
-              <button class="icon-btn" title="${this.tr('Afficher', 'Show')}" id="btn-toggle-password">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                  <circle cx="12" cy="12" r="3"></circle>
-                </svg>
-              </button>
-              <button class="icon-btn" title="${this.tr('Copier', 'Copy')}" id="btn-copy-password">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                </svg>
-              </button>
-            </div>
-          </div>
-          <div class="strength-meter" style="margin-top:6px;">${strengthHTML}</div>
-        </div>
-
-        ${websiteHTML}
-        ${passkeysHTML}
-        `}
-
-        <div data-versioning>${renderVersioning(cred, this.versionsContext('credential', cred.id))}</div>
-
-        ${cred.passwordHistory && cred.passwordHistory.length > 0 ? `
-          <div class="field-group">
-            <div class="section-divider" style="margin-bottom:8px;">${this.tr('Anciens mots de passe', 'Previous passwords')} (${cred.passwordHistory.length})</div>
-            <div style="display:flex;flex-direction:column;gap:6px;">
-              ${cred.passwordHistory.map(h => `
-                <div class="history-entry">
-                  <span class="history-password">&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;</span>
-                  <div style="display:flex;align-items:center;gap:8px;">
-                    <span class="history-date">${new Date(h.changedAt).toLocaleDateString(i18n.intlLocale())}</span>
-                    <button class="icon-btn btn-copy-history" data-pwd="${this.escapeHtml(h.password)}" title="${this.tr('Copier cet ancien mot de passe', 'Copy this previous password')}">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                    </button>
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-          </div>
-        ` : ''}
-
-        <!-- Champs Personnalisés (Custom Fields) -->
-        <div class="field-group">
-          <div class="section-divider" style="margin-bottom:8px;">${this.tr('Champs personnalisés', 'Custom fields')} (${(cred.fields || []).length})</div>
-          <div class="custom-fields-list" id="custom-fields-container">
-            ${(cred.fields || []).map(f => `
-              <div class="custom-field-row">
-                <div style="font-size:11px;color:var(--text-muted);font-weight:600;">${this.escapeHtml(f.label)}</div>
-                <div class="custom-field-box">
-                  <span class="custom-field-val ${f.isMasked ? 'masked' : ''}" id="cf-val-${f.id}">
-                    ${f.isMasked ? '••••••••••••' : this.escapeHtml(f.value)}
-                  </span>
-                  <div style="display:flex;gap:6px;">
-                    ${f.isMasked ? `
-                      <button class="icon-btn btn-reveal-cf" data-cf-id="${f.id}" data-val="${this.escapeHtml(f.value)}" title="${this.tr('Afficher', 'Show')}">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                      </button>
-                    ` : ''}
-                    <button class="icon-btn btn-copy-cf" data-val="${this.escapeHtml(f.value)}" title="${this.tr('Copier', 'Copy')}">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                    </button>
-                    <button class="icon-btn btn-del-cf" data-cf-id="${f.id}" title="${this.tr('Supprimer', 'Delete')}" style="color:var(--text-muted);">
-                      ✕
-                    </button>
-                  </div>
-                </div>
-              </div>
-            `).join('')}
-          </div>
-          <button class="btn-primary btn-ghost" id="btn-show-cf-form" style="align-self:flex-start;margin-top:4px;">+ ${this.tr('Ajouter un champ', 'Add a field')}</button>
-          <div id="cf-form" hidden>
-            <div class="form-row" style="margin-top:8px;">
-              <input class="form-input" id="input-cf-label" placeholder="${this.tr('Libellé (ex : PIN, question secrète)', 'Label (e.g. PIN, security question)')}">
-              <input class="form-input" id="input-cf-val" placeholder="${this.tr('Valeur', 'Value')}">
-            </div>
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;flex-wrap:wrap;">
-              <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);cursor:pointer;">
-                <input type="checkbox" id="input-cf-masked"> ${this.tr('Masquer la valeur', 'Hide value')}
-              </label>
-              <div style="display:flex;gap:6px;">
-                <button class="btn-primary btn-ghost" id="btn-cancel-cf">${this.tr('Annuler', 'Cancel')}</button>
-                <button class="btn-primary btn-accent" id="btn-add-cf">${this.tr('Ajouter', 'Add')}</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        ${this.renderAttachments(cred)}
-
-        <div class="field-group">
-          <div class="section-divider" style="margin-bottom:8px;">${this.tr('Tâches liées', 'Linked tasks')} (${linkedTasks.length})</div>
-          ${linkedTasksHTML}
-        </div>
-
-        <div class="field-group">
-          <div class="section-divider" style="margin-bottom:8px;">Notes</div>
-          <textarea class="note-editor" id="inline-notes" placeholder="${this.tr('Codes de récupération, informations utiles…', 'Recovery codes, useful details…')}">${this.escapeHtml(cred.notes || '')}</textarea>
-          <div style="display:flex;justify-content:flex-end;margin-top:6px;">
-            <button class="btn-primary" id="btn-save-notes" style="font-size:11px;padding:5px 14px;">${this.tr('Enregistrer', 'Save')}</button>
-          </div>
-        </div>
-      </div>
-    `;
-
-    // Events après rendu DOM
-    this.bindActionMenus(container);
-    this.updateLiveTOTP();
-
-    document.getElementById('btn-copy-username')?.addEventListener('click', async (e) => {
-      if (cred.username) {
-        await this.copyToClipboardWithAutoClear(cred.username, i18n.getLocale() === 'fr' ? 'Identifiant copié' : 'Username copied', false);
-        (e.currentTarget as HTMLElement).classList.add('copied');
-        setTimeout(() => (e.currentTarget as HTMLElement).classList.remove('copied'), 500);
-      }
-    });
-
-    document.getElementById('btn-copy-url')?.addEventListener('click', async () => {
-      if (cred.website) {
-        await this.copyToClipboardWithAutoClear(cred.website, i18n.getLocale() === 'fr' ? 'URL copiée' : 'URL copied', false);
-      }
-    });
-
-    const passEl = document.getElementById('text-password');
-    let isMasked = true;
-    document.getElementById('btn-toggle-password')?.addEventListener('click', () => {
-      isMasked = !isMasked;
-      if (passEl) {
-        passEl.textContent = isMasked ? '••••••••••••••••••••' : cred.password;
-        passEl.style.letterSpacing = isMasked ? '1px' : '0.3px';
-      }
-    });
-
-    document.getElementById('btn-copy-password')?.addEventListener('click', async (e) => {
-      await this.copyToClipboardWithAutoClear(cred.password, i18n.getLocale() === 'fr' ? 'Mot de passe copié' : 'Password copied', true);
-      (e.currentTarget as HTMLElement).classList.add('copied');
-      setTimeout(() => (e.currentTarget as HTMLElement).classList.remove('copied'), 500);
-    });
-
-    document.getElementById('detail-totp-container')?.addEventListener('click', async () => {
-      if (cred.totpSecret) {
-        const res = generateTOTP(cred.totpSecret);
-        if (res) {
-          const label = i18n.getLocale() === 'fr' 
-            ? `Code 2FA copié : ${res.token.slice(0, 3)} ${res.token.slice(3)}` 
-            : `2FA code copied: ${res.token.slice(0, 3)} ${res.token.slice(3)}`;
-          await this.copyToClipboardWithAutoClear(res.token, label, true);
-        }
-      }
-    });
-
-    document.getElementById('btn-toggle-fav')?.addEventListener('click', () => {
-      vaultStore.updateCredential(cred.id, { isFavorite: !cred.isFavorite });
-      this.showToast(cred.isFavorite ? this.tr('Retiré des favoris', 'Removed from favorites') : this.tr('Ajouté aux favoris', 'Added to favorites'), 'info');
-    });
-
-    document.getElementById('btn-save-notes')?.addEventListener('click', () => {
-      const notesEl = document.getElementById('inline-notes') as HTMLTextAreaElement;
-      if (notesEl) {
-        vaultStore.updateCredential(cred.id, { notes: notesEl.value });
-        this.showToast(this.tr('Notes enregistrées', 'Notes saved'), 'success');
-      }
-    });
-
-    document.querySelectorAll('.linked-task-row').forEach(el => {
-      el.addEventListener('click', () => {
-        const taskId = (el as HTMLElement).dataset.taskId;
-        if (taskId) {
-          this.activeView = 'tasks';
-          this.selectedItemId = taskId;
-          this.renderList();
-          this.renderDetail(taskId);
-        }
-      });
-    });
-
-    document.getElementById('btn-delete-cred')?.addEventListener('click', async () => {
-      if (!this.canEdit(cred.vaultId)) return;
-      const confirmed = await this.confirmDialog({
-        title: this.tr('Supprimer l’identifiant ?', 'Delete credential?'),
-        message: this.tr(
-          `« ${cred.title} » ira dans la corbeille avec son historique et ses fichiers, pendant 30 jours. Les tâches liées sont conservées.`,
-          `"${cred.title}" will go to the trash with its history and files, for 30 days. Linked tasks are kept.`
-        ),
-        confirmLabel: this.tr('Supprimer', 'Delete'),
-        danger: true,
-        skippable: true
-      });
-      if (confirmed) {
-        // L'identifiant part à la corbeille avec ses fichiers : ils ne quittent le serveur qu'à son vidage
-        vaultStore.deleteCredential(cred.id);
-        this.selectedItemId = null;
-        this.renderDetail(null);
-        this.showToast(this.tr('Identifiant mis à la corbeille', 'Credential moved to trash'), 'info', 6000, this.undoDelete(cred.id));
-      }
-    });
-
-    document.getElementById('btn-edit-cred')?.addEventListener('click', () => {
-      this.openCreateCredentialModal(cred.id);
-    });
-
-    // Champs des types carte, identité et clé : affichage et copie
-    document.getElementById('detail-container')?.addEventListener('click', async event => {
-      const target = event.target as HTMLElement;
-      const box = target.closest('.field-box');
-      const value = box?.querySelector<HTMLElement>('[data-secret-view]');
-      if (!value) return;
-      const secret = value.dataset.secretValue ?? '';
-
-      if (target.closest('[data-secret-toggle]')) {
-        const button = target.closest('[data-secret-toggle]') as HTMLButtonElement;
-        const shown = value.dataset.secretShown === 'true';
-        value.dataset.secretShown = String(!shown);
-        value.textContent = shown ? '•'.repeat(Math.min(secret.length, 20)) : secret;
-        button.title = shown ? this.tr('Afficher', 'Show') : this.tr('Masquer', 'Hide');
-        return;
-      }
-
-      if (target.closest('[data-secret-copy]')) {
-        const sensitive = (target.closest('[data-secret-copy]') as HTMLElement).dataset.sensitive === 'true';
-        await this.copyToClipboardWithAutoClear(secret, this.tr('Copié', 'Copied'), sensitive);
-      }
-    });
-
-    document.getElementById('btn-renew-cred')?.addEventListener('click', () => {
-      this.openCreateCredentialModal(cred.id, { renew: true });
-    });
-
-    const versioning = document.querySelector<HTMLElement>('[data-versioning]');
-    if (versioning) wireVersioning(versioning, cred, this.versionsContext('credential', cred.id));
-
-    document.querySelectorAll('.btn-copy-history').forEach(el => {
-      el.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const pwd = (el as HTMLElement).dataset.pwd;
-        if (pwd) {
-          await navigator.clipboard.writeText(pwd);
-          this.showToast(this.tr('Ancien mot de passe copié', 'Previous password copied'), 'success');
-        }
-      });
-    });
-
-    // Gestion des Champs Personnalisés
-    const currentFields = [...(cred.fields || [])];
-    const cfForm = document.getElementById('cf-form');
-    const cfShowButton = document.getElementById('btn-show-cf-form');
-    const toggleCustomFieldForm = (open: boolean) => {
-      if (cfForm) cfForm.hidden = !open;
-      if (cfShowButton) cfShowButton.hidden = open;
-      if (open) (document.getElementById('input-cf-label') as HTMLInputElement | null)?.focus();
-    };
-    cfShowButton?.addEventListener('click', () => toggleCustomFieldForm(true));
-    document.getElementById('btn-cancel-cf')?.addEventListener('click', () => toggleCustomFieldForm(false));
-
-    document.getElementById('btn-add-cf')?.addEventListener('click', () => {
-      const labelInput = document.getElementById('input-cf-label') as HTMLInputElement;
-      const valInput = document.getElementById('input-cf-val') as HTMLInputElement;
-      const maskedInput = document.getElementById('input-cf-masked') as HTMLInputElement;
-
-      const label = labelInput?.value.trim();
-      const val = valInput?.value.trim();
-      if (label && val) {
-        const newField = {
-          id: 'cf-' + Math.random().toString(36).substring(2, 8),
-          label,
-          value: val,
-          isMasked: !!maskedInput?.checked
-        };
-        vaultStore.updateCredential(cred.id, { fields: [...currentFields, newField] });
-        this.renderDetail(cred.id);
-        this.showToast(this.tr('Champ ajouté', 'Field added'), 'success');
-      } else {
-        this.showToast(this.tr('Le libellé et la valeur sont requis', 'Label and value are required'), 'error');
-      }
-    });
-
-    document.querySelectorAll('.btn-reveal-cf').forEach(el => {
-      el.addEventListener('click', (e) => {
-        const cfId = (e.currentTarget as HTMLElement).dataset.cfId;
-        const rawVal = (e.currentTarget as HTMLElement).dataset.val;
-        const valEl = document.getElementById(`cf-val-${cfId}`);
-        if (valEl && rawVal) {
-          const isCurrentlyMasked = valEl.classList.contains('masked');
-          valEl.textContent = isCurrentlyMasked ? rawVal : '••••••••••••';
-          valEl.classList.toggle('masked');
-        }
-      });
-    });
-
-    document.querySelectorAll('.btn-copy-cf').forEach(el => {
-      el.addEventListener('click', async (e) => {
-        const val = (e.currentTarget as HTMLElement).dataset.val;
-        if (val) {
-          await navigator.clipboard.writeText(val);
-          this.showToast(this.tr('Valeur copiée', 'Value copied'), 'success');
-        }
-      });
-    });
-
-    document.querySelectorAll('.btn-del-cf').forEach(el => {
-      el.addEventListener('click', (e) => {
-        const cfId = (e.currentTarget as HTMLElement).dataset.cfId;
-        const updated = currentFields.filter(f => f.id !== cfId);
-        vaultStore.updateCredential(cred.id, { fields: updated });
-        this.renderDetail(cred.id);
-      });
-    });
-
-    document.getElementById('btn-add-task-for-cred')?.addEventListener('click', () => {
-      this.openCreateTaskModal(cred.id);
-    });
-
-    this.bindAttachments(container, cred);
-
-    document.getElementById('btn-detail-back-cred')?.addEventListener('click', () => {
-      document.getElementById('detail-container')?.classList.remove('mobile-active');
-    });
+    renderDetail(this, id);
   }
 
   /* ── TOTP Live Refresh ─────────────────────────────────────────────────── */
-  private updateLiveTOTP(): void {
+  updateLiveTOTP(): void {
     if (this.totpInterval) clearInterval(this.totpInterval);
     if (!this.selectedItemId) return;
     const data = vaultStore.getData();
@@ -2290,7 +1062,7 @@ export class AppController {
   }
 
   /** Menu « … » regroupant les actions secondaires d'une fiche */
-  private renderActionMenu(items: Array<{ id: string; label: string; icon: string; danger?: boolean } | 'separator'>): string {
+  renderActionMenu(items: Array<{ id: string; label: string; icon: string; danger?: boolean } | 'separator'>): string {
     return `
       <div class="action-menu">
         <button class="icon-btn action-menu-trigger" aria-haspopup="menu" aria-expanded="false" title="${this.tr('Plus d’actions', 'More actions')}"
@@ -2306,7 +1078,7 @@ export class AppController {
       </div>`;
   }
 
-  private bindActionMenus(root: HTMLElement): void {
+  bindActionMenus(root: HTMLElement): void {
     root.querySelectorAll<HTMLElement>('.action-menu').forEach(menu => {
       const trigger = menu.querySelector('.action-menu-trigger') as HTMLButtonElement;
       const list = menu.querySelector('.action-menu-list') as HTMLElement;
@@ -2354,12 +1126,12 @@ export class AppController {
   }
 
   /* ── Créer ou Modifier un Identifiant ────────────────────────────────── */
-  private openCreateCredentialModal(existingCredId?: string, options: { renew?: boolean } = {}): void {
+  openCreateCredentialModal(existingCredId?: string, options: { renew?: boolean } = {}): void {
     openCreateCredentialModal(this, existingCredId, options);
   }
 
   /* ── Créer ou Modifier une Tâche ─────────────────────────────────────── */
-  private openCreateTaskModal(linkedCredentialId?: string, existingTaskId?: string): void {
+  openCreateTaskModal(linkedCredentialId?: string, existingTaskId?: string): void {
     openCreateTaskModal(this, linkedCredentialId, existingTaskId);
   }
 
@@ -2388,7 +1160,7 @@ export class AppController {
   /* ── Audit de Sécurité du Coffre ────────────────────────────────────────── */
   /* ── Versions, conflits, corbeille ─────────────────────────────────── */
 
-  private versionsContext(kind: 'credential' | 'task', id: string): VersionsContext {
+  versionsContext(kind: 'credential' | 'task', id: string): VersionsContext {
     return {
       tr: (fr, en) => this.tr(fr, en),
       esc: value => this.escapeHtml(value),
@@ -2656,7 +1428,7 @@ export class AppController {
   }
 
   /* ── Pièces jointes ──────────────────────────────────────────────────── */
-  private renderAttachments(cred: CredentialItem): string {
+  renderAttachments(cred: CredentialItem): string {
     const tr = (fr: string, en: string) => this.tr(fr, en);
     const files = cred.attachments ?? [];
     const formatSize = formatFileSize;
@@ -2682,7 +1454,7 @@ export class AppController {
       </div>`;
   }
 
-  private bindAttachments(container: HTMLElement, cred: CredentialItem): void {
+  bindAttachments(container: HTMLElement, cred: CredentialItem): void {
     const tr = (fr: string, en: string) => this.tr(fr, en);
     const current = () => vaultStore.getData().credentials.find(c => c.id === cred.id);
 
@@ -3241,7 +2013,7 @@ export class AppController {
   /* ── Dossiers ────────────────────────────────────────────────────────── */
 
   /** Fil d'Ariane du dossier ouvert, affiché en haut de la liste */
-  private renderFolderBreadcrumb(): string {
+  renderFolderBreadcrumb(): string {
     if (!this.activeFolderId) return '';
     const path = vaultStore.folderPath(this.activeFolderId);
     if (!path.length) return '';
@@ -3348,7 +2120,7 @@ export class AppController {
   }
 
   /** Range un élément dans un dossier et propose de revenir en arrière */
-  private moveItemToFolder(credentialId: string, folderId: string | null): void {
+  moveItemToFolder(credentialId: string, folderId: string | null): void {
     const item = vaultStore.getData().credentials.find(c => c.id === credentialId);
     const folder = folderId ? vaultStore.getFolder(folderId) : undefined;
     if (!item || (folderId && !folder)) return;
@@ -3377,7 +2149,7 @@ export class AppController {
   }
 
   /** Action « Annuler » d'une notification de suppression : l'élément revient de la corbeille */
-  private undoDelete(id: string): { label: string; run: () => void } {
+  undoDelete(id: string): { label: string; run: () => void } {
     return {
       label: this.tr('Annuler', 'Undo'),
       run: () => {
@@ -3540,7 +2312,7 @@ export class AppController {
       </button>`).join('')}</div>`;
   }
 
-  private typeBadge(type: ItemType, templateId?: string): string {
+  typeBadge(type: ItemType, templateId?: string): string {
     const info = ITEM_TYPE_INFO[type];
     const custom = templateId ? vaultStore.getTemplates().find(t => t.id === templateId) : undefined;
     return `<span class="item-type-badge">${tabIcon(info.icon, 13)}${this.escapeHtml(custom?.name ?? this.tr(info.fr, info.en))}</span>`;
@@ -3576,7 +2348,7 @@ export class AppController {
   }
 
   /** Champs affichés pour une carte, une identité ou une clé */
-  private renderTypeDetail(cred: CredentialItem): string {
+  renderTypeDetail(cred: CredentialItem): string {
     const type = itemTypeOf(cred.type);
     const tr = (fr: string, en: string) => this.tr(fr, en);
 
@@ -3620,7 +2392,7 @@ export class AppController {
   }
 
   /** Ce qui distingue l'élément dans la liste, selon son type */
-  private itemSubtitle(cred: CredentialItem): string {
+  itemSubtitle(cred: CredentialItem): string {
     const type = itemTypeOf(cred.type);
     const info = ITEM_TYPE_INFO[type];
     const fallback = this.tr(info.fr, info.en);
@@ -3669,7 +2441,7 @@ export class AppController {
    * Seuls http et https sont rendus cliquables : « javascript: » et « data: »
    * ne contiennent aucun caractère à échapper et passeraient l'échappement.
    */
-  private safeHref(raw: string): string {
+  safeHref(raw: string): string {
     const value = (raw ?? '').trim();
     if (!value) return '';
     const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(value) ? value : `https://${value}`;
@@ -3681,7 +2453,7 @@ export class AppController {
     }
   }
 
-  private renderTagChips(tags: string[]): string {
+  renderTagChips(tags: string[]): string {
     if (!tags.length) return '';
     return `<div class="tag-chip-row">${tags.map(name => {
       const tag = vaultStore.getTagByName(name);
