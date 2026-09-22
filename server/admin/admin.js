@@ -12,6 +12,7 @@ const TEXT = {
   publicUrl: ['Adresse publique', 'Public address'],
   publicUrlHint: ['Affichée dans les emails envoyés aux utilisateurs.', 'Shown in emails sent to users.'],
   registrationOpen: ['Inscriptions ouvertes', 'Registration open'],
+  attachmentsEnabled: ['Accepter les fichiers joints', 'Accept file attachments'],
   limits: ['Limites', 'Limits'],
   limitsHint: ['Les coffres sont chiffrés : les applications appliquent ces limites avant l’envoi, le serveur vérifie la taille.', 'Vaults are encrypted: apps enforce these limits before upload, the server checks the size.'],
   smtpHint: ['Sert aux codes de réinitialisation et aux alertes de sécurité. Laissez l’hôte vide pour désactiver les emails.', 'Used for reset codes and security alerts. Leave the host empty to turn emails off.'],
@@ -166,6 +167,7 @@ function fill({ settings }) {
 
   $('publicUrl').value = settings.publicUrl ?? '';
   $('registrationOpen').checked = settings.registrationOpen;
+  $('attachmentsEnabled').checked = settings.attachmentsEnabled !== false;
   for (const [key] of LIMITS) {
     $(`limit-${key}`).value = MB_FIELDS[key]
       ? Math.round(settings.limits[MB_FIELDS[key]] / 1048576)
@@ -258,6 +260,7 @@ $('settings-form').addEventListener('submit', async event => {
   const body = {
     publicUrl: $('publicUrl').value,
     registrationOpen: $('registrationOpen').checked,
+    attachmentsEnabled: $('attachmentsEnabled').checked,
     limits,
     backup,
     avatars: { uploads: $('avatarUploads').checked, remoteUrls: $('avatarUrls').checked },

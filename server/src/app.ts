@@ -364,7 +364,13 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         limits: settings.limits,
         registrationOpen: settings.registrationOpen,
         emailEnabled: !!settings.smtp,
-        avatars: { ...(settings.avatars ?? DEFAULT_AVATARS), maxBytes: settings.limits.maxAvatarBytes }
+        avatars: { ...(settings.avatars ?? DEFAULT_AVATARS), maxBytes: settings.limits.maxAvatarBytes },
+        // Consulté avant un import : l'application sait d'avance si les fichiers auront leur place
+        attachments: {
+          enabled: !!options.filesDir && settings.attachmentsEnabled !== false,
+          maxBytes: settings.limits.maxAttachmentBytes,
+          quotaBytes: settings.limits.attachmentQuotaBytes
+        }
       }
     }),
 

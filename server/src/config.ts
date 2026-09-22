@@ -41,6 +41,11 @@ export interface ServerSettings {
   limits: ServerLimits;
   /** Inscription de nouveaux comptes autorisée */
   registrationOpen: boolean;
+  /**
+   * Fichiers joints stockés sur ce serveur. Désactivé, l'envoi est refusé et
+   * l'application garde les petits fichiers dans le coffre chiffré lui-même.
+   */
+  attachmentsEnabled: boolean;
   /** Adresse publique de l'application, utilisée dans les emails */
   publicUrl: string;
   smtp: SmtpConfig | null;
@@ -157,6 +162,7 @@ export function settingsFromEnv(env: Env): ServerSettings {
   return {
     limits: limitsFromEnv(env),
     registrationOpen: env.REGISTRATION_OPEN !== 'false',
+    attachmentsEnabled: env.ATTACHMENTS_ENABLED !== 'false',
     publicUrl: env.PUBLIC_URL?.trim().replace(/\/+$/, '') ?? '',
     smtp: smtpFromEnv(env),
     backup: {
@@ -196,6 +202,7 @@ export function parseSettingsUpdate(input: unknown, current: ServerSettings): Se
     }
   }
   if (typeof body.registrationOpen === 'boolean') next.registrationOpen = body.registrationOpen;
+  if (typeof body.attachmentsEnabled === 'boolean') next.attachmentsEnabled = body.attachmentsEnabled;
   if (typeof body.publicUrl === 'string') next.publicUrl = body.publicUrl.trim().replace(/\/+$/, '');
 
   if (body.smtp === null) {

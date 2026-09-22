@@ -69,6 +69,7 @@ const EXACT: Record<string, string> = {
   'Compte inconnu': 'Unknown account',
   'Coffre inconnu': 'Unknown vault',
   'Fichier inconnu': 'Unknown file',
+  'Ce serveur n’accepte pas de nouveaux fichiers': 'This server does not accept new files',
   'Route inconnue': 'Unknown route',
   'Transférez la propriété ou supprimez le coffre avant de le quitter': 'Transfer ownership or delete the vault before leaving it',
   'Requête trop volumineuse': 'Request too large',

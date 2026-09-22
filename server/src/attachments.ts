@@ -24,6 +24,17 @@ function requireFiles(ctx: RouteContext): void {
   if (!ctx.filesDir) throw new HttpError(503, 'attachments_disabled', 'Les pièces jointes ne sont pas activées sur ce serveur');
 }
 
+/*
+ * L'hébergeur peut refuser les nouveaux fichiers sans rendre illisibles ceux déjà
+ * déposés : seul l'envoi est bloqué, la lecture et la suppression restent possibles.
+ */
+function requireUploads(ctx: RouteContext): void {
+  requireFiles(ctx);
+  if (ctx.settings().attachmentsEnabled === false) {
+    throw new HttpError(403, 'attachments_disabled', 'Ce serveur n’accepte pas de nouveaux fichiers');
+  }
+}
+
 /** Espace utilisé par un compte : ses fichiers personnels et ceux des coffres partagés qu'il possède */
 export function usedBytes(ctx: RouteContext, ownerId: string): number {
   const row = ctx.db.prepare(`
@@ -85,13 +96,13 @@ export function attachmentRoutes(ctx: RouteContext): PatternRoute[] {
     route('GET', '/api/v1/attachments/usage', async req => {
       const { userId } = ctx.authenticate(req);
       const limits = ctx.limitsFor(userId);
-      return { status: 200, body: { enabled: !!ctx.filesDir, usedBytes: usedBytes(ctx, userId), quotaBytes: limits.attachmentQuotaBytes, maxFileBytes: limits.maxAttachmentBytes } };
+      return { status: 200, body: { enabled: !!ctx.filesDir && ctx.settings().attachmentsEnabled !== false, usedBytes: usedBytes(ctx, userId), quotaBytes: limits.attachmentQuotaBytes, maxFileBytes: limits.maxAttachmentBytes } };
     }),
 
     route('POST', '/api/v1/attachments', async req => {
       const { userId } = ctx.authenticate(req);
       ctx.limit(req, 'attachments');
-      requireFiles(ctx);
+      requireUploads(ctx);
       const vaultParam = new URL(req.url ?? '/', 'http://localhost').searchParams.get('vault');
       let quotaOwner = userId;
       let vaultId: string | null = null;
