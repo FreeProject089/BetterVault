@@ -20,19 +20,12 @@ import { secretGridHtml } from './ui/secretDisplay';
 import { translateError } from './i18n/errorMessages';
 import { tabIcon } from './ui/tabIcons';
 import { ProfileStore } from './account/profiles';
-import { openImportExportModal } from './ui/importExportModal';
 import { ACTION_ICONS, GEN_ICONS, tagColor, VAULT_ICON } from './ui/icons';
-import { openTagManagerModal } from './ui/tagManagerModal';
-import { openEraseModal } from './ui/eraseModal';
-import { openVaultModal } from './ui/vaultModal';
 import { mountGenerator } from './ui/generator';
 import { registerServices } from './app/services';
 import { renderList } from './ui/listView';
 import { renderDetail } from './ui/detailView';
 import { openCreateTaskModal } from './ui/taskModal';
-import { openAuditModal } from './ui/auditModal';
-import { openShortcutsModal } from './ui/shortcutsModal';
-import { openAccountModal } from './ui/accountModal';
 import { openCreateCredentialModal } from './ui/credentialModal';
 import { loadSavedTheme, saveTheme, applyTheme } from './ui/themes';
 import { mountTemplateEditor } from './ui/itemTemplatesUi';
@@ -1279,12 +1272,14 @@ export class AppController {
   }
 
   private openAuditModal(): void {
-    openAuditModal(this);
+    // Chargée à la première ouverture : l'application démarre sans elle
+    void import('./ui/auditModal').then(m => m.openAuditModal(this)).catch(err => this.showToast(accountErrorMessage(err), 'error'));
   }
 
   /* ── Import & Export Hub ────────────────────────────────────────────────── */
   private openImportModal(): void {
-    openImportExportModal(this, { accountService, sharedVaults });
+    // Chargée à la première ouverture : l'application démarre sans elle
+    void import('./ui/importExportModal').then(m => m.openImportExportModal(this, { accountService, sharedVaults })).catch(err => this.showToast(accountErrorMessage(err), 'error'));
   }
 
   /* ── Compte : déverrouillage, verrouillage, synchronisation ─────────── */
@@ -1639,11 +1634,34 @@ export class AppController {
     }).observe(document.body, { childList: true, subtree: true });
   }
 
+  /**
+   * Les fenêtres moins courantes ne sont pas dans le premier chargement. Une fois
+   * l'application affichée, on les récupère en tâche de fond : elles s'ouvrent
+   * aussitôt, et le service worker les garde pour le mode hors ligne.
+   */
+  private windowsPreloaded = false;
+  private preloadWindows(): void {
+    if (this.windowsPreloaded) return;
+    this.windowsPreloaded = true;
+    window.setTimeout(() => {
+      for (const load of [
+        () => import('./ui/accountModal'),
+        () => import('./ui/importExportModal'),
+        () => import('./ui/vaultModal'),
+        () => import('./ui/auditModal'),
+        () => import('./ui/eraseModal'),
+        () => import('./ui/tagManagerModal'),
+        () => import('./ui/shortcutsModal')
+      ]) void load().catch(() => undefined);
+    }, 4000);
+  }
+
   private showApp(data: UnlockedVaultData): void {
     vaultStore.load(data);
     vaultStore.setPersistence(snapshot => void accountService.save(sharedVaults.split(snapshot)));
     void this.refreshSharedVaults();
     this.purgeExpiredTrash();
+    this.preloadWindows();
     this.selectedItemId = null;
     this.activeTag = null;
     (document.getElementById('app') as HTMLElement).hidden = false;
@@ -1809,7 +1827,8 @@ export class AppController {
   }
 
   private openAccountModal(): void {
-    openAccountModal(this);
+    // Chargée à la première ouverture : l'application démarre sans elle
+    void import('./ui/accountModal').then(m => m.openAccountModal(this)).catch(err => this.showToast(accountErrorMessage(err), 'error'));
   }
 
   /* ── Appareil : déverrouillage biométrique et remplissage automatique ── */
@@ -1969,7 +1988,8 @@ export class AppController {
 
   /* ── Coffres ─────────────────────────────────────────────────────────── */
   openEraseModal(): void {
-    openEraseModal(this);
+    // Chargée à la première ouverture : l'application démarre sans elle
+    void import('./ui/eraseModal').then(m => m.openEraseModal(this)).catch(err => this.showToast(accountErrorMessage(err), 'error'));
   }
 
   /**
@@ -2007,7 +2027,8 @@ export class AppController {
   }
 
   openVaultModal(vaultId?: string): void {
-    openVaultModal(this, vaultId);
+    // Chargée à la première ouverture : l'application démarre sans elle
+    void import('./ui/vaultModal').then(m => m.openVaultModal(this, vaultId)).catch(err => this.showToast(accountErrorMessage(err), 'error'));
   }
 
   /* ── Dossiers ────────────────────────────────────────────────────────── */
@@ -2462,7 +2483,8 @@ export class AppController {
   }
 
   private openTagManagerModal(): void {
-    openTagManagerModal(this);
+    // Chargée à la première ouverture : l'application démarre sans elle
+    void import('./ui/tagManagerModal').then(m => m.openTagManagerModal(this)).catch(err => this.showToast(accountErrorMessage(err), 'error'));
   }
 
   private runShortcut(action: ShortcutAction, searchInput: HTMLInputElement | null): void {
@@ -2510,7 +2532,8 @@ export class AppController {
 
   /* ── Raccourcis Clavier (Palette Cheat Sheet) ─────────────────────────── */
   private openShortcutsModal(): void {
-    openShortcutsModal(this);
+    // Chargée à la première ouverture : l'application démarre sans elle
+    void import('./ui/shortcutsModal').then(m => m.openShortcutsModal(this)).catch(err => this.showToast(accountErrorMessage(err), 'error'));
   }
 }
 
