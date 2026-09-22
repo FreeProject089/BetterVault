@@ -53,3 +53,40 @@ describe('Documentation servie par le serveur', () => {
     expect(html).toContain('aria-current="page"');
   });
 });
+
+describe('Cohérence de la documentation livrée', () => {
+  it('chaque lien interne mène à une page qui existe', async () => {
+    const { readFileSync, existsSync, readdirSync, statSync } = await import('node:fs');
+    const { join, dirname, normalize } = await import('node:path');
+
+    const pages: string[] = [];
+    const parcourir = (dir: string) => {
+      for (const nom of readdirSync(dir)) {
+        const chemin = join(dir, nom);
+        if (statSync(chemin).isDirectory()) parcourir(chemin);
+        else if (nom.endsWith('.md')) pages.push(chemin);
+      }
+    };
+    parcourir('docs');
+
+    const casses: string[] = [];
+    for (const page of pages) {
+      const contenu = readFileSync(page, 'utf8');
+      for (const lien of contenu.matchAll(/\]\(([^)#\s]+\.md)(?:#[^)]*)?\)/g)) {
+        const cible = normalize(join(dirname(page), lien[1]));
+        if (!existsSync(cible)) casses.push(`${page} → ${lien[1]}`);
+      }
+    }
+    expect(casses).toEqual([]);
+  });
+
+  it('chaque page du sommaire MkDocs existe', async () => {
+    const { readFileSync, existsSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const nav = readFileSync('mkdocs.yml', 'utf8');
+    const manquantes = [...nav.matchAll(/:\s*((?:guide|deploiement|applications|developpement)\/[\w-]+\.md|[\w-]+\.md)\s*$/gm)]
+      .map(m => m[1])
+      .filter(rel => !existsSync(join('docs', rel)));
+    expect(manquantes).toEqual([]);
+  });
+});
