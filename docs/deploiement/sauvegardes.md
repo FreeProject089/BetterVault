@@ -56,7 +56,7 @@ Ajouter, révoquer et restaurer sont réservés au rôle propriétaire et demand
 | Base SQLite (copie cohérente, compressée) | `db/bettervault-<date>.db.gz.enc` | Déjà chiffrée côté client, plus AES-256-GCM avec `BACKUP_ENCRYPTION_KEY` |
 | Pièces jointes | `files/<id>` | Chiffrées côté client, envoyées une seule fois |
 
-Sans `BACKUP_ENCRYPTION_KEY`, la copie de la base n'est pas chiffrée en plus : les coffres restent illisibles, mais les emails des comptes et les métadonnées sont en clair. La page d'administration l'indique.
+Sans `BACKUP_ENCRYPTION_KEY`, **rien n'est envoyé** : une copie de la base en clair exposerait les emails et les métadonnées. L'administration le signale en rouge.
 
 ## Restaurer
 
