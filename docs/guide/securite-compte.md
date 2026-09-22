@@ -25,6 +25,19 @@ Réservée aux comptes synchronisés : elle protège la connexion au serveur.
 
 Ensuite, chaque nouvelle connexion demande un code. Un code ne sert qu'une fois. Si un appareil reste connecté plus de 30 jours, la synchronisation demande un nouveau code dans la fenêtre du compte.
 
+## Clé de sécurité matérielle
+
+Une clé USB ou NFC (YubiKey, Titan, clé intégrée à l'appareil) remplace le code de l'application d'authentification : après le mot de passe, il suffit de la toucher.
+
+**Ajouter une clé** : *Compte* → onglet **Sécurité** → **Clés de sécurité** → **Ajouter une clé**. Le mot de passe principal est demandé, puis la clé clignote pour confirmer. Vous recevez un email à chaque ajout et à chaque retrait.
+
+**Se connecter** : saisissez le mot de passe, la demande de clé apparaît d'elle-même. Si vous l'écartez et que la double authentification par code est aussi active, le champ du code prend le relais.
+
+!!! warning "Une clé est liée à l'application où elle est enregistrée"
+    Le site web, l'application de bureau et l'extension ont chacun leur adresse : une clé ajoutée sur le site ne fonctionne pas dans l'extension. Ajoutez-la sur chaque application que vous utilisez, ou gardez un code d'application d'authentification en second moyen.
+
+Ce que le serveur vérifie à chaque connexion : l'application qui demande, l'usage unique du défi, la signature, et un compteur qui ne recule pas (signe d'une clé copiée).
+
 ## Mot de passe oublié
 
 Le lien **Mot de passe oublié ?** se trouve sur l'écran de déverrouillage et sur l'écran de connexion.

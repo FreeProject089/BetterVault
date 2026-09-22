@@ -25,6 +25,20 @@ Les types **Fichier** et **Dossier de fichiers** rangent leur contenu en [pièce
 
 Le numéro d'une carte est vérifié par le contrôle de Luhn : une faute de frappe est signalée avant l'enregistrement.
 
+## Types personnalisés
+
+Vous pouvez décrire vos propres types d'éléments : *Mes types*, dans les outils de la barre latérale.
+
+- **Créer** : un nom (Abonnement, Licence, Véhicule…) et jusqu'à 20 champs.
+- **Genre d'un champ** : texte, secret (masqué), texte long, date, nombre, adresse web. Un champ peut être **requis**.
+- **À la saisie** : un champ requis vide empêche l'enregistrement, et un nombre, une date ou une adresse mal formés sont refusés.
+
+Les valeurs sont rangées dans les champs de l'élément lui-même : modifier ou supprimer un type ne fait rien perdre, et un élément partagé s'affiche correctement chez quelqu'un qui n'a pas le type.
+
+## Pièce d'identité : recto et verso
+
+Sur un élément de type **Identité**, deux emplacements **Recto** et **Verso** acceptent une photo ou un PDF. Sur téléphone, ils ouvrent directement l'appareil photo. Le fichier est chiffré sur l'appareil, comme toute pièce jointe, et la fiche propose **Voir le recto** / **Voir le verso**.
+
 ## Fiche d'un identifiant
 
 Chaque identifiant contient :

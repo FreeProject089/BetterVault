@@ -51,6 +51,8 @@ nav:
       - Identifiants et 2FA: guide/identifiants.md
       - Tâches: guide/taches.md
       - Coffres et tags: guide/coffres-tags.md
+      - Historique et corbeille: guide/historique-corbeille.md
+      - Apparence: guide/apparence.md
       - Import et export: guide/import-export.md
       - Compte et synchronisation: guide/synchronisation.md
       - Sécurité du compte: guide/securite-compte.md
@@ -67,6 +69,7 @@ nav:
       - Sessions et lieu: deploiement/sessions-lieu.md
       - Plusieurs serveurs (grappe): deploiement/grappe.md
       - Supervision: deploiement/supervision.md
+      - Page publique et annuaire: deploiement/page-publique.md
       - Documents légaux: deploiement/documents-legaux.md
       - Espace payant (Stripe): deploiement/offres-stripe.md
   - Applications:
