@@ -179,7 +179,9 @@ export class SharedVaultManager {
     const personalVaults = data.vaults.filter(v => !sharedIds.has(v.id)).map(({ shared: _shared, ...vault }) => vault);
     if (!sharedIds.has(data.activeVaultId)) this.lastPersonalVaultId = data.activeVaultId;
 
+    // Tout le reste (types de coffre, types d'éléments, corbeille…) suit tel quel : le nommer un à un en oubliait
     const personal: UnlockedVaultData = {
+      ...data,
       vaults: personalVaults,
       activeVaultId: sharedIds.has(data.activeVaultId) ? (this.lastPersonalVaultId || personalVaults[0]?.id || '') : data.activeVaultId,
       credentials: data.credentials.filter(c => !sharedIds.has(c.vaultId)),

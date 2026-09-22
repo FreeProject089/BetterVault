@@ -84,3 +84,19 @@ describe('Types d’éléments personnalisés', () => {
     });
   });
 });
+
+describe('Enregistrement d’un compte synchronisé', () => {
+  it('garde types d’éléments, types de coffre et corbeille (régression)', async () => {
+    const { SharedVaultManager } = await import('../src/account/sharedVaults');
+    const manager = new SharedVaultManager({} as never);
+    const data = normalizeVaultData({
+      itemTemplates: [licence],
+      vaultTypes: [{ id: 'vtype-perso01', name: 'Famille', createdAt: 1, updatedAt: 1 }],
+      trash: [{ kind: 'credential', item: { id: 'cred-supprime1', title: 'x' }, deletedAt: Date.now() } as never]
+    });
+    const personal = manager.split(data, { save: false });
+    expect(personal.itemTemplates?.map(t => t.id)).toEqual(['tpl-licence01']);
+    expect(personal.vaultTypes?.map(t => t.name)).toEqual(['Famille']);
+    expect(personal.trash).toHaveLength(1);
+  });
+});
