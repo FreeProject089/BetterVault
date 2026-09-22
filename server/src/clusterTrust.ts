@@ -73,6 +73,8 @@ const ZONE = /^[A-Z][A-Z0-9]{1,9}$/;
 const REGION = /^[A-Za-z0-9-]{1,20}$/;
 const NODE_ID = /^n-[a-f0-9]{16}$/;
 const MAX_SKEW_MS = 5 * 60 * 1000;
+/** Nombre de nœuds accepté dans un manifeste : une grappe en compte quelques-uns */
+const MAX_NODES = 64;
 const INVITE_TTL_MS = 60 * 60 * 1000;
 const SPKI_ED25519 = Buffer.from('302a300506032b6570032100', 'hex');
 
@@ -324,6 +326,7 @@ export function createClusterTrust(options: {
     if (!m) return false;
     const { manifest: next, signature } = signed;
     if (!next || next.clusterId !== m.cluster_id || !Number.isInteger(next.epoch) || next.epoch <= m.epoch) return false;
+    if (!Array.isArray(next.nodes) || next.nodes.length > MAX_NODES) return false;
     let valid = false;
     try {
       valid = verify(null, Buffer.from(canonical(next)), publicFromRaw(m.root_key), Buffer.from(String(signature), 'base64url'));

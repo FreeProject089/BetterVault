@@ -873,8 +873,11 @@ const HEALTH = {
   revoked: ['Révoqué', 'Revoked', 'fail'],
   'other-zone': ['Autre zone', 'Other zone', 'muted']
 };
+/* L'état vient du manifeste d'un autre nœud : un état inconnu s'affiche comme
+   du texte, jamais comme du HTML. */
 const healthBadge = health => {
-  const [f, e, tone] = HEALTH[health] ?? [health, health, 'muted'];
+  const connu = HEALTH[Object.prototype.hasOwnProperty.call(HEALTH, health) ? health : ''];
+  const [f, e, tone] = connu ?? [escapeHtml(String(health)), escapeHtml(String(health)), 'muted'];
   return `<span class="badge ${tone}">${fr ? f : e}</span>`;
 };
 const when = ms => (ms ? new Date(ms).toLocaleString(locale) : '—');
@@ -971,9 +974,12 @@ function clusterMap(view) {
     const startX = width / 2 - (step * (inZone.length - 1)) / 2;
     const placed = inZone.map((node, i) => ({ node, x: startX + i * step, y }));
 
-    // Liens : chaque couple de nœuds actifs de la zone se réplique
+    // Liens : chaque couple de nœuds actifs de la zone se réplique.
+    // Au-delà de 16 nœuds dans une zone, on ne dessine plus le maillage complet :
+    // il compterait des centaines de traits pour une lisibilité nulle.
     const links = [];
-    for (let a = 0; a < placed.length; a++) {
+    const maille = placed.length <= 16;
+    for (let a = 0; maille && a < placed.length; a++) {
       for (let b = a + 1; b < placed.length; b++) {
         const live = placed[a].node.status === 'active' && placed[b].node.status === 'active';
         const touche = placed[a].node.self || placed[b].node.self;

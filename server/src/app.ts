@@ -948,10 +948,17 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     return row;
   };
 
+  /*
+   * Pages rendues par l'API (documentation, page publique, documents légaux) :
+   * aucun script, rien d'externe. La politique le dit, de sorte qu'une éventuelle
+   * faille d'échappement ne suffirait ni à exécuter du code ni à sortir une donnée.
+   */
+  const PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
   const htmlReply = (html: string, status = 200): Reply => ({
     status,
     raw: Buffer.from(html),
-    contentType: 'text/html; charset=utf-8'
+    contentType: 'text/html; charset=utf-8',
+    headers: { 'Content-Security-Policy': PAGE_CSP, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' }
   });
 
   /* ── Sauvegardes dans l'administration ─────────────────────────────────── */
@@ -1189,7 +1196,8 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     return known?.ip ?? null;
   };
 
-  const clusterView = () => {
+  /** `detailed` : adresse IP et message d'erreur brut ne sortent que pour qui opère la grappe */
+  const clusterView = (detailed = true) => {
     const snapshot = trust.snapshot();
     const interval = options.clusterIntervalMs ?? 30_000;
     const peers = new Map(cluster.status().map(p => [p.id, p]));
@@ -1214,8 +1222,11 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
             }
           })();
           return {
-            ...node, health, lag, host, ip: hostIp(host.split(':')[0]),
-            lastOkAt: peer?.lastOkAt ?? null, lastError: peer?.lastError ?? null, lastErrorAt: peer?.lastErrorAt ?? null
+            ...node, health, lag, host,
+            ip: detailed ? hostIp(host.split(':')[0]) : null,
+            lastOkAt: peer?.lastOkAt ?? null,
+            lastError: detailed ? peer?.lastError ?? null : peer?.lastError ? 'error' : null,
+            lastErrorAt: peer?.lastErrorAt ?? null
           };
         })
       } : null,
@@ -1234,8 +1245,9 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       });
     return [
       route('GET', '/api/v1/admin/cluster', async req => {
-        requireAdmin(req, 'view');
-        return { status: 200, body: clusterView() };
+        const admin = requireAdmin(req, 'view');
+        // Un rôle en lecture seule voit l'état, pas la topologie réseau détaillée
+        return { status: 200, body: clusterView(admin.role !== 'viewer') };
       }),
       act('POST', '/api/v1/admin/cluster', async (_r, _p, body) => { await trust.actions.create(body); }, 'cluster.created'),
       act('POST', '/api/v1/admin/cluster/invites', () => trust.actions.invite(), 'cluster.invite_created'),
@@ -1405,7 +1417,14 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
           const match = candidate.pattern.exec(pathname);
           if (!match) continue;
           routeLabel = `${req.method} ${candidate.pattern.source.replace(/\(\[\^\/\]\+\)/g, ':param').replace(/^\^|\$$/g, '')}`;
-          matched = { run: candidate.handler, params: Object.fromEntries(candidate.keys.map((key, i) => [key, decodeURIComponent(match[i + 1])])) };
+          // Un « % » isolé dans l'adresse fait échouer le décodage : requête invalide, pas panne
+          let params: Record<string, string>;
+          try {
+            params = Object.fromEntries(candidate.keys.map((key, i) => [key, decodeURIComponent(match[i + 1] ?? '')]));
+          } catch {
+            throw new HttpError(400, 'invalid_request', 'Adresse mal encodée');
+          }
+          matched = { run: candidate.handler, params };
           break;
         }
         if (!matched) throw new HttpError(404, 'not_found', 'Route inconnue');

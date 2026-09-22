@@ -139,6 +139,7 @@ const EXACT: Record<string, string> = {
   'La double authentification est déjà activée': 'Two-factor authentication is already on',
   'Code incorrect ou déjà utilisé': 'Incorrect or already used code',
   'Manifeste illisible': 'Unreadable manifest',
+  'Adresse mal encodée': 'Badly encoded address',
   'Envoi introuvable ou expiré : recommencez': 'Upload not found or expired: start again',
   'Taille de fichier invalide': 'Invalid file size',
   'Morceau inattendu : reprise nécessaire': 'Unexpected chunk: resume needed',

@@ -116,7 +116,7 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 // Aperçu des pièces jointes (blob:), aucun script tiers, pas d'intégration dans un autre site
-const CSP = "default-src 'self'; script-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob:; frame-src blob:; object-src 'none'; base-uri 'self'; form-action 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://api.pwnedpasswords.com; frame-ancestors 'none'";
+export const CSP = "default-src 'self'; script-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob:; frame-src blob:; object-src 'none'; base-uri 'self'; form-action 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://api.pwnedpasswords.com; frame-ancestors 'none'";
 
 /** Sert un dossier de fichiers statiques ; les chemins inconnus renvoient index.html */
 function serveStatic(root: string, pathname: string, res: ServerResponse): void {
