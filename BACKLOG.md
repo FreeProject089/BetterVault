@@ -44,4 +44,4 @@ Lot 8 — données entre serveurs
 - [x] Sauvegardes vers plusieurs destinations S3, reprise, restauration contrôlée
 - [x] Sauvegarde complète du compte (fichiers compris) et import avec bilan du serveur cible
 - [x] Historique des versions, conflits, corbeille de 30 jours
-- [ ] Envoi des fichiers par morceaux avec reprise lors d'un import
+- [x] Envoi des gros fichiers par morceaux de 4 Mo, avec reprise après coupure

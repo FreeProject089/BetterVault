@@ -1,4 +1,4 @@
-﻿# Changer de compte ou de serveur
+# Changer de compte ou de serveur
 
 La **grappe** réplique automatiquement vos données entre les serveurs d'un même opérateur. Pour partir ailleurs (un autre compte, ou un serveur tenu par quelqu'un d'autre), c'est vous qui déplacez vos données avec une **sauvegarde complète**.
 
@@ -38,4 +38,4 @@ Le bilan explique ce qui bloque :
 
 Vous pouvez importer sans ce qui dépasse : rien n'est perdu, tout reste dans le fichier de sauvegarde.
 
-Si la connexion coupe pendant l'envoi des fichiers, chaque envoi est retenté. Si l'import échoue quand même, le coffre n'est pas modifié et vous pouvez relancer l'import.
+Les gros fichiers partent par morceaux de 4 Mo. Si la connexion coupe, l'envoi reprend là où le serveur s'est arrêté, sans tout renvoyer. Si l'import échoue quand même, le coffre n'est pas modifié, les fichiers déjà envoyés sont retirés du serveur, et vous pouvez relancer l'import.

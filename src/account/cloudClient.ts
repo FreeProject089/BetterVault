@@ -199,6 +199,9 @@ export function normalizeServerUrl(input: string): string {
   return url.origin + url.pathname.replace(/\/+$/, '');
 }
 
+/** Même valeur que CHUNK_BYTES côté serveur */
+export const UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024;
+
 export class CloudClient {
   readonly baseUrl: string;
   private token: string | null;
@@ -475,9 +478,49 @@ export class CloudClient {
     return response;
   }
 
-  async uploadAttachment(payload: Uint8Array, sharedVaultId?: string): Promise<{ id: string; size: number }> {
+  /**
+   * Envoie un fichier chiffré. Au-delà d'un morceau, l'envoi se fait par morceaux :
+   * une coupure ne fait perdre que le morceau en cours, et l'envoi reprend là où le
+   * serveur s'est arrêté. Un serveur plus ancien, sans cette route, reçoit le
+   * fichier d'un seul bloc.
+   */
+  async uploadAttachment(payload: Uint8Array, sharedVaultId?: string, onProgress?: (sent: number, total: number) => void): Promise<{ id: string; size: number }> {
     const query = sharedVaultId ? `?vault=${encodeURIComponent(sharedVaultId)}` : '';
-    return (await this.rawRequest('POST', `/api/v1/attachments${query}`, payload)).json();
+    const direct = async () => (await this.rawRequest('POST', `/api/v1/attachments${query}`, payload)).json() as Promise<{ id: string; size: number }>;
+    if (payload.length <= UPLOAD_CHUNK_BYTES) return direct();
+
+    let session: { uploadId: string; chunkBytes: number; received: number };
+    try {
+      session = await this.request('POST', '/api/v1/attachments/uploads', { size: payload.length, ...(sharedVaultId ? { vault: sharedVaultId } : {}) });
+    } catch (err) {
+      if (err instanceof CloudError && err.status === 404 && err.code !== 'upload_not_found') return direct();
+      throw err;
+    }
+    const path = `/api/v1/attachments/uploads/${encodeURIComponent(session.uploadId)}`;
+    const chunk = Math.min(session.chunkBytes || UPLOAD_CHUNK_BYTES, UPLOAD_CHUNK_BYTES);
+    let received = session.received;
+    let failures = 0;
+    try {
+      while (received < payload.length) {
+        try {
+          const part = payload.subarray(received, Math.min(received + chunk, payload.length));
+          received = (await (await this.rawRequest('PUT', `${path}?offset=${received}`, part)).json() as { received: number }).received;
+          failures = 0;
+          onProgress?.(received, payload.length);
+        } catch (err) {
+          // Coupure ou morceau refusé : on relit où en est le serveur, et on reprend de là
+          const retryable = err instanceof CloudError && (err.code === 'network' || err.code === 'offset_mismatch' || err.status >= 500 || err.status === 429);
+          if (!retryable || ++failures > 5) throw err;
+          await new Promise(resolve => setTimeout(resolve, Math.min(8000, 500 * 2 ** failures)));
+          received = (await this.request<{ received: number }>('GET', path)).received;
+        }
+      }
+      return await this.request<{ id: string; size: number }>('POST', `${path}/complete`);
+    } catch (err) {
+      // Abandon : la place réservée est rendue tout de suite plutôt qu'au bout d'un jour
+      await this.request('DELETE', path).catch(() => undefined);
+      throw err;
+    }
   }
 
   async downloadAttachment(id: string): Promise<Uint8Array> {
