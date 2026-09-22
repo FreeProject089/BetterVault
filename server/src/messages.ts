@@ -138,6 +138,7 @@ const EXACT: Record<string, string> = {
   'Stripe injoignable': 'Stripe unreachable',
   'La double authentification est déjà activée': 'Two-factor authentication is already on',
   'Code incorrect ou déjà utilisé': 'Incorrect or already used code',
+  'Manifeste illisible': 'Unreadable manifest',
   'Votre clé de sécurité est enregistrée dans une autre application BetterVault. Connectez-vous depuis celle-ci, ou utilisez votre clé de récupération.': 'Your security key is registered in another BetterVault app. Sign in from that one, or use your recovery key.',
   'Clé de sécurité ou code de l’application requis': 'Security key or authenticator app code required',
   'Clé de sécurité inconnue': 'Unknown security key',

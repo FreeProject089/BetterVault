@@ -1027,12 +1027,21 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       }),
 
       route('POST', '/api/v1/admin/backup/test', async req => {
-        requireAdmin(req, 'operate');
         const body = await readJson(req, 4096);
+        /*
+         * Tester une adresse saisie fait sortir le serveur vers elle : c'est réservé au
+         * propriétaire, mot de passe reconfirmé, comme l'ajout d'une destination.
+         * Le secret enregistré n'est repris que pour la même adresse, le même bucket et
+         * la même clé d'accès : jamais pour signer des requêtes vers un autre hôte.
+         */
+        requireAdmin(req, body.s3 ? 'manage' : 'operate', !!body.s3);
         try {
           if (body.s3) {
-            const s3 = parseS3(body.s3 as never, typeof body.destinationId === 'string'
-              ? effectiveDestinations(settings.backup).find(d => d.id === body.destinationId)?.s3.secretAccessKey ?? '' : '');
+            const input = body.s3 as { endpoint?: unknown; bucket?: unknown; accessKeyId?: unknown };
+            const saved = typeof body.destinationId === 'string' ? effectiveDestinations(settings.backup).find(d => d.id === body.destinationId) : undefined;
+            const same = !!saved && String(input.endpoint ?? '').trim() === saved.s3.endpoint
+              && String(input.bucket ?? '').trim() === saved.s3.bucket && String(input.accessKeyId ?? '').trim() === saved.s3.accessKeyId;
+            const s3 = parseS3(body.s3 as never, same ? saved!.s3.secretAccessKey : '');
             if (!s3) throw new Error('Adresse et bucket S3 requis');
             await need().testConfig(s3);
           } else {

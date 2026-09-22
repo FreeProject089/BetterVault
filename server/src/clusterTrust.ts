@@ -256,7 +256,15 @@ export function createClusterTrust(options: {
     };
   }
 
-  const seen = new Map<string, number>();
+  /*
+   * Nonces déjà vus, gardés en base : un redémarrage ne rouvre pas la fenêtre de
+   * cinq minutes pendant laquelle une requête capturée pourrait être rejouée.
+   */
+  db.exec('CREATE TABLE IF NOT EXISTS cluster_nonces (key TEXT PRIMARY KEY, at INTEGER NOT NULL)');
+  const rememberNonce = db.prepare('INSERT OR IGNORE INTO cluster_nonces (key, at) VALUES (?, ?)');
+  const forgetNonces = db.prepare('DELETE FROM cluster_nonces WHERE at < ?');
+  let lastNoncePurge = 0;
+  let lastForgedWarning = 0;
   /**
    * Vérifie une requête signée. `allow` choisit qui peut parler : les nœuds actifs
    * (réplication), tout nœud connu du manifeste (lire le manifeste, changer de clé),
@@ -293,10 +301,11 @@ export function createClusterTrust(options: {
     }
     if (!valid) throw refuse();
 
-    const key = `${node}:${nonce}`;
-    if (seen.has(key)) throw refuse();
-    seen.set(key, at);
-    if (seen.size > 20_000) for (const [k, t] of seen) if (t < now() - MAX_SKEW_MS) seen.delete(k);
+    if (now() - lastNoncePurge > 60_000) {
+      lastNoncePurge = now();
+      forgetNonces.run(now() - 2 * MAX_SKEW_MS);
+    }
+    if (Number(rememberNonce.run(`${node}:${nonce}`, at).changes) === 0) throw refuse();
     return found ?? { id: node, publicKey, pending: true };
   }
 
@@ -322,7 +331,11 @@ export function createClusterTrust(options: {
       valid = false;
     }
     if (!valid) {
-      event('warn', `Manifeste d’époque ${next.epoch} refusé : signature invalide`);
+      // Route ouverte à tous : on note au plus un refus par minute, pour ne pas noyer le journal
+      if (now() - lastForgedWarning > 60_000) {
+        lastForgedWarning = now();
+        event('warn', `Manifeste d’époque ${next.epoch} refusé : signature invalide`);
+      }
       return false;
     }
     const becameMember = m.state === 'joining' && next.nodes.some(n => n.id === selfId && n.status === 'active');
@@ -429,7 +442,13 @@ export function createClusterTrust(options: {
     // de manifeste pour reconnaître l'expéditeur, mais il a épinglé la clé racine
     route('POST', '/api/v1/cluster/manifest', async req => {
       const raw = await readRaw(req, 256 * 1024);
-      return acceptManifest(JSON.parse(raw) as SignedManifest) ? { status: 204 } : { status: 409, body: { error: { code: 'stale', message: 'Manifeste ignoré' } } };
+      let signed: SignedManifest;
+      try {
+        signed = JSON.parse(raw) as SignedManifest;
+      } catch {
+        throw new HttpError(400, 'invalid_request', 'Manifeste illisible');
+      }
+      return acceptManifest(signed) ? { status: 204 } : { status: 409, body: { error: { code: 'stale', message: 'Manifeste ignoré' } } };
     }),
 
     // Rotation de la clé d'un nœud : la demande est signée avec l'ancienne clé

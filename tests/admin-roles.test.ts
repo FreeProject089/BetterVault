@@ -68,6 +68,8 @@ describe('Administration : rôles', () => {
     expect((await call('PUT', 'settings', operator, { registrationOpen: false })).status).toBe(403);
     expect((await call('GET', 'accounts', operator)).status).toBe(403);
     expect((await call('GET', 'accounts', owner)).status).toBe(200);
+    // Un opérateur ne fait pas sortir le serveur vers une adresse de son choix
+    expect((await call('POST', 'backup/test', operator, { s3: { endpoint: 'http://10.0.0.5:6379', bucket: 'x' } })).status).toBe(403);
   });
 
   it('exige une reconfirmation récente pour une action sensible', async () => {

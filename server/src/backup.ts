@@ -438,7 +438,7 @@ export function createBackupService(options: {
       if (raw.subarray(0, 15).toString() !== 'SQLite format 3') throw new Error('Copie de sauvegarde illisible');
       const dir = mkdtempSync(join(tmpdir(), 'bettervault-restore-'));
       const path = join(dir, 'snapshot.db');
-      writeFileSync(path, raw);
+      writeFileSync(path, raw, { mode: 0o600 });
 
       const snap = new DatabaseSync(path, { readOnly: true });
       try {
@@ -448,6 +448,8 @@ export function createBackupService(options: {
         const token = randomBytes(24).toString('base64url');
         purgePreviews();
         previews.set(token, { path, dir, destinationId, key, expiresAt: now() + PREVIEW_TTL_MS });
+        // Effacée à l'expiration même si personne ne revient dans l'administration
+        setTimeout(purgePreviews, PREVIEW_TTL_MS + 1000).unref?.();
         const takenAt = (await this.restorePoints(destinationId)).find(p => p.key === key)?.takenAt ?? 0;
         return {
           token,
@@ -629,12 +631,15 @@ export function createBackupService(options: {
         }
         for (const id of snapIds.shared) dominate('shared_vaults', 'id', id, before.shared.get(id) ?? null);
       }
+      // La copie déchiffrée ne sert plus : elle ne reste pas sur le disque
+      rmSync(preview.dir, { recursive: true, force: true });
+      previews.delete(token);
       return { accounts: snapIds.users.length, skipped: snapIds.skipped.length, files: fetched, safetyKey };
     },
 
     start() {
       if (timer) return;
-      timer = setInterval(tick, 10 * 60_000);
+      timer = setInterval(() => { purgePreviews(); void tick(); }, 10 * 60_000);
       timer.unref?.();
       setTimeout(tick, 30_000).unref?.();
     },
