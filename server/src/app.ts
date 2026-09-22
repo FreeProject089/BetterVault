@@ -42,6 +42,7 @@ import { emails, pickLocale, type Locale } from './emails.ts';
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.ts';
 import { createWebauthn, parseRpId, type AssertionInput } from './webauthn.ts';
 import { DEFAULT_PUBLIC_PAGE, publicDirectory, renderLanding } from './directory.ts';
+import { renderDocPage } from './docs.ts';
 
 /**
  * API BetterVault : le serveur ne stocke que des données chiffrées côté client.
@@ -76,6 +77,8 @@ export interface AppOptions {
   dbPath?: string | null;
   /** Dossier des modèles de documents légaux */
   legalDir?: string;
+  /** Dossier des fichiers Markdown servis sous /docs */
+  docsDir?: string;
   /** L'application web est servie par ce même serveur (lien « Ouvrir l'application » de /about) */
   appAvailable?: boolean;
   /** Appels HTTP sortants (Stripe) ; remplaçable dans les tests */
@@ -848,6 +851,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     sessionDays: Math.round(sessionTtl / 86_400_000)
   });
   const legalDir = options.legalDir ?? fileURLToPath(new URL('../legal', import.meta.url));
+  const docsDir = options.docsDir ?? fileURLToPath(new URL('../../docs', import.meta.url));
 
   Object.assign(routes, adminAuth.routes, accountKeyRoutes(context), sessionRoutes(context), billingRoutes(context, fetchImpl), avatarRoutes(context), {
     // Consultable sans session : l'application interroge ce serveur avant même
@@ -1316,6 +1320,23 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       return htmlReply(renderNotMeDone());
     }),
     route('GET', '/legal', async req => legalPage('privacy', req)),
+    // La documentation est servie depuis les fichiers Markdown, sans générateur
+    {
+      method: 'GET',
+      // Le groupe capture toujours (quitte à être vide) : le routeur décode match[1]
+      pattern: /^\/docs\/?(.*)$/,
+      keys: ['page'],
+      handler: async (req: IncomingMessage, params: Record<string, string>): Promise<Reply> => {
+        const page = (params.page ?? '').replace(/\/$/, '');
+        const html = renderDocPage(page, {
+          root: docsDir,
+          locale: requestLocale(req) === 'en' ? 'en' : 'fr',
+          appAvailable: !!options.appAvailable
+        });
+        return html ? htmlReply(html) : htmlReply('<!DOCTYPE html><title>404</title><p>Not found</p>', 404);
+      }
+    },
+
     route('GET', '/about', async req => {
       const page = settings.publicPage ?? DEFAULT_PUBLIC_PAGE;
       if (!page.landingEnabled) return htmlReply('<!DOCTYPE html><title>404</title><p>Not found</p>', 404);

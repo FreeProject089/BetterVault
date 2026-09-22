@@ -19,6 +19,7 @@ const TEXT = {
   groupConfig: ['Configuration', 'Configuration'],
   groupInfra: ['Infrastructure', 'Infrastructure'],
   groupAccess: ['Accès', 'Access'],
+  docs: ['Documentation', 'Documentation'],
   adminsTitle: ['Administrateurs', 'Administrators'],
   adminsHint: ['Lecteur : consulter. Opérateur : lancer synchronisations, sauvegardes et tests. Propriétaire : tout, dont réglages, nœuds, secrets et restaurations.', 'Viewer: read only. Operator: run syncs, backups and tests. Owner: everything, including settings, nodes, secrets and restores.'],
   roleViewer: ['Lecteur', 'Viewer'],

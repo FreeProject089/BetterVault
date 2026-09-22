@@ -147,7 +147,8 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       res.writeHead(400).end();
       return;
     }
-    if (pathname === '/about' || pathname === '/legal' || pathname.startsWith('/legal/')) {
+    if (pathname === '/about' || pathname === '/docs' || pathname.startsWith('/docs/')
+      || pathname === '/legal' || pathname.startsWith('/legal/')) {
       void api(req, res);
       return;
     }

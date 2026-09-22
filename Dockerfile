@@ -27,6 +27,7 @@ COPY server/index.ts ./server/index.ts
 COPY server/src ./server/src
 COPY server/admin ./server/admin
 COPY server/legal ./server/legal
+COPY docs ./docs
 
 RUN mkdir -p /data && chown node:node /data
 USER node
