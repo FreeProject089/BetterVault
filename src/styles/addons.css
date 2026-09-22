@@ -4189,3 +4189,40 @@ input[type="range"]::-webkit-slider-thumb { width: 20px; height: 20px; }
 
 /* Lien « En savoir plus » d'une explication courte */
 .doc-link { color: var(--accent); font-weight: 600; white-space: nowrap; }
+
+/* ── Focus et validation des champs ───────────────────────────────────────
+   Un champ actif se voit (anneau à la couleur d'accent), et un champ que
+   l'utilisateur a laissé invalide se signale en rouge — sans rien colorer
+   avant qu'il ait eu l'occasion de le remplir (:user-invalid). */
+.form-input:focus,
+.form-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+.form-input:user-invalid {
+  border-color: var(--accent-red);
+}
+.form-input:user-invalid:focus,
+.form-input:user-invalid:focus-visible {
+  outline-color: var(--accent-red);
+}
+.btn-primary:focus-visible,
+.icon-btn:focus-visible,
+.nav-item:focus-visible,
+.tab-btn:focus-visible,
+.type-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Message d'erreur du formulaire : visible sans le chercher */
+.form-error:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--accent-red);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-red) 12%, transparent);
+  color: var(--text-primary);
+}
