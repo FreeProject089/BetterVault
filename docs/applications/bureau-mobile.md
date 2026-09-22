@@ -139,5 +139,6 @@ npm run tauri ios build
 
 - Le scan des QR codes 2FA utilise la caméra : Android demande l'autorisation au premier scan. Sur iOS, ajoutez `NSCameraUsageDescription` dans `src-tauri/gen/apple/bettervault_iOS/Info.plist` après `tauri ios init`.
 - Les exports sont enregistrés dans le dossier Documents de l'application.
-- Le trousseau du système est disponible sur iOS (Keychain), pas encore sur Android (Keystore non relié).
+- Le trousseau du système est utilisé des deux côtés : Keychain sur iOS, Android Keystore sur Android (une paire de clés y vit, et la lecture du secret demande l'empreinte ou le visage).
+- Le remplissage automatique du système est en place sur les deux : service de remplissage Android (`BetterVaultAutofillService`) et extension de mots de passe iOS. Sur iOS, l'extension se branche dans Xcode après `tauri ios init` (voir l'en-tête du fichier Swift).
 - Un serveur accessible en HTTPS est nécessaire : `127.0.0.1` désigne le téléphone lui-même.
