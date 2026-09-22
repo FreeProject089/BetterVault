@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BetterVault",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Mots de passe, codes 2FA et tâches chiffrés de bout en bout, avec remplissage des formulaires de connexion.",
   "icons": {
     "32": "icons/32.png",

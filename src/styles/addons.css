@@ -4009,3 +4009,7 @@ body.dragging-item .folder-breadcrumb button { outline: 1px dashed var(--border-
   [id^="btn-detail-back"] { min-height: 40px; min-width: 40px; display: inline-flex; align-items: center; justify-content: center; }
   .btn-primary { min-height: 36px; }
 }
+@media (max-width: 900px) {
+  /* Le menu du téléphone glisse déjà : pas de bouton de réduction ici */
+  .sidebar-collapse-btn { display: none !important; }
+}
