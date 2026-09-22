@@ -36,7 +36,18 @@ Ne lancez pas le profil `backup` et renseignez le service choisi :
 | OVHcloud | `https://s3.gra.io.cloud.ovh.net` | `true` |
 | MinIO / Garage auto-hébergé | adresse de votre instance | `true` |
 
-Renseignez aussi `BACKUP_S3_REGION`, `BACKUP_S3_BUCKET` et les clés d'accès. La page `/admin` permet de tout modifier, de **tester le stockage** et de **sauvegarder maintenant**.
+Renseignez aussi `BACKUP_S3_REGION`, `BACKUP_S3_BUCKET` et les clés d'accès. Cette destination apparaît dans l'administration sous le nom « Principal ».
+
+## Plusieurs destinations
+
+L'onglet **Sauvegardes** de `/admin` gère autant de destinations S3 que nécessaire (par exemple une chez Scaleway et une chez Backblaze). Elles sont indépendantes entre elles et de la grappe :
+
+- chaque destination reçoit sa propre copie à chaque sauvegarde ; une panne chez l'une n'empêche pas les autres ;
+- une destination en panne est **retentée automatiquement** dans l'heure, puis rattrape son retard dès qu'elle répond ;
+- l'onglet affiche pour chacune son état (à jour, en retard, en erreur), la dernière réussite, le nombre de copies, l'espace utilisé et la capacité si vous l'avez indiquée ;
+- **Ajouter** teste la connexion avant d'enregistrer. **Désactiver** suspend les envois. **Révoquer** efface tout de suite les identifiants (retirez aussi la clé chez le fournisseur) et peut désigner la destination qui la remplace. Une destination révoquée peut ensuite être **retirée** de la liste.
+
+Ajouter, révoquer et restaurer sont réservés au rôle propriétaire et demandent de reconfirmer son mot de passe. Toutes ces actions sont inscrites au journal.
 
 ## Ce qui est sauvegardé
 
@@ -49,16 +60,23 @@ Sans `BACKUP_ENCRYPTION_KEY`, la copie de la base n'est pas chiffrée en plus : 
 
 ## Restaurer
 
-1. Téléchargez la copie voulue depuis le bucket.
-2. Déchiffrez-la :
+Depuis l'onglet **Sauvegardes**, bloc **Restaurer** :
 
-    ```bash
-    BACKUP_ENCRYPTION_KEY="…" node server/tools/decrypt-backup.ts bettervault-2026-09-15.db.gz.enc bettervault.db
-    ```
+1. Choisissez la destination, **listez les copies**, puis choisissez-en une.
+2. **Aperçu** : la copie est téléchargée et vérifiée. Rien n'est modifié. L'aperçu indique combien de comptes elle contient, combien ont un coffre **plus récent aujourd'hui** et combien ont été créés depuis.
+3. Restaurez selon le besoin :
+    - **Un seul compte** (recommandé) : le coffre actuel du compte est mis de côté avant d'être remplacé.
+    - **Tout le serveur** : tapez `RESTAURER`. Une copie de sécurité de l'état actuel est envoyée d'abord. Les comptes créés depuis la copie ne sont pas touchés, et un ancien compte dont l'adresse sert aujourd'hui à un autre compte est ignoré. Réglages, administrateurs et grappe ne changent pas.
 
-3. Arrêtez le serveur, remplacez le fichier de base par `bettervault.db`, redémarrez.
-4. Copiez le dossier `files/` du bucket dans le dossier des pièces jointes (`/data/files` dans Docker) si nécessaire.
+Dans une grappe, l'état restauré devient la référence et se propage aux autres nœuds de la zone.
 
+### À la main, sans serveur
+
+`ash
+BACKUP_ENCRYPTION_KEY="…" node server/tools/decrypt-backup.ts bettervault-2026-09-15.db.gz.enc bettervault.db
+`
+
+Arrêtez le serveur, remplacez le fichier de base, copiez le dossier `files/` du bucket dans le dossier des pièces jointes (`/data/files` dans Docker), puis redémarrez.
 ## RGPD
 
 | Principe | Comment BetterVault s'y conforme |
