@@ -18,6 +18,7 @@ import { localAttachmentBytes, MAX_LOCAL_ATTACHMENT_BYTES } from '../account/att
 import { isTauri } from '../platform/tauriBridge';
 import { accountErrorMessage } from '../ui/authScreen';
 import { MANAGER_EXPORTS } from '../import_export/managerExports';
+import { exportBitwardenEncrypted } from '../import_export/bitwardenEncrypted';
 import { tabIcon } from '../ui/tabIcons';
 import { checkCredential, remainingCapacity } from '../account/limits';
 import { renderSVG } from 'uqr';
@@ -177,6 +178,7 @@ export function openImportExportModal(app: ModalHost, { accountService, sharedVa
               ${exportItem('encrypted', bvLogo, tr('BetterVault chiffré', 'Encrypted BetterVault'), tr('Ce coffre, protégé par un mot de passe dédié · Argon2id et AES-256-GCM', 'This vault, protected by a dedicated password · Argon2id and AES-256-GCM'), { label: tr('Recommandé', 'Recommended'), safe: true })}
               ${exportItem('full', bvLogo, tr('Tout le compte, fichiers compris', 'The whole account, files included'), tr('Tous les coffres et pièces jointes, chiffrés · pour changer de compte ou de serveur', 'Every vault and attachment, encrypted · to move to another account or server'))}
               ${exportItem('kdbx', brand('keepassxc'), tr('Base KeePass (.kdbx)', 'KeePass database (.kdbx)'), tr('Chiffrée · KeePass, KeePassXC, Strongbox', 'Encrypted · KeePass, KeePassXC, Strongbox'))}
+              ${exportItem('bitwarden-encrypted', brand('bitwarden'), tr('Bitwarden chiffré (JSON)', 'Encrypted Bitwarden (JSON)'), tr('Protégé par mot de passe · Bitwarden, Vaultwarden · PBKDF2 et AES-256', 'Password protected · Bitwarden, Vaultwarden · PBKDF2 and AES-256'))}
             </div>
             <div id="export-password-panel" class="form-section ie-export-password" hidden>
               <div class="form-section-title" id="export-password-title"></div>
@@ -266,7 +268,7 @@ export function openImportExportModal(app: ModalHost, { accountService, sharedVa
     const exportPwdConfirm = $<HTMLInputElement>('#export-password-confirm');
     const exportStatus = $<HTMLElement>('#export-password-status');
     const exportConfirmBtn = $<HTMLButtonElement>('#btn-export-password-confirm');
-    let protectedExportMode: 'encrypted' | 'kdbx' | 'full' = 'encrypted';
+    let protectedExportMode: 'encrypted' | 'kdbx' | 'full' | 'bitwarden-encrypted' = 'encrypted';
 
     const setExportStatus = (text: string, error = false) => {
       exportStatus.textContent = text;
@@ -276,7 +278,7 @@ export function openImportExportModal(app: ModalHost, { accountService, sharedVa
     box.querySelectorAll<HTMLButtonElement>('[data-export]').forEach(button => {
       button.addEventListener('click', async () => {
         const kind = button.dataset.export;
-        if (kind === 'encrypted' || kind === 'kdbx' || kind === 'full') {
+        if (kind === 'encrypted' || kind === 'kdbx' || kind === 'full' || kind === 'bitwarden-encrypted') {
           const reopen = exportPanel.hidden || protectedExportMode !== kind;
           box.querySelectorAll('[data-export]').forEach(b => b.setAttribute('aria-expanded', 'false'));
           if (!reopen) {
@@ -289,7 +291,9 @@ export function openImportExportModal(app: ModalHost, { accountService, sharedVa
             ? tr('Mot de passe de l’export', 'Export password')
             : kind === 'full'
               ? tr('Mot de passe de la sauvegarde complète', 'Full backup password')
-              : tr('Mot de passe de la base KeePass', 'KeePass database password');
+              : kind === 'bitwarden-encrypted'
+                ? tr('Mot de passe du fichier Bitwarden', 'Bitwarden file password')
+                : tr('Mot de passe de la base KeePass', 'KeePass database password');
           button.parentElement?.insertAdjacentElement('afterend', exportPanel);
           setExportStatus('');
           exportPanel.hidden = false;
@@ -360,6 +364,10 @@ export function openImportExportModal(app: ModalHost, { accountService, sharedVa
               filesLost ? tr(`${filesLost} fichier(s) illisible(s) sur le serveur, non inclus`, `${filesLost} file(s) unreadable on the server, not included`) : ''
             ].filter(Boolean).join(' · '), 'error', 8000);
           }
+        } else if (protectedExportMode === 'bitwarden-encrypted') {
+          // Bitwarden redemande ce mot de passe à l'import (Importer › JSON Bitwarden)
+          const file = await exportBitwardenEncrypted(creds, exportPwd.value);
+          downloadExportFile(file, `bettervault-bitwarden-${exportDate}.encrypted.json`, 'application/json');
         } else {
           const kdbx = await buildKdbx4(creds, exportPwd.value, { databaseName: activeVaultName });
           downloadExportFile(kdbx, `bettervault-${exportDate}.kdbx`, 'application/octet-stream');
