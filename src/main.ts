@@ -2,7 +2,7 @@ import { randomId, vaultStore } from './store/vaultStore';
 import type { CredentialItem } from './types/vault';
 import { extractDomain, getServiceIconSvg } from './icons/serviceIcons';
 import { renderItemIcon, type ItemIcon } from './icons/iconLibrary';
-import { generateTOTP } from './crypto/totpEngine';
+import { generateTOTP, totpUrgency } from './crypto/totpEngine';
 import { downloadExportFile } from './import_export/importEngine';
 import { AccountService, type SyncStatus } from './account/accountService';
 import { SharedReadOnlyError, SharedVaultManager } from './account/sharedVaults';
@@ -897,11 +897,26 @@ export class AppController {
         codeEl.textContent = f;
       }
       if (secEl) secEl.textContent = res.remainingSeconds.toString();
+      /*
+       * La couleur de l'urgence porte sur toute la carte, pas seulement sur
+       * l'anneau : le code lui-même change de teinte, sinon on lit un code
+       * bleu tranquille à une seconde de son expiration.
+       */
+      const urgence = totpUrgency(res.remainingSeconds);
+      const carte = document.getElementById('detail-totp-container');
+      if (carte) {
+        carte.classList.toggle('totp-warning', urgence === 'warning');
+        carte.classList.toggle('totp-danger', urgence === 'danger');
+      }
       if (meterEl) {
         const pct = (res.remainingSeconds / 30) * 100;
         meterEl.setAttribute('stroke-dashoffset', (100 - pct).toString());
-        const color = res.remainingSeconds <= 5 ? 'var(--accent-red)' : res.remainingSeconds <= 10 ? 'var(--accent-orange)' : 'var(--accent-blue)';
-        meterEl.setAttribute('stroke', color);
+        meterEl.setAttribute('stroke', 'currentColor');
+      }
+      // Le temps restant est annoncé aux lecteurs d'écran, mais pas chaque seconde
+      const label = document.getElementById('detail-totp-seconds-label');
+      if (label && res.remainingSeconds % 10 === 0) {
+        label.textContent = this.tr(`${res.remainingSeconds} secondes avant le prochain code`, `${res.remainingSeconds} seconds until the next code`);
       }
     };
     refresh();
@@ -2385,12 +2400,26 @@ registerServices(accountService, sharedVaults);
   document.body.append(box);
 });
 
-// Service worker (hors ligne) uniquement pour le site : l'app Tauri embarque déjà ses fichiers
+/*
+ * Service worker (hors ligne) uniquement pour le site : l'app Tauri embarque
+ * déjà ses fichiers.
+ *
+ * En développement, il est non seulement inutile mais nuisible : il resservait
+ * ses fichiers en cache alors que la source venait de changer, et on débogue
+ * une version qui n'existe plus. Un service worker déjà installé sur cette
+ * adresse est donc retiré, pour ne pas rester coincé sur l'ancienne copie.
+ */
 if ('serviceWorker' in navigator && window.location.protocol.startsWith('http') && !isTauri()) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {
-      // Ignorer si non servi sous HTTP/HTTPS (ex: tauri:// ou file://)
+  if (import.meta.env?.DEV) {
+    void navigator.serviceWorker.getRegistrations()
+      .then(list => Promise.all(list.map(registration => registration.unregister())))
+      .catch(() => { /* rien à retirer */ });
+  } else {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {
+        // Ignorer si non servi sous HTTP/HTTPS (ex: tauri:// ou file://)
+      });
     });
-  });
+  }
 }
 

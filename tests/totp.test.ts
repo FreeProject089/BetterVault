@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateTOTP } from '../src/crypto/totpEngine';
+import { generateTOTP, totpUrgency } from '../src/crypto/totpEngine';
 
 describe('TOTP Engine (RFC 6238)', () => {
   it('should generate a 6-digit numeric token from a valid Base32 secret', () => {
@@ -18,5 +18,18 @@ describe('TOTP Engine (RFC 6238)', () => {
     const invalidResult = generateTOTP('NOT A VALID BASE 32 ??? !!!');
     // Le moteur gère les erreurs silencieusement
     expect(invalidResult === null || typeof invalidResult?.token === 'string').toBe(true);
+  });
+});
+
+describe('Urgence d’un code qui expire', () => {
+  it('avertit dans les dix dernières secondes, alerte dans les cinq dernières', () => {
+    expect(totpUrgency(30)).toBe('calm');
+    expect(totpUrgency(11)).toBe('calm');
+    expect(totpUrgency(10)).toBe('warning');
+    expect(totpUrgency(6)).toBe('warning');
+    expect(totpUrgency(5)).toBe('danger');
+    expect(totpUrgency(1)).toBe('danger');
+    // Un compteur à zéro, entre deux fenêtres, reste une alerte et non un calme
+    expect(totpUrgency(0)).toBe('danger');
   });
 });

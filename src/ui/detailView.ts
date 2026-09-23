@@ -4,7 +4,7 @@ import { generateTOTP } from '../crypto/totpEngine';
 import { calculatePasswordEntropy } from '../crypto/vaultCrypto';
 import { describeRecurrence, getDependents, getOpenBlockers, planTaskCompletion } from '../tasks/taskEngine';
 import { expiryInfo } from '../ui/expiry';
-import { ACTION_ICONS } from '../ui/icons';
+import { ACTION_ICONS, GEN_ICONS } from '../ui/icons';
 import { memberChipHtml } from '../ui/memberChip';
 import { accountService } from '../app/services';
 import { renderVersioning, wireVersioning } from '../ui/versionsPanel';
@@ -373,20 +373,21 @@ export function renderDetail(app: AppController, id: string | null): void {
   const totpHTML = cred.totpSecret ? `
     <div class="field-group">
       <div class="field-label">${app.tr('Code 2FA', '2FA code')}</div>
-      <div class="totp-card" id="detail-totp-container" style="cursor:pointer;" title="${app.tr('Cliquer pour copier', 'Click to copy')}">
-        <div>
-          <div class="totp-code-display" id="detail-totp-code">--- ---</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${app.tr('Cliquer pour copier', 'Click to copy')}</div>
-        </div>
-        <div class="totp-timer-ring">
-          <svg width="42" height="42" viewBox="0 0 36 36">
+      <button type="button" class="totp-card" id="detail-totp-container" aria-label="${app.tr('Copier le code 2FA', 'Copy the 2FA code')}">
+        <span class="totp-card-main">
+          <span class="totp-code-display" id="detail-totp-code" aria-live="polite">••• •••</span>
+          <span class="totp-card-hint">${GEN_ICONS.copy}<span>${app.tr('Cliquer pour copier', 'Click to copy')}</span></span>
+        </span>
+        <span class="totp-timer-ring">
+          <svg width="46" height="46" viewBox="0 0 36 36" aria-hidden="true">
             <circle cx="18" cy="18" r="15.915" fill="none" stroke="var(--bg-tertiary)" stroke-width="3"></circle>
             <circle id="totp-circle-meter" cx="18" cy="18" r="15.915" fill="none" stroke="var(--accent-blue)" stroke-width="3"
               stroke-dasharray="100 100" stroke-dashoffset="0" stroke-linecap="round" transform="rotate(-90 18 18)"></circle>
           </svg>
-          <div class="totp-timer-sec" id="detail-totp-seconds" style="position:absolute;">30</div>
-        </div>
-      </div>
+          <span class="totp-timer-sec" id="detail-totp-seconds">30</span>
+          <span class="visually-hidden" id="detail-totp-seconds-label"></span>
+        </span>
+      </button>
     </div>` : '';
 
   // Website HTML
