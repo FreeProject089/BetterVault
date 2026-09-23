@@ -7,6 +7,8 @@
  * rien n'y figure que l'hébergeur n'ait saisi lui-même.
  */
 
+import { ART_CSS, flowArt, heroArt, isoIcon, type GlyphName } from './landingArt.ts';
+
 export interface DirectoryEntry {
   name: string;
   url: string;
@@ -83,9 +85,14 @@ export interface LandingContext {
   appAvailable: boolean;
   version: string;
   locale: 'fr' | 'en';
+  /** `illustre` : icônes 2,5D et animations ; par défaut, la page sobre */
+  variant?: 'sobre' | 'illustre';
 }
 
 /** Ce que l'application sait faire : montré tel quel sur la page d'accueil */
+/** Icône 2,5D de chaque fonction, dans le même ordre que FEATURES */
+const FEATURE_ICONS: GlyphName[] = ['key', 'lock', 'devices', 'sync', 'files', 'share', 'securityKey', 'export'];
+
 const FEATURES: Array<[string, string, string, string]> = [
   ['Mots de passe et codes 2FA', 'Passwords and 2FA codes',
    'Un coffre pour vos identifiants, vos codes à usage unique et vos passkeys, avec recherche, étiquettes et audit de sécurité.',
@@ -123,8 +130,9 @@ export function renderLanding(ctx: LandingContext): string {
         'Vos mots de passe, vos codes 2FA et vos fichiers, chiffrés sur votre appareil avant d’arriver ici. Ce serveur garde le coffre, sans jamais pouvoir l’ouvrir.',
         'Your passwords, 2FA codes and files, encrypted on your device before they get here. This server keeps the vault without ever being able to open it.')}</p>`;
 
-  const features = FEATURES.map(([tf, te, df, de]) => `
-    <li><h3>${t(tf, te)}</h3><p>${t(df, de)}</p></li>`).join('');
+  const illustre = ctx.variant === 'illustre';
+  const features = FEATURES.map(([tf, te, df, de], i) => `
+    <li>${illustre ? isoIcon(FEATURE_ICONS[i], { size: 60, delay: i * 0.25 }) : ''}<h3>${t(tf, te)}</h3><p>${t(df, de)}</p></li>`).join('');
 
   const servers = ctx.page.directoryEnabled && ctx.page.servers.length ? `
     <section>
@@ -180,6 +188,7 @@ header a,footer a{display:inline-flex;align-items:center;min-height:44px;padding
 header a:hover,footer a:hover{text-decoration:underline}
 footer .meta{margin-right:auto}
 @media (max-width:560px){.hero{padding:40px 0 0}section{padding:40px 0 0}.btn{width:100%;justify-content:center}}
+${illustre ? ART_CSS : ''}
 </style>
 </head>
 <body>
@@ -191,6 +200,7 @@ footer .meta{margin-right:auto}
 </div></header>
 <main>
   <section class="hero">
+    ${illustre ? '<div class="hero-grid"><div>' : ''}
     <h1>${escapeHtml(title)}</h1>
     ${intro}
     <div class="actions">
@@ -202,15 +212,17 @@ footer .meta{margin-right:auto}
     <p class="note">${ctx.registrationOpen
       ? t('Inscriptions ouvertes sur ce serveur. Aucune carte bancaire pour commencer.', 'Sign-ups are open on this server. No card needed to start.')
       : t('Ce serveur est sur invitation : demandez un accès à son hébergeur.', 'This server is invitation only: ask its operator for access.')}</p>
+    ${illustre ? `</div>${heroArt(t('Un coffre-fort fermé, entouré d’une clé et d’un cadenas', 'A closed safe, with a key and a padlock around it'))}</div>` : ''}
   </section>
 
   <section>
     <h2>${t('Ce que vous y trouvez', 'What you get')}</h2>
-    <ul class="features">${features}</ul>
+    <ul class="features${illustre ? ' illustrated' : ''}">${features}</ul>
   </section>
 
   <section>
     <h2>${t('Comment ça marche', 'How it works')}</h2>
+    ${illustre ? flowArt([t('Votre appareil chiffre', 'Your device encrypts'), t('Un bloc illisible voyage', 'An unreadable blob travels'), t('Le serveur le range', 'The server stores it')]) : ''}
     <ol class="steps">
       <li><strong>${t('Votre mot de passe principal reste chez vous.', 'Your master password stays with you.')}</strong> ${t('Il ne quitte jamais l’appareil : il sert à fabriquer la clé du coffre.', 'It never leaves the device: it derives the vault key.')}</li>
       <li><strong>${t('Le coffre est chiffré, puis envoyé.', 'The vault is encrypted, then sent.')}</strong> ${t('Le serveur stocke un bloc illisible, daté, et rien d’autre.', 'The server stores an unreadable, timestamped blob and nothing else.')}</li>

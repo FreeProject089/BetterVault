@@ -1462,7 +1462,9 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         legalEnabled: settings.legal.enabled,
         appAvailable: !!options.appAvailable,
         version: SERVER_VERSION,
-        locale: requestLocale(req) === 'en' ? 'en' : 'fr'
+        locale: requestLocale(req) === 'en' ? 'en' : 'fr',
+        // Comparaison des deux présentations : /about et /about?style=illustre
+        variant: new URL(req.url ?? '/', 'http://x').searchParams.get('style') === 'illustre' ? 'illustre' : 'sobre'
       }));
     }),
     route('GET', '/legal/:slug', async (req, params) => legalPage(params.slug, req))
