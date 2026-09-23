@@ -3,13 +3,14 @@ import { getKdbxVersion, isKdbx, parseKdbx, parseKeePassXml } from './keepass';
 import { is1PasswordExportData, isZipArchive, parse1PasswordExportData, parse1pux } from './onepassword';
 import { isCxfDocument, parseCxf } from './cxf';
 import { decryptExport, isEncryptedExport } from './encryptedExport';
+import { decryptBitwardenJson, isBitwardenPasswordProtected } from './bitwardenEncrypted';
 
 /**
  * Point d'entrée unique de l'import : détecte le format à partir des octets
  * (KDBX, 1PUX, export chiffré BUM, CXF, KeePass XML, JSON/CSV).
  */
 
-export type ProtectedImportKind = 'kdbx' | 'encrypted-export';
+export type ProtectedImportKind = 'kdbx' | 'encrypted-export' | 'bitwarden-encrypted';
 
 export class PasswordRequiredError extends Error {
   readonly kind: ProtectedImportKind;
@@ -17,7 +18,9 @@ export class PasswordRequiredError extends Error {
   constructor(kind: ProtectedImportKind) {
     super(kind === 'kdbx'
       ? 'Base KeePass chiffrée : mot de passe requis'
-      : 'Export chiffré : mot de passe requis');
+      : kind === 'bitwarden-encrypted'
+        ? 'Export Bitwarden protégé : mot de passe requis'
+        : 'Export chiffré : mot de passe requis');
     this.name = 'PasswordRequiredError';
     this.kind = kind;
   }
@@ -62,6 +65,13 @@ export async function parseImportData(bytes: Uint8Array, fileName = '', secrets:
       const inner = await decryptExport(json, secrets.password);
       const result = await parseImportData(new TextEncoder().encode(inner), fileName);
       return { ...result, sourceFormat: `${result.sourceFormat} — chiffré Argon2id` };
+    }
+    // Export Bitwarden « protégé par mot de passe » : on le déchiffre puis on repasse par le lecteur JSON Bitwarden
+    if (isBitwardenPasswordProtected(json)) {
+      if (!secrets.password) throw new PasswordRequiredError('bitwarden-encrypted');
+      const clear = await decryptBitwardenJson(json, secrets.password);
+      const result = parseImportFile(clear, fileName || 'bitwarden.json');
+      return { ...result, sourceFormat: `${result.sourceFormat} — protégé par mot de passe` };
     }
     if (isCxfDocument(json)) return credentialsResult(parseCxf(json), 'FIDO CXF (Credential Exchange)');
     if (is1PasswordExportData(json)) return credentialsResult(parse1PasswordExportData(json), '1Password export.data');

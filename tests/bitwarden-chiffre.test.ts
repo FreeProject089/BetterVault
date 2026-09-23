@@ -40,3 +40,21 @@ describe('Export Bitwarden chiffré par mot de passe', () => {
     await expect(decryptBitwardenJson({ ...file, data: `2.${iv}|${flipped}|${mac}` }, 'un mot de passe solide')).rejects.toThrow();
   });
 });
+
+describe('Import d’un export Bitwarden protégé par mot de passe', () => {
+  it('demande le mot de passe, déchiffre et importe par le lecteur Bitwarden', async () => {
+    const { parseImportData, PasswordRequiredError } = await import('../src/import_export/importRouter');
+    const bytes = new TextEncoder().encode(await exportBitwardenEncrypted([cred], 'un mot de passe solide', 5000));
+
+    const sansMotDePasse = await parseImportData(bytes, 'bitwarden.json').catch(e => e);
+    expect(sansMotDePasse).toBeInstanceOf(PasswordRequiredError);
+    expect(sansMotDePasse.kind).toBe('bitwarden-encrypted');
+
+    const result = await parseImportData(bytes, 'bitwarden.json', { password: 'un mot de passe solide' });
+    expect(result.count).toBe(1);
+    expect(result.credentials[0]).toMatchObject({ username: 'octo', password: 'mot de passe é', totpSecret: 'JBSWY3DPEHPK3PXP' });
+    expect(result.sourceFormat).toContain('protégé par mot de passe');
+
+    await expect(parseImportData(bytes, 'bitwarden.json', { password: 'mauvais mot de passe' })).rejects.toThrow(/Mot de passe incorrect/);
+  });
+});
