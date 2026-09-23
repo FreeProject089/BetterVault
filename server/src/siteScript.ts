@@ -48,29 +48,52 @@ export const SITE_JS = `(() => {
       const W = box.width;
       const etapes = [...serpent.querySelectorAll('.snake-step')];
       const cartes = etapes.map(e => {
-        const r = e.querySelector('.mock').getBoundingClientRect();
+        // La maquette et ce qui en dépasse (étiquette, badge, compteur) : le ruban contourne le tout
+        const rects = [e.querySelector('.mock'), ...e.querySelectorAll('.mock-chip, .sync-badge, .ring')].map(x => x.getBoundingClientRect());
+        const r = { left: Math.min(...rects.map(x => x.left)), right: Math.max(...rects.map(x => x.right)), top: Math.min(...rects.map(x => x.top)), bottom: Math.max(...rects.map(x => x.bottom)) };
         return { l: r.left - box.left, r: r.right - box.left, t: r.top - box.top, b: r.bottom - box.top, gauche: e.classList.contains('art-left'), c: getComputedStyle(e).getPropertyValue('--c').trim() };
       });
       if (!cartes.length) return;
       const fin = bandeau ? bandeau.getBoundingClientRect().top - box.top + 14 : box.height + 60;
-      const M = 50, cx = W / 2;
+      const M = 62, cx = W / 2;
       /*
        * Points de passage : pour chaque maquette, l'entrée par le haut, le
        * milieu du côté extérieur, la sortie par le bas. Une spline de
        * Catmull-Rom centripète passe par tous ces points : la courbure varie
        * en douceur, sans segment droit suivi d'un coin, et sans dépasser.
+       * Au milieu de certaines traversées, le ruban fait une boucle.
        */
+      const BOUCLES = new Set([0, 2]);
       const pts = [];
       cartes.forEach((k, i) => {
-        const haut = k.t - M, bas = k.b + M, h = bas - haut;
+        const haut = k.t - M, bas = k.b + M - 14, h = bas - haut;
         const bord = k.gauche ? k.l - M : k.r + M, s = k.gauche ? 1 : -1;
         const w = k.r - k.l;
-        if (i === 0) pts.push([bord + s * w * 0.75, haut]);
-        // Autour des coins : un point avant et un après, pour ne jamais les couper
-        pts.push([bord + s * w * 0.35, haut]);
-        pts.push([bord, haut + h * 0.22]);
-        pts.push([bord, bas - h * 0.22]);
-        pts.push([bord + s * w * 0.35, bas]);
+        if (i === 0) pts.push([bord + s * w * 0.8, haut]);
+        pts.push([bord + s * w * 0.25, haut + h * 0.02]);
+        pts.push([bord - s * 6, haut + h * 0.5]);
+        pts.push([bord + s * w * 0.25, bas - h * 0.02]);
+        const suite = cartes[i + 1];
+        if (suite && BOUCLES.has(i)) {
+          /*
+           * Une boucle, au milieu de la page entre les deux colonnes : le
+           * ruban arrive, fait un tour complet (un cercle tracé par neuf points
+           * réguliers, pour qu'il reste rond) et repart dans le même sens.
+           */
+          const haut2 = suite.t - M;
+          const r = 42;
+          // Le bas de la boucle reste entre la sortie d'une maquette et l'entrée de la suivante,
+          // et la boucle penche du côté des maquettes, loin du texte de l'étape
+          const fond = Math.max(bas, Math.min(haut2 - 16, (bas + haut2) / 2 + r));
+          const bx = cx - s * 30;
+          const centre = [bx, fond - r];
+          pts.push([bx - s * r * 2.6, fond]);
+          for (let n = 0; n <= 8; n++) {
+            const a = Math.PI / 2 - n * Math.PI / 4;
+            pts.push([centre[0] + s * r * Math.cos(a), centre[1] + r * Math.sin(a)]);
+          }
+          pts.push([bx + s * r * 2.6, fond]);
+        }
       });
       const bas = cartes[cartes.length - 1].b + M;
       pts.push([cx, bas + Math.min(120, (fin - bas) * 0.45)]);
