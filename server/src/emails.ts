@@ -3,11 +3,10 @@ import type { MailMessage } from './mailer.ts';
 /**
  * Emails envoyés par le serveur.
  *
- * Ils sont rédigés en anglais quelle que soit la langue de l'application. Un email
- * traverse des serveurs, des filtres anti-spam et parfois une boîte partagée : il
- * est lu par des gens et des machines qui ne partagent pas forcément la langue du
- * destinataire, et l'hébergeur d'un serveur BetterVault n'est pas nécessairement
- * francophone. Une seule langue, c'est aussi un seul texte à relire.
+ * Ils partent dans la langue du compte, ou à défaut dans la langue choisie par
+ * l'administration du serveur (voir `emailTemplates.ts`). Les faits — code,
+ * date, adresse IP — et l'avertissement de sécurité sont toujours produits par
+ * le serveur : une personnalisation ne peut ni les retirer ni les déformer.
  *
  * Chaque message part en deux versions — texte et HTML. Le HTML est écrit à
  * l'ancienne, en tableaux et en styles greffés sur chaque balise : les clients de
@@ -22,13 +21,25 @@ export function pickLocale(explicit: unknown, acceptLanguage: string | undefined
   return (acceptLanguage ?? '').toLowerCase().startsWith('fr') ? 'fr' : 'en';
 }
 
-const formatDate = (timestamp: number) =>
-  new Date(timestamp).toLocaleString('en-GB', { dateStyle: 'long', timeStyle: 'short', timeZone: 'UTC' }) + ' UTC';
+/** Le mot juste selon la langue, sans table de traduction pour si peu de textes */
+const t = (locale: Locale, fr: string, en: string) => (locale === 'fr' ? fr : en);
+
+const formatDate = (timestamp: number, locale: Locale = 'en') =>
+  new Date(timestamp).toLocaleString(locale === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'long', timeStyle: 'short', timeZone: 'UTC' }) + ' UTC';
+
+/** Personnalisation posée par l'administration : du texte, jamais du HTML */
+export interface EmailOverride {
+  subject?: string;
+  /** Paragraphe d'introduction ajouté en tête du message */
+  intro?: string;
+}
 
 export interface EmailContext {
   to: string;
   locale: Locale;
   publicUrl: string;
+  /** Sujet et introduction réécrits par l'administration, s'il y en a */
+  override?: EmailOverride;
   /**
    * Lien « ce n'était pas moi », à usage unique. Absent quand le serveur n'a pas
    * d'adresse publique configurée : il n'y aurait nulle part où pointer.
@@ -111,7 +122,7 @@ const paragraphe = (texte: string) =>
  * Le bouton ferme toutes les sessions en un clic, sans avoir à se connecter — c'est
  * le geste utile, et le seul que le lien autorise.
  */
-const alerte = (texte: string, notMeUrl?: string) => `
+const alerte = (texte: string, notMeUrl?: string, locale: Locale = 'en') => `
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:18px 0 4px;">
     <tr>
       <td style="padding:12px 14px;background-color:#fff8c5;border:1px solid #d4a72c;border-radius:8px;
@@ -122,21 +133,21 @@ const alerte = (texte: string, notMeUrl?: string) => `
           <tr>
             <td align="center" style="background-color:#cf222e;border-radius:8px;">
               <a href="${escapeHtml(notMeUrl)}" style="display:inline-block;padding:10px 18px;color:#ffffff;text-decoration:none;
-                font:600 14px/1.2 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">This wasn’t me</a>
+                font:600 14px/1.2 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">${t(locale, 'Ce n’était pas moi', 'This wasn’t me')}</a>
             </td>
           </tr>
         </table>
-        <div style="margin-top:7px;font-size:12px;color:#6b4a00;">Signs every device out of your account. Works once.</div>` : ''}
+        <div style="margin-top:7px;font-size:12px;color:#6b4a00;">${t(locale, 'Déconnecte tous les appareils du compte. Utilisable une seule fois.', 'Signs every device out of your account. Works once.')}</div>` : ''}
       </td>
     </tr>
   </table>`;
 
-function page(titre: string, corps: string, publicUrl: string): string {
+function page(titre: string, corps: string, publicUrl: string, locale: Locale = 'en'): string {
   const lien = publicUrl
     ? `<a href="${escapeHtml(publicUrl)}" style="color:${ACCENT};text-decoration:none;">${escapeHtml(publicUrl)}</a><br>`
     : '';
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${locale}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -162,7 +173,7 @@ function page(titre: string, corps: string, publicUrl: string): string {
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:520px;">
           <tr>
             <td style="padding:16px 26px 0;font:400 12px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${DISCRET};">
-              ${lien}You are receiving this email because it concerns the security of your BetterVault account.
+              ${lien}${t(locale, 'Vous recevez cet email parce qu’il concerne la sécurité de votre compte BetterVault.', 'You are receiving this email because it concerns the security of your BetterVault account.')}
             </td>
           </tr>
         </table>
@@ -173,112 +184,174 @@ function page(titre: string, corps: string, publicUrl: string): string {
 </html>`;
 }
 
-const piedTexte = (publicUrl: string) =>
-  `\n\n— BetterVault${publicUrl ? `\n${publicUrl}` : ''}\nYou are receiving this email because it concerns the security of your BetterVault account.`;
+const piedTexte = (publicUrl: string, locale: Locale) =>
+  `\n\n— BetterVault${publicUrl ? `\n${publicUrl}` : ''}\n${t(locale,
+    'Vous recevez cet email parce qu’il concerne la sécurité de votre compte BetterVault.',
+    'You are receiving this email because it concerns the security of your BetterVault account.')}`;
 
-const message = (ctx: EmailContext, subject: string, texte: string, corpsHtml: string): MailMessage => ({
-  to: ctx.to,
-  subject,
-  // Le lien figure aussi en texte : c'est la version que certains clients affichent
-  text: texte + (ctx.notMeUrl ? `
+/**
+ * Assemble le message. Une personnalisation ne remplace que le sujet et une
+ * introduction : elle est posée comme du texte, échappée, au-dessus du corps
+ * produit par le serveur. Les faits et l'avertissement restent en dessous.
+ */
+const message = (ctx: EmailContext, subject: string, texte: string, corpsHtml: string): MailMessage => {
+  const locale = ctx.locale;
+  const intro = (ctx.override?.intro ?? '').trim();
+  const sujet = (ctx.override?.subject ?? '').trim() || subject;
+  return {
+    to: ctx.to,
+    subject: sujet,
+    // Le lien figure aussi en texte : c'est la version que certains clients affichent
+    text: (intro ? `${intro}
 
-This wasn't me — sign every device out of the account:
+` : '') + texte + (ctx.notMeUrl ? `
+
+${t(locale, 'Ce n’était pas moi — déconnecter tous les appareils du compte :', 'This wasn’t me — sign every device out of the account:')}
 ${ctx.notMeUrl}
-(works once)` : '') + piedTexte(ctx.publicUrl),
-  html: page(subject, corpsHtml, ctx.publicUrl)
-});
+${t(locale, '(utilisable une seule fois)', '(works once)')}` : '') + piedTexte(ctx.publicUrl, locale),
+    html: page(sujet, (intro ? paragraphe(escapeHtml(intro)) : '') + corpsHtml, ctx.publicUrl, locale)
+  };
+};
 
 /* ── Messages ───────────────────────────────────────────────────────────── */
 
 export const emails = {
   resetCode(ctx: EmailContext, code: string, minutes: number): MailMessage {
+    const l = ctx.locale;
     return message(
       ctx,
-      `BetterVault reset code: ${code}`,
-      `Your code: ${code}\n\nIt is valid for ${minutes} minutes.\nIf you did not ask to reset your password, ignore this email: nothing changes without this code.`,
-      paragraphe('Use this code to continue resetting your master password.')
+      t(l, `Code de réinitialisation BetterVault : ${code}`, `BetterVault reset code: ${code}`),
+      t(l,
+        `Votre code : ${code}\n\nIl est valable ${minutes} minutes.\nSi vous n’avez pas demandé à réinitialiser votre mot de passe, ignorez cet email : rien ne change sans ce code.`,
+        `Your code: ${code}\n\nIt is valid for ${minutes} minutes.\nIf you did not ask to reset your password, ignore this email: nothing changes without this code.`),
+      paragraphe(t(l, 'Utilisez ce code pour continuer la réinitialisation de votre mot de passe principal.', 'Use this code to continue resetting your master password.'))
         + blocCode(code)
-        + paragraphe(`<span style="color:${DISCRET};">It expires in ${minutes} minutes.</span>`)
-        + alerte('If you did not ask to reset your password, ignore this email — nothing changes without this code. You can also cancel it right away.', ctx.notMeUrl)
+        + paragraphe(`<span style="color:${DISCRET};">${t(l, `Il expire dans ${minutes} minutes.`, `It expires in ${minutes} minutes.`)}</span>`)
+        + alerte(
+          t(l,
+            'Si vous n’avez pas demandé cette réinitialisation, ignorez cet email — rien ne change sans ce code. Vous pouvez aussi l’annuler tout de suite.',
+            'If you did not ask to reset your password, ignore this email — nothing changes without this code. You can also cancel it right away.'),
+          ctx.notMeUrl, l)
     );
   },
 
   newLogin(ctx: EmailContext, when: number, address: string, device: string): MailMessage {
+    const l = ctx.locale;
+    const appareil = device || t(l, 'inconnu', 'unknown');
     return message(
       ctx,
-      'New sign-in to your BetterVault account',
-      `A sign-in happened on ${formatDate(when)}.\nIP address: ${address}\nDevice: ${device || 'unknown'}\n\nIf this wasn't you, change your master password and turn on two-factor authentication.`,
-      paragraphe('Someone signed in to your account.')
-        + faits([['When', formatDate(when)], ['IP address', address], ['Device', device || 'unknown']])
-        + alerte('If this wasn’t you, act now.', ctx.notMeUrl)
+      t(l, 'Nouvelle connexion à votre compte BetterVault', 'New sign-in to your BetterVault account'),
+      t(l,
+        `Une connexion a eu lieu le ${formatDate(when, l)}.\nAdresse IP : ${address}\nAppareil : ${appareil}\n\nSi ce n’était pas vous, changez votre mot de passe principal et activez la double authentification.`,
+        `A sign-in happened on ${formatDate(when, l)}.\nIP address: ${address}\nDevice: ${appareil}\n\nIf this wasn't you, change your master password and turn on two-factor authentication.`),
+      paragraphe(t(l, 'Quelqu’un s’est connecté à votre compte.', 'Someone signed in to your account.'))
+        + faits([
+          [t(l, 'Quand', 'When'), formatDate(when, l)],
+          [t(l, 'Adresse IP', 'IP address'), address],
+          [t(l, 'Appareil', 'Device'), appareil]
+        ])
+        + alerte(t(l, 'Si ce n’était pas vous, agissez maintenant.', 'If this wasn’t you, act now.'), ctx.notMeUrl, l)
     );
   },
 
   passwordChanged(ctx: EmailContext, when: number, viaRecovery: boolean): MailMessage {
-    const how = viaRecovery ? ' using account recovery' : '';
+    const l = ctx.locale;
+    const comment = viaRecovery ? t(l, ' avec la clé de secours', ' using account recovery') : '';
     return message(
       ctx,
-      'Master password changed',
-      `Your account's master password was changed${how} on ${formatDate(when)}.\nOther devices will need to sign in again.\n\nIf this wasn't you, contact the server administrator.`,
-      paragraphe(`Your account’s master password was changed${how}.`)
-        + faits([['When', formatDate(when)]])
-        + paragraphe(`<span style="color:${DISCRET};">Other devices will need to sign in again.</span>`)
-        + alerte('If this wasn’t you, act now.', ctx.notMeUrl)
+      t(l, 'Mot de passe principal changé', 'Master password changed'),
+      t(l,
+        `Le mot de passe principal de votre compte a été changé${comment} le ${formatDate(when, l)}.\nLes autres appareils devront se reconnecter.\n\nSi ce n’était pas vous, contactez l’administration du serveur.`,
+        `Your account's master password was changed${comment} on ${formatDate(when, l)}.\nOther devices will need to sign in again.\n\nIf this wasn't you, contact the server administrator.`),
+      paragraphe(t(l, `Le mot de passe principal de votre compte a été changé${comment}.`, `Your account’s master password was changed${comment}.`))
+        + faits([[t(l, 'Quand', 'When'), formatDate(when, l)]])
+        + paragraphe(`<span style="color:${DISCRET};">${t(l, 'Les autres appareils devront se reconnecter.', 'Other devices will need to sign in again.')}</span>`)
+        + alerte(t(l, 'Si ce n’était pas vous, agissez maintenant.', 'If this wasn’t you, act now.'), ctx.notMeUrl, l)
     );
   },
 
   vaultReset(ctx: EmailContext, when: number): MailMessage {
+    const l = ctx.locale;
     return message(
       ctx,
-      'BetterVault account reset',
-      `Your account was reset without a recovery key on ${formatDate(when)}.\nThe previous vault was replaced with an empty one.`,
-      paragraphe('Your account was reset without a recovery key.')
-        + faits([['When', formatDate(when)]])
-        + paragraphe('The previous vault was replaced with an empty one. Its contents cannot be recovered.')
-        + alerte('If this wasn’t you, act now — then contact the administrator of your server.', ctx.notMeUrl)
+      t(l, 'Compte BetterVault réinitialisé', 'BetterVault account reset'),
+      t(l,
+        `Votre compte a été réinitialisé sans clé de secours le ${formatDate(when, l)}.\nLe coffre précédent a été remplacé par un coffre vide.`,
+        `Your account was reset without a recovery key on ${formatDate(when, l)}.\nThe previous vault was replaced with an empty one.`),
+      paragraphe(t(l, 'Votre compte a été réinitialisé sans clé de secours.', 'Your account was reset without a recovery key.'))
+        + faits([[t(l, 'Quand', 'When'), formatDate(when, l)]])
+        + paragraphe(t(l,
+          'Le coffre précédent a été remplacé par un coffre vide. Son contenu est irrécupérable.',
+          'The previous vault was replaced with an empty one. Its contents cannot be recovered.'))
+        + alerte(t(l,
+          'Si ce n’était pas vous, agissez maintenant — puis contactez l’administration de votre serveur.',
+          'If this wasn’t you, act now — then contact the administrator of your server.'), ctx.notMeUrl, l)
     );
   },
 
   twoFactor(ctx: EmailContext, when: number, enabled: boolean): MailMessage {
-    const etat = enabled ? 'on' : 'off';
+    const l = ctx.locale;
+    const etat = enabled ? t(l, 'activée', 'on') : t(l, 'désactivée', 'off');
     return message(
       ctx,
-      `Two-factor authentication turned ${etat}`,
-      `Two-factor authentication was turned ${etat} for your account on ${formatDate(when)}.`,
-      paragraphe(`Two-factor authentication was turned <strong>${etat}</strong> for your account.`)
-        + faits([['When', formatDate(when)]])
-        + alerte('If this wasn’t you, act now, then change your master password.', ctx.notMeUrl)
+      t(l, `Double authentification ${etat}`, `Two-factor authentication turned ${etat}`),
+      t(l,
+        `La double authentification a été ${etat} sur votre compte le ${formatDate(when, l)}.`,
+        `Two-factor authentication was turned ${etat} for your account on ${formatDate(when, l)}.`),
+      paragraphe(t(l,
+        `La double authentification a été <strong>${etat}</strong> sur votre compte.`,
+        `Two-factor authentication was turned <strong>${etat}</strong> for your account.`))
+        + faits([[t(l, 'Quand', 'When'), formatDate(when, l)]])
+        + alerte(t(l,
+          'Si ce n’était pas vous, agissez maintenant, puis changez votre mot de passe principal.',
+          'If this wasn’t you, act now, then change your master password.'), ctx.notMeUrl, l)
     );
   },
 
   recoveryKeyChanged(ctx: EmailContext, when: number): MailMessage {
+    const l = ctx.locale;
     return message(
       ctx,
-      'New recovery key',
-      `A new recovery key was created on ${formatDate(when)}. The previous one no longer works.`,
-      paragraphe('A new recovery key was created for your account.')
-        + faits([['When', formatDate(when)]])
-        + paragraphe('The previous key no longer works. Keep the new one outside BetterVault.')
-        + alerte('If this wasn’t you, act now — then contact the administrator of your server.', ctx.notMeUrl)
+      t(l, 'Nouvelle clé de secours', 'New recovery key'),
+      t(l,
+        `Une nouvelle clé de secours a été créée le ${formatDate(when, l)}. La précédente ne fonctionne plus.`,
+        `A new recovery key was created on ${formatDate(when, l)}. The previous one no longer works.`),
+      paragraphe(t(l, 'Une nouvelle clé de secours a été créée pour votre compte.', 'A new recovery key was created for your account.'))
+        + faits([[t(l, 'Quand', 'When'), formatDate(when, l)]])
+        + paragraphe(t(l,
+          'La précédente ne fonctionne plus. Gardez la nouvelle hors de BetterVault.',
+          'The previous key no longer works. Keep the new one outside BetterVault.'))
+        + alerte(t(l,
+          'Si ce n’était pas vous, agissez maintenant — puis contactez l’administration de votre serveur.',
+          'If this wasn’t you, act now — then contact the administrator of your server.'), ctx.notMeUrl, l)
     );
   },
 
   sharedInvite(ctx: EmailContext, inviterEmail: string): MailMessage {
+    const l = ctx.locale;
     return message(
       ctx,
-      `${inviterEmail} invited you to a shared vault`,
-      `${inviterEmail} invited you to a shared BetterVault vault.\nOpen BetterVault, then Shared vaults, to accept or decline.`,
-      paragraphe(`<strong>${escapeHtml(inviterEmail)}</strong> invited you to a shared BetterVault vault.`)
-        + paragraphe(`<span style="color:${DISCRET};">Open BetterVault, then <strong>Shared vaults</strong>, to accept or decline. Nothing is shared until you accept.</span>`)
+      t(l, `${inviterEmail} vous invite à un coffre partagé`, `${inviterEmail} invited you to a shared vault`),
+      t(l,
+        `${inviterEmail} vous invite à un coffre partagé BetterVault.\nOuvrez BetterVault, puis Coffres partagés, pour accepter ou refuser.`,
+        `${inviterEmail} invited you to a shared BetterVault vault.\nOpen BetterVault, then Shared vaults, to accept or decline.`),
+      paragraphe(t(l,
+        `<strong>${escapeHtml(inviterEmail)}</strong> vous invite à un coffre partagé BetterVault.`,
+        `<strong>${escapeHtml(inviterEmail)}</strong> invited you to a shared BetterVault vault.`))
+        + paragraphe(`<span style="color:${DISCRET};">${t(l,
+          'Ouvrez BetterVault, puis <strong>Coffres partagés</strong>, pour accepter ou refuser. Rien n’est partagé tant que vous n’avez pas accepté.',
+          'Open BetterVault, then <strong>Shared vaults</strong>, to accept or decline. Nothing is shared until you accept.')}</span>`)
     );
   },
 
-  test(to: string, _locale: Locale): MailMessage {
+  test(to: string, locale: Locale, override?: EmailOverride): MailMessage {
     return message(
-      { to, locale: 'en', publicUrl: '' },
-      'BetterVault test email',
-      'The SMTP settings of your BetterVault server work.',
-      paragraphe('The SMTP settings of your BetterVault server work. Nothing else to do.')
+      { to, locale, publicUrl: '', override },
+      t(locale, 'Email de test BetterVault', 'BetterVault test email'),
+      t(locale, 'Les réglages SMTP de votre serveur BetterVault fonctionnent.', 'The SMTP settings of your BetterVault server work.'),
+      paragraphe(t(locale,
+        'Les réglages SMTP de votre serveur BetterVault fonctionnent. Rien d’autre à faire.',
+        'The SMTP settings of your BetterVault server work. Nothing else to do.'))
     );
   }
 };

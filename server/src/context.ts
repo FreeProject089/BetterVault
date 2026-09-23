@@ -4,7 +4,7 @@ import type { ServerLimits, ServerSettings } from './config.ts';
 import type { GeoLookup } from './geoip.ts';
 import type { UserRow } from './app.ts';
 import type { MailMessage } from './mailer.ts';
-import type { Locale } from './emails.ts';
+import type { EmailContext } from './emails.ts';
 import type { Reply } from './http.ts';
 
 /** Ce que l'application met à disposition des modules de routes */
@@ -15,7 +15,8 @@ export interface RouteContext {
   authenticate(req: IncomingMessage): { userId: string; tokenHash: string };
   getUser(userId: string): UserRow;
   verifyAuthHash(user: UserRow | undefined, authHash: string): Promise<boolean>;
-  notify(build: (ctx: { to: string; locale: Locale; publicUrl: string }) => MailMessage, user: UserRow): void;
+  /** `kind` nomme le message, pour appliquer la personnalisation de l'administration */
+  notify(kind: string, build: (ctx: EmailContext) => MailMessage, user: UserRow, alertKind?: string): void;
   settings(): ServerSettings;
   filesDir: string | null;
   maxBody(): number;

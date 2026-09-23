@@ -46,7 +46,14 @@ async function startServer(settings: Partial<ServerSettings> = {}, db = openData
 }
 
 const SMTP = { host: 'smtp.test', port: 25, security: 'none' as const, user: '', password: '', from: 'BetterVault <no-reply@exemple.fr>' };
-const lastCode = (sent: MailMessage[]) => /(\d{6})/.exec(sent.filter(m => m.subject.includes('reset code')).at(-1)?.subject ?? '')?.[1];
+/*
+ * Les emails suivent la langue du compte : les comptes de ces tests sont créés
+ * par l'application en français, leurs emails arrivent donc en français.
+ */
+const isResetCode = (m: MailMessage) => m.subject.includes('reset code') || m.subject.includes('Code de réinitialisation');
+const lastCode = (sent: MailMessage[]) => /(\d{6})/.exec(sent.filter(isResetCode).at(-1)?.subject ?? '')?.[1];
+/** Le sujet attendu, dans l'une ou l'autre langue */
+const sujet = (m: MailMessage, fr: string, en: string) => m.subject === fr || m.subject === en;
 const totpFor = (secret: string, offset = 0) => totpCode(base32Decode(secret), currentStep(Date.now()) + offset);
 
 describe('Serveur : double authentification, récupération, emails', () => {
@@ -77,7 +84,7 @@ describe('Serveur : double authentification, récupération, emails', () => {
     await expect(device.enableTotp('000000')).rejects.toMatchObject({ code: 'totp_invalid' });
     await device.enableTotp(totpFor(setup.secret));
     expect(await device.getCloudAccountInfo()).toMatchObject({ totpEnabled: true, hasRecoveryKey: true });
-    expect(ctx.sent.some(m => m.to === email && m.subject === 'Two-factor authentication turned on')).toBe(true);
+    expect(ctx.sent.some(m => m.to === email && sujet(m, 'Double authentification activée', 'Two-factor authentication turned on'))).toBe(true);
 
     await expect(newService().signIn(ctx.url, email, PASSWORD)).rejects.toMatchObject({ code: 'totp_required' });
     await expect(newService().signIn(ctx.url, email, 'mauvais mot de passe', totpFor(setup.secret, 1))).rejects.toBeInstanceOf(WrongPasswordError);
@@ -85,7 +92,7 @@ describe('Serveur : double authentification, récupération, emails', () => {
     const code = totpFor(setup.secret, 1);
     await newService().signIn(ctx.url, email, PASSWORD, code);
     await expect(newService().signIn(ctx.url, email, PASSWORD, code)).rejects.toMatchObject({ code: 'totp_invalid' });
-    expect(ctx.sent.some(m => m.to === email && m.subject.startsWith('New sign-in'))).toBe(true);
+    expect(ctx.sent.some(m => m.to === email && (m.subject.startsWith('New sign-in') || m.subject.startsWith('Nouvelle connexion')))).toBe(true);
   });
 
   it('récupère un compte avec la clé de secours et le code email, sans perdre le coffre', async () => {
@@ -116,7 +123,7 @@ describe('Serveur : double authentification, récupération, emails', () => {
 
     await expect(newService().signIn(ctx.url, email, PASSWORD)).rejects.toBeInstanceOf(WrongPasswordError);
     expect((await newService().signIn(ctx.url, email, NEW_PASSWORD)).credentials.map(c => c.title)).toEqual(['Gardé']);
-    expect(ctx.sent.some(m => m.to === email && m.subject === 'Master password changed')).toBe(true);
+    expect(ctx.sent.some(m => m.to === email && sujet(m, 'Mot de passe principal changé', 'Master password changed'))).toBe(true);
 
     // Le code email ne sert qu'une fois
     await expect(newService().recoverCloudAccount({ serverUrl: ctx.url, email, newPassword: PASSWORD, recoveryKey, emailCode }))
@@ -145,7 +152,7 @@ describe('Serveur : double authentification, récupération, emails', () => {
     expect(result.vaultReset).toBe(true);
     expect(result.data.credentials).toEqual([]);
     expect(parseRecoveryKey(result.newRecoveryKey!)).toHaveLength(32);
-    expect(ctx.sent.some(m => m.to === email && m.subject === 'BetterVault account reset')).toBe(true);
+    expect(ctx.sent.some(m => m.to === email && sujet(m, 'Compte BetterVault réinitialisé', 'BetterVault account reset'))).toBe(true);
 
     // Le premier appareil doit se reconnecter : ses sessions ont été fermées
     await device.syncNow();

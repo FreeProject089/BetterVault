@@ -38,7 +38,8 @@ import { route } from './context.ts';
 import type { DatabaseSync } from 'node:sqlite';
 import { parseS3, parseSettingsUpdate, publicSettings, settingsFromEnv, type ServerSettings } from './config.ts';
 import { createSmtpMailer, type Mailer, type MailMessage, type SmtpConfig } from './mailer.ts';
-import { emails, pickLocale, type Locale } from './emails.ts';
+import { emails, pickLocale, type EmailContext, type Locale } from './emails.ts';
+import { createEmailTemplates, isEmailKind, isEmailLocale } from './emailTemplates.ts';
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.ts';
 import { createWebauthn, parseRpId, type AssertionInput } from './webauthn.ts';
 import { DEFAULT_PUBLIC_PAGE, publicDirectory, renderLanding } from './directory.ts';
@@ -332,7 +333,13 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       : { revision: 0, blob: null, updatedAt: null };
   };
 
-  const locale = (user: UserRow): Locale => (user.locale === 'fr' || user.locale === 'en' ? user.locale : 'en');
+  const emailTemplates = createEmailTemplates(db);
+
+  /*
+   * Langue d'un email : celle du compte, sinon celle choisie par
+   * l'administration (anglais tant que personne n'a rien choisi).
+   */
+  const locale = (user: UserRow): Locale => (user.locale === 'fr' || user.locale === 'en' ? user.locale : emailTemplates.defaultLocale());
 
   const ALERT_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -355,17 +362,24 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
   };
 
   /** Envoi en arrière-plan : une panne du serveur SMTP ne bloque jamais l'utilisateur */
+  /**
+   * Envoie un email à un compte. `kind` nomme le message : c'est ce qui permet
+   * d'appliquer la personnalisation posée par l'administration.
+   */
   const notify = (
-    build: (ctx: { to: string; locale: Locale; publicUrl: string; notMeUrl?: string }) => MailMessage,
+    kind: string,
+    build: (ctx: EmailContext) => MailMessage,
     user: UserRow,
     alertKind?: string
   ) => {
     if (!settings.smtp) return;
+    const langue = locale(user);
     const message = build({
       to: user.email,
-      locale: locale(user),
+      locale: langue,
       publicUrl: settings.publicUrl,
-      notMeUrl: alertKind ? alertLink(user, alertKind) : undefined
+      notMeUrl: alertKind ? alertLink(user, alertKind) : undefined,
+      override: emailTemplates.override(kind, langue)
     });
     mailerFactory(settings.smtp).send(message).catch(err => console.error(`Email non envoyé à ${user.email} :`, err instanceof Error ? err.message : err));
   };
@@ -492,7 +506,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       if (body.notify !== false) {
         const client = describeClient(req);
         const place = [client.city, client.country].filter(Boolean).join(', ');
-        notify(ctx => emails.newLogin(ctx, now(), `${client.ipPrefix}${place ? ` (${place})` : ''}`, client.device), user, 'new_login');
+        notify('newLogin', ctx => emails.newLogin(ctx, now(), `${client.ipPrefix}${place ? ` (${place})` : ''}`, client.device), user, 'new_login');
       }
       return {
         status: 200,
@@ -578,7 +592,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       sql.updateCredentials.run(verifier.toString('base64'), authSalt.toString('base64'), JSON.stringify(kdf), salt, JSON.stringify(wrappedVaultKey), userId);
       // Les autres appareils devront se reconnecter avec le nouveau mot de passe
       sql.deleteOtherSessions.run(userId, tokenHash);
-      notify(ctx => emails.passwordChanged(ctx, now(), false), user, 'password_changed');
+      notify('passwordChanged', ctx => emails.passwordChanged(ctx, now(), false), user, 'password_changed');
       audit('account.password_changed', {}, userId);
       return { status: 204 };
     },
@@ -595,7 +609,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       const [verifier, salt, wrapped] = await recoveryColumns(recovery);
       sql.updateRecovery.run(verifier, salt, wrapped, userId);
       sql.deleteRecoveryTokens.run(userId);
-      notify(ctx => emails.recoveryKeyChanged(ctx, now()), user, 'recovery_key_changed');
+      notify('recoveryKeyChanged', ctx => emails.recoveryKeyChanged(ctx, now()), user, 'recovery_key_changed');
       return { status: 204 };
     },
 
@@ -621,7 +635,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       const step = code ? verifyTotp(user.totp_secret, code, now(), 0) : null;
       if (step === null) throw new HttpError(400, 'totp_invalid', 'Code incorrect. Vérifiez l’heure de votre téléphone.');
       sql.enableTotp.run(step, userId);
-      notify(ctx => emails.twoFactor(ctx, now(), true), user, 'totp_enabled');
+      notify('twoFactor', ctx => emails.twoFactor(ctx, now(), true), user, 'totp_enabled');
       audit('account.2fa_enabled', {}, userId);
       return { status: 204 };
     },
@@ -636,7 +650,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       if (!(await verifyAuthHash(user, authHash))) throw new HttpError(403, 'invalid_credentials', 'Mot de passe principal incorrect');
       if (user.totp_enabled && !consumeTotp(user, code)) throw new HttpError(400, 'totp_invalid', 'Code incorrect ou déjà utilisé');
       sql.disableTotp.run(userId);
-      if (user.totp_enabled) notify(ctx => emails.twoFactor(ctx, now(), false), user, 'totp_disabled');
+      if (user.totp_enabled) notify('twoFactor', ctx => emails.twoFactor(ctx, now(), false), user, 'totp_disabled');
       audit('account.2fa_disabled', {}, userId);
       return { status: 204 };
     },
@@ -665,11 +679,14 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
         sql.upsertEmailCode.run(user.id, emailCodeHash(user.id, code), now() + EMAIL_CODE_TTL_MS);
         // Qui n'a rien demandé doit pouvoir annuler la réinitialisation, pas seulement ignorer l'email
+        // La langue du formulaire l'emporte : la personne est en train de le remplir
+        const langue = pickLocale(body.locale, req.headers['accept-language']);
         const ctx = {
           to: user.email,
-          locale: pickLocale(body.locale, req.headers['accept-language']),
+          locale: langue,
           publicUrl: settings.publicUrl,
-          notMeUrl: alertLink(user, 'reset_requested')
+          notMeUrl: alertLink(user, 'reset_requested'),
+          override: emailTemplates.override('resetCode', langue)
         };
         mailerFactory(settings.smtp).send(emails.resetCode(ctx, code, EMAIL_CODE_TTL_MS / 60_000))
           .catch(err => console.error(`Code de réinitialisation non envoyé à ${user.email} :`, err instanceof Error ? err.message : err));
@@ -771,7 +788,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         throw err;
       }
 
-      notify(ctx => (vault ? emails.vaultReset(ctx, now()) : emails.passwordChanged(ctx, now(), true)), user, 'recovery');
+      notify(vault ? 'vaultReset' : 'passwordChanged', ctx => (vault ? emails.vaultReset(ctx, now()) : emails.passwordChanged(ctx, now(), true)), user, 'recovery');
       audit(vault ? 'account.reset_without_key' : 'account.recovered_with_key', {}, user.id);
       return { status: 200, body: { token: createSession(user.id, req), revision: readVault(user.id).revision } };
     },
@@ -812,12 +829,58 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       const body = await readJson(req, 4096);
       const to = parseEmail(body.to);
       if (!settings.smtp) throw new HttpError(400, 'smtp_disabled', 'Configurez d’abord le serveur SMTP');
+      const locale = isEmailLocale(body.locale) ? body.locale : emailTemplates.defaultLocale();
       try {
-        await mailerFactory(settings.smtp).send(emails.test(to, pickLocale(body.locale, req.headers['accept-language'])));
+        await mailerFactory(settings.smtp).send(emails.test(to, locale, emailTemplates.override('test', locale)));
       } catch (err) {
         throw new HttpError(502, 'smtp_failed', `Envoi impossible : ${err instanceof Error ? err.message : err}`);
       }
       return { status: 204 };
+    },
+
+    /* ── Emails : aperçu et personnalisation ──────────────────────────── */
+
+    'GET /api/v1/admin/emails': async req => {
+      requireAdmin(req);
+      return { status: 200, body: emailTemplates.view() };
+    },
+
+    'PUT /api/v1/admin/emails/locale': async req => {
+      requireAdmin(req, 'manage');
+      const body = await readJson(req, 512);
+      if (!isEmailLocale(body.locale)) throw new HttpError(400, 'bad_locale', 'Langue inconnue');
+      emailTemplates.setDefaultLocale(body.locale);
+      audit('admin.email_locale_changed', { locale: body.locale });
+      return { status: 200, body: { defaultLocale: body.locale } };
+    },
+
+    'PUT /api/v1/admin/emails/template': async req => {
+      requireAdmin(req, 'manage');
+      const body = await readJson(req, 4096);
+      if (!isEmailKind(body.id)) throw new HttpError(400, 'bad_email_kind', 'Message inconnu');
+      if (!isEmailLocale(body.locale)) throw new HttpError(400, 'bad_locale', 'Langue inconnue');
+      const saved = emailTemplates.save(body.id, body.locale, { subject: body.subject, intro: body.intro });
+      audit('admin.email_template_saved', { id: body.id, locale: body.locale, cleared: !saved });
+      return { status: 200, body: { template: saved ?? { subject: '', intro: '' } } };
+    },
+
+    /*
+     * Aperçu : renvoie le vrai HTML de l'email, avec des valeurs d'exemple. Le
+     * brouillon passé dans la requête permet de voir sa personnalisation avant
+     * de l'enregistrer. La page d'administration l'affiche dans un cadre
+     * cloisonné : ce HTML n'est pas fait pour s'exécuter chez elle.
+     */
+    'POST /api/v1/admin/emails/preview': async req => {
+      requireAdmin(req);
+      const body = await readJson(req, 4096);
+      if (!isEmailKind(body.id)) throw new HttpError(400, 'bad_email_kind', 'Message inconnu');
+      const locale = isEmailLocale(body.locale) ? body.locale : emailTemplates.defaultLocale();
+      const draft = body.draft && typeof body.draft === 'object'
+        ? { subject: (body.draft as Record<string, unknown>).subject, intro: (body.draft as Record<string, unknown>).intro }
+        : undefined;
+      const message = emailTemplates.preview(body.id, locale, settings.publicUrl, draft as never);
+      if (!message) throw new HttpError(400, 'bad_email_kind', 'Message inconnu');
+      return { status: 200, body: { subject: message.subject, text: message.text, html: message.html } };
     }
   };
 
@@ -1295,7 +1358,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       const body = await readJson(req, 32768);
       const key = webauthn.register(userId, body as never);
       const user = getUser(userId);
-      notify(ctx => emails.twoFactor(ctx, now(), true), user, 'security_key_added');
+      notify('twoFactor', ctx => emails.twoFactor(ctx, now(), true), user, 'security_key_added');
       audit('account.security_key_added', { rpId: key.rpId }, userId);
       return { status: 201, body: key };
     }),
@@ -1308,7 +1371,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         throw new HttpError(403, 'invalid_credentials', 'Mot de passe principal incorrect');
       }
       if (!webauthn.remove(userId, params.id)) throw new HttpError(404, 'not_found', 'Clé de sécurité inconnue');
-      notify(ctx => emails.twoFactor(ctx, now(), false), user, 'security_key_removed');
+      notify('twoFactor', ctx => emails.twoFactor(ctx, now(), false), user, 'security_key_removed');
       audit('account.security_key_removed', {}, userId);
       return { status: 204 };
     }),

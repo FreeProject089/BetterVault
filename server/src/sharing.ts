@@ -283,7 +283,7 @@ export function sharingRoutes(ctx: RouteContext): PatternRoute[] {
       const role = roleInVault(params.id, roleId);
       if (role.builtin === 'owner') throw new HttpError(400, 'invalid_role', 'Transférez la propriété depuis la liste des membres');
       requireGrantable(me, rolePermissions(role));
-      const target = ctx.db.prepare('SELECT * FROM users WHERE id = ?').get(targetId) as Parameters<RouteContext['notify']>[1] | undefined;
+      const target = ctx.db.prepare('SELECT * FROM users WHERE id = ?').get(targetId) as Parameters<RouteContext['notify']>[2] | undefined;
       if (!target?.public_key) throw new HttpError(404, 'user_not_found', 'Compte introuvable');
       if (membership(ctx, params.id, targetId)) throw new HttpError(409, 'already_member', 'Cette personne fait déjà partie du coffre');
       const memberCount = ctx.db.prepare('SELECT COUNT(*) AS count FROM shared_members WHERE vault_id = ?').get(params.id) as { count: number };
@@ -293,7 +293,7 @@ export function sharingRoutes(ctx: RouteContext): PatternRoute[] {
       ctx.db.prepare('INSERT INTO shared_members (vault_id, user_id, role_id, wrapped_key, status, invited_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .run(params.id, targetId, roleId, wrappedKey, 'invited', userId, ctx.now());
       const inviter = ctx.getUser(userId);
-      ctx.notify(mail => emails.sharedInvite(mail, inviter.email), target);
+      ctx.notify('sharedInvite', mail => emails.sharedInvite(mail, inviter.email), target);
       return { status: 201, body: { userId: targetId, status: 'invited' } };
     }),
 

@@ -16,6 +16,8 @@ export function requestLocale(req: IncomingMessage): ApiLocale {
 
 const EXACT: Record<string, string> = {
   'Cette personne fait déjà partie du coffre': 'This person is already a member of the vault',
+  'Message inconnu': 'Unknown message',
+  'Langue inconnue': 'Unknown language',
   'Le fichier n’est plus disponible sur le serveur': 'The file is no longer available on the server',
   'Pièce jointe introuvable': 'Attachment not found',
   'Les pièces jointes ne sont pas activées sur ce serveur': 'Attachments are not enabled on this server',

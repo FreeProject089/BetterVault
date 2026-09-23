@@ -75,11 +75,12 @@ describe('Lien « ce n’était pas moi »', () => {
 
   it('joint un lien à l’email de nouvelle connexion, dans les deux versions', async () => {
     const { message, chemin } = await compteAvecAlerte('alerte');
-    expect(message.subject).toBe('New sign-in to your BetterVault account');
+    // Le compte est créé par l'application en français : l'email l'est aussi
+    expect(message.subject).toBe('Nouvelle connexion à votre compte BetterVault');
     expect(chemin).toBeTruthy();
     // La version texte porte le même lien : certains clients n'affichent qu'elle
     expect(message.text).toContain('/security/not-me/');
-    expect(message.html).toContain('This wasn’t me');
+    expect(message.html).toContain('Ce n’était pas moi');
   });
 
   it('montre une page de confirmation sans rien faire', async () => {
@@ -142,7 +143,7 @@ describe('Lien « ce n’était pas moi »', () => {
     const { email } = await compteAvecAlerte('annulation');
     await newService().requestRecoveryCode(url, email);
 
-    const demande = sent.filter(m => m.to === email && m.subject.includes('reset code')).at(-1)!;
+    const demande = sent.filter(m => m.to === email && (m.subject.includes('reset code') || m.subject.includes('Code de réinitialisation'))).at(-1)!;
     const code = /(\d{6})/.exec(demande.subject)![1];
     const chemin = /https:\/\/vault\.exemple\.fr(\/security\/not-me\/[\w-]+)/.exec(demande.html ?? '')![1];
 

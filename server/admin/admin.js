@@ -73,6 +73,22 @@ const TEXT = {
   version: ['Version du serveur', 'Server version'],
   wrongToken: ['Jeton incorrect', 'Wrong token'],
   backups: ['Sauvegardes', 'Backups'],
+  tabEmails: ['Emails', 'Emails'],
+  emailsTitle: ['Emails envoyés', 'Emails sent'],
+  emailsHint: ['Voyez chaque message tel qu’il part, changez son sujet et ajoutez une introduction. Le code, la date, l’adresse IP et l’avertissement de sécurité restent produits par le serveur.', 'See each message as it is sent, change its subject and add an introduction. The code, date, IP address and security warning stay produced by the server.'],
+  emailsDefaultLocale: ['Langue d’envoi par défaut', 'Default sending language'],
+  emailsDefaultLocaleHint: ['Pour les comptes qui n’ont pas choisi de langue. Un compte qui en a choisi une la garde.', 'For accounts that have not picked a language. An account that picked one keeps it.'],
+  emailsSubject: ['Sujet', 'Subject'],
+  emailsSubjectPlaceholder: ['Laisser vide pour le sujet d’origine', 'Leave empty for the original subject'],
+  emailsIntro: ['Introduction', 'Introduction'],
+  emailsIntroPlaceholder: ['Paragraphe ajouté en tête du message, en texte simple', 'Paragraph added at the top of the message, plain text'],
+  emailsPreview: ['Aperçu', 'Preview'],
+  emailsSave: ['Enregistrer', 'Save'],
+  emailsReset: ['Revenir au texte d’origine', 'Back to the original text'],
+  emailsSaved: ['Message enregistré', 'Message saved'],
+  emailsCustomised: ['personnalisé', 'customised'],
+  emailsWhen: ['Envoyé :', 'Sent:'],
+  emailsTextVersion: ['Version texte', 'Text version'],
   backupHint: ['Copie chiffrée de la base et des fichiers vers un stockage S3.', 'Encrypted copy of the database and files to S3-compatible storage.'],
   learnMore: ['En savoir plus', 'Learn more'],
   backupEnabled: ['Sauvegardes automatiques', 'Automatic backups'],
@@ -434,6 +450,7 @@ document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', (
   if (name === 'admins') void loadAdmins();
   if (name === 'cluster') void loadCluster();
   if (name === 'backups') void loadBackups();
+  if (name === 'emails') void loadEmails();
 }));
 
 /* ── Administrateurs ───────────────────────────────────────────────────── */
@@ -1598,4 +1615,154 @@ function wireRestore() {
     try { localStorage.setItem(THEME_KEY, theme); } catch { /* navigation privée : le choix vaut pour la session */ }
     apply(theme);
   });
+}
+/* ── Emails : aperçu et personnalisation ─────────────────────────────────
+   À gauche, les messages que le serveur envoie ; à droite, l'éditeur et
+   l'aperçu du vrai HTML. L'aperçu est rendu dans un cadre cloisonné
+   (`sandbox` vide) : ce HTML n'a aucune raison de s'exécuter ici. */
+let emailsState = null;
+let emailSelected = 'resetCode';
+let emailLocale = fr ? 'fr' : 'en';
+let emailPreviewTimer = 0;
+
+const LOCALE_NAMES = { fr: 'Français', en: 'English' };
+
+async function loadEmails() {
+  const host = $('emails-panel');
+  if (!host) return;
+  try {
+    emailsState = await api('GET', 'emails');
+  } catch (err) {
+    host.innerHTML = `<p class="notice notice-danger">${escapeHtml(err.message)}</p>`;
+    return;
+  }
+  renderEmails();
+}
+
+function emailIsCustomised(kind) {
+  return Object.values(kind.overrides).some(o => o.subject || o.intro);
+}
+
+function renderEmails() {
+  const host = $('emails-panel');
+  const state = emailsState;
+  const kind = state.kinds.find(k => k.id === emailSelected) ?? state.kinds[0];
+  emailSelected = kind.id;
+  const current = kind.overrides[emailLocale] ?? { subject: '', intro: '' };
+  const canEdit = me?.breakGlass || me?.role === 'owner';
+
+  host.innerHTML = `
+    <section class="card">
+      <div class="panel-head"><h2>${t('emailsTitle')}</h2></div>
+      <p class="hint">${t('emailsHint')}</p>
+      <div class="email-locale-row">
+        <div>
+          <div class="field-label">${t('emailsDefaultLocale')}</div>
+          <div class="hint">${t('emailsDefaultLocaleHint')}</div>
+        </div>
+        <div class="segmented" role="radiogroup" aria-label="${t('emailsDefaultLocale')}">
+          ${state.locales.map(l => `<button type="button" role="radio" aria-checked="${state.defaultLocale === l}" class="${state.defaultLocale === l ? 'active' : ''}" data-default-locale="${l}"${canEdit ? '' : ' disabled'}>${LOCALE_NAMES[l] ?? l}</button>`).join('')}
+        </div>
+      </div>
+    </section>
+
+    <div class="email-layout">
+      <nav class="email-list" aria-label="${t('emailsTitle')}">
+        ${state.kinds.map(k => `
+          <button type="button" class="email-item${k.id === kind.id ? ' active' : ''}" data-email="${escapeHtml(k.id)}" aria-current="${k.id === kind.id}">
+            <span class="email-item-name">${escapeHtml(k.label[fr ? 0 : 1])}${emailIsCustomised(k) ? ` <span class="badge-mini">${t('emailsCustomised')}</span>` : ''}</span>
+            <span class="email-item-when">${escapeHtml(k.when[fr ? 0 : 1])}</span>
+          </button>`).join('')}
+      </nav>
+
+      <section class="card email-editor">
+        <div class="email-editor-head">
+          <h3>${escapeHtml(kind.label[fr ? 0 : 1])}</h3>
+          <div class="segmented" role="tablist" aria-label="Langue du message">
+            ${state.locales.map(l => `<button type="button" role="tab" aria-selected="${emailLocale === l}" class="${emailLocale === l ? 'active' : ''}" data-edit-locale="${l}">${LOCALE_NAMES[l] ?? l}</button>`).join('')}
+          </div>
+        </div>
+        <label class="field">
+          <span class="field-label">${t('emailsSubject')}</span>
+          <input type="text" id="email-subject" maxlength="150" value="${escapeHtml(current.subject)}" placeholder="${t('emailsSubjectPlaceholder')}"${canEdit ? '' : ' disabled'}>
+        </label>
+        <label class="field">
+          <span class="field-label">${t('emailsIntro')}</span>
+          <textarea id="email-intro" rows="3" maxlength="600" placeholder="${t('emailsIntroPlaceholder')}"${canEdit ? '' : ' disabled'}>${escapeHtml(current.intro)}</textarea>
+        </label>
+        ${canEdit ? `
+        <div class="actions">
+          <span class="status" id="email-status" role="status"></span>
+          <button type="button" class="btn ghost" id="email-reset">${t('emailsReset')}</button>
+          <button type="button" class="btn primary" id="email-save">${t('emailsSave')}</button>
+        </div>` : ''}
+
+        <div class="email-preview-head">
+          <span class="field-label">${t('emailsPreview')}</span>
+          <span class="email-preview-subject" id="email-preview-subject"></span>
+        </div>
+        <iframe class="email-preview" id="email-preview" sandbox="" referrerpolicy="no-referrer" title="${t('emailsPreview')}"></iframe>
+        <details class="email-text">
+          <summary>${t('emailsTextVersion')}</summary>
+          <pre id="email-preview-text"></pre>
+        </details>
+      </section>
+    </div>`;
+
+  host.querySelectorAll('[data-email]').forEach(button => button.addEventListener('click', () => {
+    emailSelected = button.dataset.email;
+    renderEmails();
+  }));
+  host.querySelectorAll('[data-edit-locale]').forEach(button => button.addEventListener('click', () => {
+    emailLocale = button.dataset.editLocale;
+    renderEmails();
+  }));
+  host.querySelectorAll('[data-default-locale]').forEach(button => button.addEventListener('click', async () => {
+    try {
+      const result = await api('PUT', 'emails/locale', { locale: button.dataset.defaultLocale });
+      emailsState.defaultLocale = result.defaultLocale;
+      renderEmails();
+    } catch (err) {
+      alert(err.message);
+    }
+  }));
+
+  const subject = $('email-subject');
+  const intro = $('email-intro');
+  // Aperçu du brouillon en direct, sans rien enregistrer
+  const planPreview = () => {
+    clearTimeout(emailPreviewTimer);
+    emailPreviewTimer = setTimeout(() => void refreshEmailPreview({ subject: subject.value, intro: intro.value }), 250);
+  };
+  subject?.addEventListener('input', planPreview);
+  intro?.addEventListener('input', planPreview);
+
+  $('email-save')?.addEventListener('click', async () => {
+    const saved = await api('PUT', 'emails/template', { id: emailSelected, locale: emailLocale, subject: subject.value, intro: intro.value });
+    kind.overrides[emailLocale] = saved.template;
+    renderEmails();
+    setStatus($('email-status'), t('emailsSaved'), 'ok');
+  });
+  $('email-reset')?.addEventListener('click', async () => {
+    const saved = await api('PUT', 'emails/template', { id: emailSelected, locale: emailLocale, subject: '', intro: '' });
+    kind.overrides[emailLocale] = saved.template;
+    renderEmails();
+  });
+
+  void refreshEmailPreview();
+}
+
+async function refreshEmailPreview(draft) {
+  const frame = $('email-preview');
+  if (!frame) return;
+  try {
+    const preview = await api('POST', 'emails/preview', { id: emailSelected, locale: emailLocale, ...(draft ? { draft } : {}) });
+    // Le sujet et le texte d'abord : s'ils dépendaient du rendu du cadre, un
+    // HTML que le navigateur refuse effacerait aussi ce qu'on sait déjà afficher.
+    $('email-preview-subject').textContent = preview.subject;
+    $('email-preview-text').textContent = preview.text;
+    frame.srcdoc = preview.html;
+  } catch (err) {
+    $('email-preview-subject').textContent = err.message;
+  }
 }

@@ -69,7 +69,7 @@ body {
 label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin: 12px 0 4px; }
 label.check { display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 500; font-size: 13px; }
 
-input, select {
+input, select, textarea {
   width: 100%;
   padding: 8px 10px;
   background: var(--field);
@@ -79,7 +79,8 @@ input, select {
   font: inherit;
 }
 input[type="checkbox"] { width: auto; accent-color: var(--accent); }
-input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
+textarea { resize: vertical; line-height: 1.5; }
 
 .row { display: flex; gap: 12px; flex-wrap: wrap; }
 .row > div { flex: 1 1 200px; }
@@ -328,3 +329,111 @@ code.fp.big { font-size: 18px; }
 /* Lien « En savoir plus » : discret, à la suite d'une explication courte */
 .aide { color: var(--accent); text-decoration: none; white-space: nowrap; font-weight: 600; }
 .aide:hover { text-decoration: underline; }
+
+/* ── Emails : liste, éditeur et aperçu ─────────────────────────────────── */
+.email-locale-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.field-label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+.field { display: block; margin-top: 14px; }
+.field input, .field textarea { width: 100%; box-sizing: border-box; }
+
+/* Bascule à deux ou trois choix : parts égales, l'actif marqué à l'accent */
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+.segmented button {
+  min-height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.segmented button.active { background: var(--card); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); font-weight: 600; }
+.segmented button:disabled { cursor: not-allowed; opacity: 0.7; }
+
+.email-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 16px;
+  align-items: start;
+}
+.email-list { display: flex; flex-direction: column; gap: 6px; }
+.email-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 52px;
+  padding: 10px 12px;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.email-item:hover { border-color: var(--muted); }
+.email-item.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.email-item-name { font-size: 13px; font-weight: 600; }
+.email-item-when { font-size: 12px; color: var(--muted); }
+.badge-mini {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  vertical-align: middle;
+}
+.email-editor-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.email-editor-head h3 { margin: 0; font-size: 16px; }
+.email-editor .actions { margin-top: 14px; }
+.email-preview-head { display: flex; align-items: baseline; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+.email-preview-subject { font-size: 13px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+/* L'aperçu est une page d'email : fond clair quel que soit le thème de l'admin */
+.email-preview {
+  width: 100%;
+  height: 560px;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f6f8fa;
+}
+.email-text { margin-top: 10px; }
+.email-text summary { cursor: pointer; font-size: 13px; color: var(--muted); min-height: 32px; display: flex; align-items: center; }
+.email-text pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+@media (max-width: 860px) {
+  .email-layout { grid-template-columns: minmax(0, 1fr); }
+  /* Au téléphone, la liste défile en bande : elle ne pousse pas l'éditeur hors de vue */
+  .email-list { flex-direction: row; overflow-x: auto; padding-bottom: 4px; }
+  .email-item { flex: 0 0 200px; }
+  .email-preview { height: 460px; }
+  .segmented button { min-height: 44px; }
+}
