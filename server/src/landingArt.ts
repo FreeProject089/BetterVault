@@ -27,8 +27,8 @@ export function icon(name: IconName, size = 24, label?: string): string {
 }
 
 /** Icône dans sa tuile en relief */
-export function tile(name: IconName, size: 'sm' | 'md' | 'lg' = 'md'): string {
-  const px = size === 'lg' ? 34 : size === 'md' ? 24 : 18;
+export function tile(name: IconName, size: 'sm' | 'md' = 'md'): string {
+  const px = size === 'md' ? 24 : 18;
   return `<span class="tile tile-${size}">${icon(name, px)}</span>`;
 }
 
@@ -218,17 +218,15 @@ export const ART_CSS = `
   box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 10%,transparent),0 10px 24px -14px color-mix(in srgb,var(--accent) 80%,transparent)}
 .tile-sm{width:34px;height:34px;border-radius:7px}
 .tile-md{width:46px;height:46px}
-.tile-lg{width:60px;height:60px;border-radius:9px}
 
 /* Traits à main levée */
 .hl{position:relative;display:inline-block;padding:0 .12em;white-space:nowrap}
 .hl-text{position:relative;z-index:1}
-.hl-brush{position:absolute;z-index:0;left:-.08em;right:-.12em;top:.16em;bottom:.02em;width:calc(100% + .2em);height:.9em;margin-top:.12em;overflow:visible;transform:rotate(-1.2deg)}
+.hl-brush{position:absolute;z-index:0;left:-.08em;top:.16em;width:calc(100% + .2em);height:.9em;margin-top:.12em;overflow:visible;transform:rotate(-1.2deg)}
 .hl-brush path{fill:var(--hl,#ffc62e)}.hl-brush .hl-tail{fill:none;stroke:var(--hl,#ffc62e);stroke-width:5;stroke-linecap:round}
 .hl-accent{--hl:color-mix(in srgb,var(--accent) 78%,transparent)}
 .hl-accent .hl-text{color:#fff}
 .hl-yellow{--hl:#ffc62e}.hl-yellow .hl-text{color:#1a1530}
-.hl-blue{--hl:#6cb6f5}.hl-blue .hl-text{color:#0b1b2e}
 .ul{position:relative;display:inline-block;white-space:nowrap}
 .ul-line{position:absolute;left:-2%;bottom:-.14em;width:104%;height:.3em;overflow:visible}
 .ul-line path{fill:var(--ul,#3aa0f0)}
@@ -289,7 +287,7 @@ export const ART_CSS = `
 .rivet{position:absolute;width:9px;height:9px;border-radius:50%;background:color-mix(in srgb,var(--muted) 55%,var(--card));box-shadow:inset 0 -2px 0 rgba(0,0,0,.3)}
 .r1{top:6px;left:6px}.r2{top:6px;right:6px}.r3{bottom:6px;left:6px}.r4{bottom:6px;right:6px}
 .vault-opening{position:relative;border-radius:7px;perspective:2400px;perspective-origin:50% 40%;background:var(--bg);box-shadow:inset 0 14px 34px rgba(0,0,0,.55)}
-.vault-light{position:absolute;inset:0;border-radius:7px;background:radial-gradient(70% 60% at 50% 0%,color-mix(in srgb,var(--accent) 26%,transparent),transparent 70%);opacity:0;transition:opacity 1.2s ease .5s;pointer-events:none}
+.vault-light{position:absolute;inset:0;border-radius:7px;background:radial-gradient(70% 60% at 50% 0%,color-mix(in srgb,var(--accent) 26%,transparent),transparent 70%);transition:opacity 1.2s ease .5s;pointer-events:none}
 .vault-inner{position:relative;list-style:none;margin:0;padding:14px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
 .vault-inner>li{display:flex}
 .locker{position:relative;display:flex;flex-direction:column;gap:10px;width:100%;padding:16px 16px 40px;border-radius:8px;background:var(--card);border:1px solid var(--border);
@@ -305,11 +303,11 @@ export const ART_CSS = `
 .door{position:absolute;top:0;bottom:0;width:50%;transform-style:preserve-3d;transition:transform 1.5s cubic-bezier(.55,0,.15,1) .15s;pointer-events:none}
 .door-l{left:0;transform-origin:left center;transform:rotateY(-100deg)}
 .door-r{right:0;transform-origin:right center;transform:rotateY(100deg)}
-.door-face{position:absolute;inset:0;display:grid;place-items:center;border-radius:6px;backface-visibility:hidden;
+.door-face{position:absolute;inset:0;display:grid;place-items:center;backface-visibility:hidden;
   background:linear-gradient(135deg,color-mix(in srgb,var(--muted) 40%,var(--card)),color-mix(in srgb,var(--muted) 20%,var(--card)));
   border:1px solid color-mix(in srgb,var(--muted) 45%,var(--border));box-shadow:inset 0 0 0 8px color-mix(in srgb,var(--muted) 10%,transparent),inset 0 0 40px rgba(0,0,0,.25)}
 .door-l .door-face{border-radius:6px 2px 2px 6px}.door-r .door-face{border-radius:2px 6px 6px 2px}
-.door-edge{position:absolute;top:0;bottom:0;width:18px;background:linear-gradient(90deg,color-mix(in srgb,var(--muted) 30%,var(--card)),color-mix(in srgb,var(--muted) 50%,var(--card)));}
+.door-edge{position:absolute;top:0;bottom:0;width:18px;background:linear-gradient(90deg,color-mix(in srgb,var(--muted) 30%,var(--card)),color-mix(in srgb,var(--muted) 50%,var(--card)))}
 .door-l .door-edge{right:0;transform-origin:right center;transform:rotateY(90deg)}
 .door-r .door-edge{left:0;transform-origin:left center;transform:rotateY(-90deg)}
 .door-back{position:absolute;inset:0;border-radius:6px;transform:rotateY(180deg);backface-visibility:hidden;display:flex;flex-direction:column;justify-content:space-evenly;padding:0 12px;
@@ -333,8 +331,8 @@ export const ART_CSS = `
 .js .vault.open .door-r{transform:rotateY(100deg)}
 .js .vault.open .dial-knob{transform:rotate(-200deg)}
 .js .vault.open .wheel{transform:rotate(180deg)}
+.js .vault-light{opacity:0}
 .js .vault.open .vault-light{opacity:1}
-.vault-light{opacity:1}.js .vault-light{opacity:0}
 .js .vault-inner>li{opacity:0;transform:translateY(10px) scale(.98);transition:opacity .45s ease,transform .45s ease}
 .js .vault.open .vault-inner>li{opacity:1;transform:none;transition-delay:calc(1.1s + var(--i) * 70ms)}
 
@@ -342,12 +340,9 @@ export const ART_CSS = `
 .snake{position:relative;margin:36px 0 0}
 .snake-path{position:absolute;left:0;top:0;width:100%;height:calc(100% * var(--k));overflow:visible;pointer-events:none}
 .snake-path path{fill:none;stroke-linecap:round}
-.snake-wide path{stroke-width:26px}
+.snake-wide path{stroke-width:26px;transition:stroke-dashoffset .15s linear}
 .snake-narrow{display:none}
 .snake-narrow path{stroke-width:12px}
-.snake.measured .snake-wide{height:auto}
-.snake.measured .snake-wide path{stroke-width:26px}
-.snake-wide path{transition:stroke-dashoffset .15s linear}
 .snake-steps{position:relative;list-style:none;margin:0;padding:0;display:grid;grid-template-rows:repeat(var(--rows),minmax(340px,auto))}
 .snake-step{display:grid;grid-template-columns:1fr 1fr;align-items:center;gap:56px}
 .snake-step.art-right .snake-art{order:2}
@@ -493,7 +488,6 @@ export const ART_CSS = `
 
 @media (prefers-reduced-motion:reduce){
   .window,.float,.cycle-item,.sync-badge .ph,.otp.flip,.site-menu nav{animation:none!important}
-  .cycle-item{opacity:0}.cycle-item:first-child{opacity:1}
   .js [data-reveal],.js .vault-inner>li{opacity:1!important;transform:none!important;transition:none!important}
   .door,.dial-knob,.wheel{transition:none!important}
   .js .hl-brush,.js .ul-line{clip-path:none;transition:none}
