@@ -53,35 +53,39 @@ export const SITE_JS = `(() => {
       });
       if (!cartes.length) return;
       const fin = bandeau ? bandeau.getBoundingClientRect().top - box.top + 14 : box.height + 60;
-      const M = 34, R = 58, cx = W / 2;
-      let d = '';
+      const M = 50, cx = W / 2;
+      /*
+       * Points de passage : pour chaque maquette, l'entrée par le haut, le
+       * milieu du côté extérieur, la sortie par le bas. Une spline de
+       * Catmull-Rom centripète passe par tous ces points : la courbure varie
+       * en douceur, sans segment droit suivi d'un coin, et sans dépasser.
+       */
+      const pts = [];
       cartes.forEach((k, i) => {
-        const haut = k.t - M, bas = k.b + M, milieu = (k.l + k.r) / 2;
+        const haut = k.t - M, bas = k.b + M, h = bas - haut;
         const bord = k.gauche ? k.l - M : k.r + M, s = k.gauche ? 1 : -1;
-        // Première maquette : le ruban arrive par le haut ; les suivantes, par la traversée
-        if (i === 0) d += 'M' + (milieu + s * 70) + ',' + haut + ' H' + (bord + s * R);
-        // Le tour de la maquette par l'extérieur, coins arrondis
-        d += ' Q' + bord + ',' + haut + ' ' + bord + ',' + (haut + R)
-          + ' V' + (bas - R) + ' Q' + bord + ',' + bas + ' ' + (bord + s * R) + ',' + bas;
-        const x0 = bord + s * R;
-        const suite = cartes[i + 1];
-        if (suite) {
-          /*
-           * Traversée vers la maquette suivante, de l'autre côté : un seul S
-           * large, d'un coin à l'autre, tangentes horizontales aux deux bouts.
-           * Avant, un S serré dans un petit écart vertical faisait une marche.
-           */
-          const haut2 = suite.t - M;
-          const bord2 = suite.gauche ? suite.l - M : suite.r + M;
-          const x1 = bord2 - s * R;
-          const mx = (x0 + x1) / 2;
-          d += ' C' + mx + ',' + bas + ' ' + mx + ',' + haut2 + ' ' + x1 + ',' + haut2;
-        } else {
-          // Dernière : un quart de tour vers le centre, puis tout droit dans le bandeau
-          const D = Math.min(90, Math.abs(cx - x0));
-          d += ' H' + (cx - s * D) + ' Q' + cx + ',' + bas + ' ' + cx + ',' + (bas + D) + ' V' + fin;
-        }
+        const w = k.r - k.l;
+        if (i === 0) pts.push([bord + s * w * 0.75, haut]);
+        // Autour des coins : un point avant et un après, pour ne jamais les couper
+        pts.push([bord + s * w * 0.35, haut]);
+        pts.push([bord, haut + h * 0.22]);
+        pts.push([bord, bas - h * 0.22]);
+        pts.push([bord + s * w * 0.35, bas]);
       });
+      const bas = cartes[cartes.length - 1].b + M;
+      pts.push([cx, bas + Math.min(120, (fin - bas) * 0.45)]);
+      pts.push([cx, fin]);
+      // Conversion en courbes de Bézier (Catmull-Rom centripète, alpha = 0,5)
+      const ext = [pts[0], ...pts, pts[pts.length - 1]];
+      const dist = (a, b) => Math.pow(Math.hypot(b[0] - a[0], b[1] - a[1]), 0.5) || 1e-6;
+      let d = 'M' + pts[0][0].toFixed(1) + ',' + pts[0][1].toFixed(1);
+      for (let i = 1; i < ext.length - 2; i++) {
+        const p0 = ext[i - 1], p1 = ext[i], p2 = ext[i + 1], p3 = ext[i + 2];
+        const d1 = dist(p0, p1), d2 = dist(p1, p2), d3 = dist(p2, p3);
+        const c1 = [0, 1].map(j => (d1 * d1 * p2[j] - d2 * d2 * p0[j] + (2 * d1 * d1 + 3 * d1 * d2 + d2 * d2) * p1[j]) / (3 * d1 * (d1 + d2)));
+        const c2 = [0, 1].map(j => (d3 * d3 * p1[j] - d2 * d2 * p3[j] + (2 * d3 * d3 + 3 * d3 * d2 + d2 * d2) * p2[j]) / (3 * d3 * (d3 + d2)));
+        d += ' C' + c1.map(v => v.toFixed(1)).join(',') + ' ' + c2.map(v => v.toFixed(1)).join(',') + ' ' + p2.map(v => v.toFixed(1)).join(',');
+      }
       large.setAttribute('viewBox', '0 0 ' + W + ' ' + fin);
       large.setAttribute('preserveAspectRatio', 'xMinYMin meet');
       large.style.height = fin + 'px';
