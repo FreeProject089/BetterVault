@@ -107,3 +107,27 @@ describe('Page des tarifs et liens', () => {
     expect(parseSiteLinks({ discord: 'javascript:alert(1)', status: 'http://x.org', github: 'https://github.com/a/b' })).toEqual({ github: 'https://github.com/a/b' });
   });
 });
+
+describe('Langues des pages publiques', () => {
+  const langs = [{ code: 'fr', label: 'Français' }, { code: 'en', label: 'English' }, { code: 'de', label: 'Deutsch' }];
+
+  it('traduit par le pack quand il connaît le texte, sinon affiche l’anglais', () => {
+    const html = renderLanding({ ...base, locale: 'en', lang: 'de', strings: { 'Premiers pas': 'Erste Schritte' }, langs, path: '/' });
+    expect(html).toContain('<html lang="de">');
+    expect(html).toContain('Erste Schritte');
+    expect(html).toContain('How it works');
+    expect(html).not.toContain('Comment ça marche');
+  });
+
+  it('passe en menu déroulant au-delà de deux langues', () => {
+    const html = renderLanding({ ...base, langs, path: '/' });
+    expect(html).toContain('class="lang-menu lang-bar"');
+    expect(html).toContain('href="/?lang=de"');
+    expect(html).not.toContain('class="lang-toggle');
+  });
+
+  it('échappe le nom d’une langue venu de l’administration', () => {
+    const html = renderLanding({ ...base, langs: [...langs, { code: 'xx', label: '<b>x</b>' }], path: '/' });
+    expect(html).not.toContain('<b>x</b>');
+  });
+});

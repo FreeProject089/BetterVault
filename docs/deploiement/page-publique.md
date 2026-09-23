@@ -58,7 +58,15 @@ Dès qu'une offre payante a un tarif créé dans Stripe, la page **`/tarifs`** a
 
 ## Langue des pages
 
-Les pages publiques (accueil, tarifs, serveurs, documentation, documents légaux) existent en français et en anglais. La langue suit celle du navigateur ; le sélecteur de la barre du haut l'impose et la retient un an (cookie `bv_lang`, sans autre contenu). Avec deux langues, c'est une bascule ; au-delà, un menu déroulant.
+Les pages publiques (accueil, tarifs, serveurs, documentation, documents légaux) sont écrites en français et en anglais. La langue suit celle du navigateur ; le sélecteur de la barre du haut l'impose et la retient un an (cookie `bv_lang`, sans autre contenu).
+
+Les **packs de langue** ajoutés dans **/admin → Langues** servent aussi aux pages publiques : chaque pack apparaît dans le sélecteur. Un texte que le pack traduit (clé = texte français, par exemple `"Premiers pas": "Erste Schritte"`) s'affiche dans sa langue ; un texte qu'il ne connaît pas encore s'affiche en anglais. Le contenu de la documentation et des documents légaux reste en français ou en anglais.
+
+| Langues proposées | Sélecteur |
+| --- | --- |
+| Une seule | Aucun |
+| Deux (français, anglais) | Une bascule `FR / EN` |
+| Trois ou plus | Un menu déroulant |
 
 ## Liens communautaires
 

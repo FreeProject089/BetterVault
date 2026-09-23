@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, normalize, sep } from 'node:path';
 import { markdownToHtml } from './legal.ts';
-import { CHROME_CSS, siteFooter, siteHeader, type ChromeContext } from './siteChrome.ts';
+import { CHROME_CSS, pageLangCode, siteFooter, siteHeader, translator, type ChromeContext } from './siteChrome.ts';
 
 /**
  * Documentation servie par le serveur, directement depuis les fichiers Markdown
@@ -316,7 +316,7 @@ export function renderDocPage(path: string, ctx: DocsContext): string | null {
   const current = pages[at];
   const markdown = readFileSync(file, 'utf8');
   const fr = ctx.locale === 'fr';
-  const t = (a: string, b: string) => (fr ? a : b);
+  const t = ctx.chrome ? translator(ctx.chrome) : (a: string, b: string) => (fr ? a : b);
   const sectionLabel = (s: string) => SECTIONS[s]?.[fr ? 0 : 1] ?? s;
 
   const sections = [...new Set(pages.map(p => p.section))].map(section => {
@@ -348,7 +348,7 @@ export function renderDocPage(path: string, ctx: DocsContext): string | null {
     : `<header class="site-bar"><div class="site-bar-in"><a class="site-brand" href="/"><picture><source srcset="/admin/logo-on-light.svg" media="(prefers-color-scheme: light)"><img src="/admin/logo-on-dark.svg" alt="" width="28" height="28"></picture><span>BetterVault</span></a><nav class="site-links"><a href="/docs" aria-current="page">Documentation</a></nav>${ctx.appAvailable ? `<div class="site-actions"><a class="site-cta" href="/app">${t('Premiers pas', 'Get started')}<span aria-hidden="true">→</span></a></div>` : ''}</div></header>`;
 
   return `<!DOCTYPE html>
-<html lang="${ctx.locale}">
+<html lang="${escapeHtml(ctx.chrome ? pageLangCode(ctx.chrome) : ctx.locale)}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">

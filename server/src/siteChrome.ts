@@ -38,13 +38,35 @@ export interface ChromeContext {
   links?: SiteLinks;
   /** Chemin de la page courante, pour le lien de changement de langue */
   path?: string;
+  /** Langue affichée quand elle vient d'un pack de l'administration (« de », « es »…) */
+  lang?: string;
+  /** Traductions de ce pack : texte français → texte traduit */
+  strings?: Record<string, string>;
+  /** Langues proposées : français, anglais, puis les packs publiés */
+  langs?: PageLang[];
 }
 
-/** Langues des pages publiques */
-const LANGS: Array<{ code: 'fr' | 'en'; label: string }> = [
+export interface PageLang { code: string; label: string }
+
+/** Langues de base des pages publiques ; les packs de l'administration s'ajoutent */
+export const BASE_LANGS: PageLang[] = [
   { code: 'fr', label: 'Français' },
   { code: 'en', label: 'English' }
 ];
+
+/**
+ * Traduction d'un texte des pages publiques. Les textes sont écrits en
+ * français et en anglais ; pour une autre langue, le pack de l'administration
+ * fournit la traduction du texte français, et à défaut on affiche l'anglais.
+ */
+export function translator(ctx: Pick<ChromeContext, 'locale' | 'strings'>): (fr: string, en: string) => string {
+  if (ctx.locale === 'fr') return fr => fr;
+  const strings = ctx.strings;
+  return strings ? (fr, en) => strings[fr] ?? en : (_fr, en) => en;
+}
+
+/** Code de langue de la page, pour l'attribut lang */
+export const pageLangCode = (ctx: Pick<ChromeContext, 'locale' | 'lang'>) => ctx.lang ?? ctx.locale;
 
 const logo = (size: number) =>
   `<picture><source srcset="/admin/logo-on-light.svg" media="(prefers-color-scheme: light)"><img src="/admin/logo-on-dark.svg" alt="" width="${size}" height="${size}"></picture>`;
@@ -68,20 +90,22 @@ export const ICONS = {
  * déroulant au-delà. Le lien pose ?lang=, que le serveur retient.
  */
 export function langSwitch(ctx: ChromeContext, where: 'bar' | 'footer'): string {
-  if (LANGS.length < 2) return '';
+  const langs = ctx.langs ?? BASE_LANGS;
+  if (langs.length < 2) return '';
   const path = ctx.path ?? '/';
-  const href = (code: string) => `${path}${path.includes('?') ? '&' : '?'}lang=${code}`;
-  const current = LANGS.find(l => l.code === ctx.locale) ?? LANGS[0];
-  if (LANGS.length === 2) {
-    const other = LANGS.find(l => l.code !== current.code)!;
-    return `<a class="lang-toggle lang-${where}" href="${href(other.code)}" hreflang="${other.code}" lang="${other.code}" title="${escapeHtml(other.label)}">${ICONS.globe}<span class="lang-cur">${current.code.toUpperCase()}</span><span class="lang-sep" aria-hidden="true">/</span><span>${other.code.toUpperCase()}</span></a>`;
+  const href = (code: string) => `${path}${path.includes('?') ? '&' : '?'}lang=${encodeURIComponent(code)}`;
+  const code = pageLangCode(ctx);
+  const current = langs.find(l => l.code === code) ?? langs[0];
+  if (langs.length === 2) {
+    const other = langs.find(l => l.code !== current.code)!;
+    return `<a class="lang-toggle lang-${where}" href="${escapeHtml(href(other.code))}" hreflang="${escapeHtml(other.code)}" lang="${escapeHtml(other.code)}" title="${escapeHtml(other.label)}">${ICONS.globe}<span class="lang-cur">${escapeHtml(current.code.toUpperCase())}</span><span class="lang-sep" aria-hidden="true">/</span><span>${escapeHtml(other.code.toUpperCase())}</span></a>`;
   }
-  return `<details class="lang-menu lang-${where}"><summary>${ICONS.globe}<span>${current.code.toUpperCase()}</span>${ICONS.chevron}</summary><div>${LANGS.map(l =>
-    `<a href="${href(l.code)}" hreflang="${l.code}" lang="${l.code}"${l.code === current.code ? ' aria-current="true"' : ''}>${escapeHtml(l.label)}</a>`).join('')}</div></details>`;
+  return `<details class="lang-menu lang-${where}"><summary>${ICONS.globe}<span>${escapeHtml(current.code.toUpperCase())}</span>${ICONS.chevron}</summary><div>${langs.map(l =>
+    `<a href="${escapeHtml(href(l.code))}" hreflang="${escapeHtml(l.code)}" lang="${escapeHtml(l.code)}"${l.code === current.code ? ' aria-current="true"' : ''}>${escapeHtml(l.label)}</a>`).join('')}</div></details>`;
 }
 
 export function siteHeader(ctx: ChromeContext, current: SiteSection): string {
-  const t = (a: string, b: string) => (ctx.locale === 'fr' ? a : b);
+  const t = translator(ctx);
   const cur = (s: SiteSection) => (s === current ? ' aria-current="page"' : '');
   const links = ctx.links ?? DEFAULT_LINKS;
   const nav = `
@@ -113,7 +137,7 @@ export function siteHeader(ctx: ChromeContext, current: SiteSection): string {
 }
 
 export function siteFooter(ctx: ChromeContext): string {
-  const t = (a: string, b: string) => (ctx.locale === 'fr' ? a : b);
+  const t = translator(ctx);
   const q = ctx.locale === 'en' ? '?lang=en' : '';
   const links = ctx.links ?? DEFAULT_LINKS;
   /*
@@ -191,6 +215,7 @@ export const CHROME_CSS = `
 .lang-menu summary{list-style:none;display:inline-flex;align-items:center;gap:6px;min-height:38px;padding:0 10px;border-radius:8px;cursor:pointer;color:var(--muted);font-weight:600;font-size:13px}
 .lang-menu summary::-webkit-details-marker{display:none}
 .lang-menu[open] .chev{transform:rotate(180deg)}
+.lang-footer>div{top:auto;bottom:44px}
 .lang-menu>div{position:absolute;right:0;top:44px;min-width:150px;display:flex;flex-direction:column;padding:6px;border:1px solid var(--border);border-radius:8px;background:var(--card);box-shadow:0 20px 40px -20px rgba(0,0,0,.5);z-index:5}
 .lang-menu>div a{padding:8px 10px;border-radius:6px;color:var(--text);text-decoration:none;font-size:14px}
 .lang-menu>div a:hover,.lang-menu>div a[aria-current]{background:color-mix(in srgb,var(--accent) 14%,transparent)}

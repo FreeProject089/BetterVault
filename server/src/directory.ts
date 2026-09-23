@@ -8,7 +8,7 @@
  */
 
 import { ART_CSS, artAccount, artCipher, artDevices, artUnlock, circled, faqList, heroArt, highlight, icon, snakeSteps, tile, underline, vaultFeatures, type IconName } from './landingArt.ts';
-import { CHROME_CSS, DEFAULT_LINKS, ICONS, siteFooter, siteHeader, type ChromeContext, type SiteLinks } from './siteChrome.ts';
+import { CHROME_CSS, DEFAULT_LINKS, ICONS, pageLangCode, siteFooter, siteHeader, translator, type ChromeContext, type PageLang, type SiteLinks } from './siteChrome.ts';
 
 export interface DirectoryEntry {
   name: string;
@@ -102,6 +102,10 @@ export interface LandingContext {
   links?: SiteLinks;
   /** Chemin demandé, pour le lien de changement de langue */
   path?: string;
+  /** Langue d'un pack de l'administration, ses traductions, et les langues proposées */
+  lang?: string;
+  strings?: Record<string, string>;
+  langs?: PageLang[];
   /** Serveurs officiels de la grappe, quand il y en a plusieurs */
   officialServers?: Array<{ name: string; region: string; zone: string; online: boolean }>;
   /** Offres payantes publiées, pour la page des tarifs */
@@ -205,12 +209,15 @@ const chrome = (ctx: LandingContext): ChromeContext => ({
   operatorName: ctx.operatorName,
   plansOn: (ctx.plans?.length ?? 0) > 0,
   links: ctx.links,
-  path: ctx.path
+  path: ctx.path,
+  lang: ctx.lang,
+  strings: ctx.strings,
+  langs: ctx.langs
 });
 
 function page(ctx: LandingContext, title: string, description: string, body: string): string {
   return `<!DOCTYPE html>
-<html lang="${ctx.locale}">
+<html lang="${escapeHtml(pageLangCode(ctx))}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -233,8 +240,7 @@ const goButton = (href: string, label: string, extra = '') =>
   `<a class="btn primary${extra}" href="${href}">${label}<span class="go">${ICONS.arrow}</span></a>`;
 
 export function renderLanding(ctx: LandingContext): string {
-  const fr = ctx.locale === 'fr';
-  const t = (a: string, b: string) => (fr ? a : b);
+  const t = translator(ctx);
   const title = ctx.page.title || ctx.operatorName || 'BetterVault';
   const links = ctx.links ?? DEFAULT_LINKS;
   const intro = ctx.page.description
@@ -414,7 +420,7 @@ function priceParts(p: PublicPlan['prices'][number]): { amount: string; currency
 export function renderPlansPage(ctx: LandingContext): string | null {
   const plans = ctx.plans ?? [];
   if (!plans.length) return null;
-  const t = (a: string, b: string) => (ctx.locale === 'fr' ? a : b);
+  const t = translator(ctx);
   const hasYear = plans.some(p => p.prices.some(pr => priceParts(pr).period === 'year'));
   const hasMonth = plans.some(p => p.prices.some(pr => priceParts(pr).period === 'month'));
   const toggle = hasYear && hasMonth;
@@ -523,7 +529,7 @@ export function renderPlansPage(ctx: LandingContext): string | null {
  */
 export function renderServersPage(ctx: LandingContext): string | null {
   if (!ctx.page.directoryEnabled || ctx.page.servers.length === 0) return null;
-  const t = (a: string, b: string) => (ctx.locale === 'fr' ? a : b);
+  const t = translator(ctx);
   // Regroupés par région, les officiels d'abord
   const regions = new Map<string, DirectoryEntry[]>();
   for (const s of [...ctx.page.servers].sort((a, b) => Number(b.official) - Number(a.official) || a.name.localeCompare(b.name))) {

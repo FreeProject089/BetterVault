@@ -48,7 +48,7 @@ import { DEFAULT_PUBLIC_PAGE, publicDirectory, renderLanding, renderPlansPage, r
 import { renderDocPage } from './docs.ts';
 import { SITE_JS } from './siteScript.ts';
 import { createSiteLinks } from './siteLinks.ts';
-import type { ChromeContext } from './siteChrome.ts';
+import { BASE_LANGS, type ChromeContext, type PageLang } from './siteChrome.ts';
 
 /**
  * API BetterVault : le serveur ne stocke que des données chiffrées côté client.
@@ -880,6 +880,8 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       settings = { ...settings, billing: { ...settings.billing, plans: result.plans } };
       writeSetting.run('settings', JSON.stringify(settings));
       audit('admin.billing_stripe_sync', { created: result.created });
+      // Ce qui a été créé est enregistré ; l'erreur est remontée ensuite
+      if (result.error) throw result.error;
       return { status: 200, body: { created: result.created, settings: publicSettings(settings) } };
     },
 
@@ -1067,11 +1069,19 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
    * Langue des pages publiques : ?lang= l'impose et la retient un an (cookie
    * sans valeur sensible), sinon le cookie, sinon la langue du navigateur.
    */
-  const pageLocale = (req: IncomingMessage): { locale: 'fr' | 'en'; cookie?: string } => {
-    const asked = new URL(req.url ?? '/', 'http://localhost').searchParams.get('lang');
-    if (asked === 'fr' || asked === 'en') return { locale: asked, cookie: `bv_lang=${asked}; Path=/; Max-Age=31536000; SameSite=Lax` };
-    const saved = /(?:^|;\s*)bv_lang=(fr|en)\b/.exec(String(req.headers.cookie ?? ''))?.[1] as 'fr' | 'en' | undefined;
-    return { locale: saved ?? (requestLocale(req) === 'en' ? 'en' : 'fr') };
+  type PageLocale = { locale: 'fr' | 'en'; lang?: string; strings?: Record<string, string>; langs: PageLang[]; cookie?: string };
+  const pageLocale = (req: IncomingMessage): PageLocale => {
+    // Langues proposées : français, anglais, puis les packs de l'administration
+    const packs = languages.list().filter(pack => pack.code !== 'fr' && pack.code !== 'en');
+    const langs: PageLang[] = [...BASE_LANGS, ...packs.map(pack => ({ code: pack.code, label: pack.name || pack.code }))];
+    const known = (code: string | null | undefined) => (code && langs.some(l => l.code === code) ? code : null);
+    const asked = known(new URL(req.url ?? '/', 'http://localhost').searchParams.get('lang'));
+    const saved = known(/(?:^|;\s*)bv_lang=([a-zA-Z-]{2,12})(?:;|$)/.exec(String(req.headers.cookie ?? ''))?.[1]);
+    const code = asked ?? saved ?? (requestLocale(req) === 'en' ? 'en' : 'fr');
+    // Le code vient de la liste ci-dessus (LANGUAGE_CODE) : rien d'autre n'entre dans l'en-tête
+    const cookie = asked ? `bv_lang=${asked}; Path=/; Max-Age=31536000; SameSite=Lax` : undefined;
+    if (code === 'fr' || code === 'en') return { locale: code, langs, cookie };
+    return { locale: 'en', lang: code, strings: languages.get(code)?.strings ?? {}, langs, cookie };
   };
   const withCookie = (reply: Reply, cookie?: string): Reply => (cookie ? { ...reply, headers: { ...(reply.headers ?? {}), 'Set-Cookie': cookie } } : reply);
 
@@ -1096,11 +1106,12 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
 
   /** Contexte commun des pages publiques (accueil, tarifs, serveurs) */
   const landingContext = async (req: IncomingMessage) => {
-    const { locale, cookie } = pageLocale(req);
+    const { locale, lang, strings, langs, cookie } = pageLocale(req);
     const url = new URL(req.url ?? '/', 'http://localhost');
     return {
       cookie,
       ctx: {
+        lang, strings, langs,
         page: settings.publicPage ?? DEFAULT_PUBLIC_PAGE,
         operatorName: settings.legal.operatorName ?? '',
         registrationOpen: settings.registrationOpen,
@@ -1122,7 +1133,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     const page = settings.publicPage ?? DEFAULT_PUBLIC_PAGE;
     const url = new URL(req.url ?? '/', 'http://localhost');
     return {
-      locale: pageLocale(req).locale,
+      ...(({ locale, lang, strings, langs }) => ({ locale, lang, strings, langs }))(pageLocale(req)),
       appAvailable: !!options.appAvailable,
       serversOn: page.directoryEnabled && page.servers.length > 0,
       legalEnabled: settings.legal.enabled,
