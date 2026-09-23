@@ -43,7 +43,7 @@ import { createEmailTemplates, isEmailKind, isEmailLocale } from './emailTemplat
 import { createLanguages, LanguageError } from './languages.ts';
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.ts';
 import { createWebauthn, parseRpId, type AssertionInput } from './webauthn.ts';
-import { DEFAULT_PUBLIC_PAGE, publicDirectory, renderLanding } from './directory.ts';
+import { DEFAULT_PUBLIC_PAGE, publicDirectory, renderLanding, renderServersPage } from './directory.ts';
 import { renderDocPage } from './docs.ts';
 
 /**
@@ -1452,9 +1452,13 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       }
     },
 
-    route('GET', '/about', async req => {
+    /*
+     * Page d'accueil à la racine. Quand l'hébergeur l'a coupée, la racine mène
+     * directement à l'application ; l'ancienne adresse /about renvoie ici.
+     */
+    route('GET', '/', async req => {
       const page = settings.publicPage ?? DEFAULT_PUBLIC_PAGE;
-      if (!page.landingEnabled) return htmlReply('<!DOCTYPE html><title>404</title><p>Not found</p>', 404);
+      if (!page.landingEnabled) return { status: 302, headers: { Location: '/app' } };
       return htmlReply(renderLanding({
         page,
         operatorName: settings.legal.operatorName ?? '',
@@ -1462,10 +1466,22 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         legalEnabled: settings.legal.enabled,
         appAvailable: !!options.appAvailable,
         version: SERVER_VERSION,
-        locale: requestLocale(req) === 'en' ? 'en' : 'fr',
-        // Comparaison des deux présentations : /about et /about?style=illustre
-        variant: new URL(req.url ?? '/', 'http://x').searchParams.get('style') === 'illustre' ? 'illustre' : 'sobre'
+        locale: requestLocale(req) === 'en' ? 'en' : 'fr'
       }));
+    }),
+    route('GET', '/about', async () => ({ status: 301, headers: { Location: '/' } })),
+    // Serveurs recommandés par l'hébergeur (annuaire) ; absente si l'annuaire est coupé
+    route('GET', '/serveurs', async req => {
+      const html = renderServersPage({
+        page: settings.publicPage ?? DEFAULT_PUBLIC_PAGE,
+        operatorName: settings.legal.operatorName ?? '',
+        registrationOpen: settings.registrationOpen,
+        legalEnabled: settings.legal.enabled,
+        appAvailable: !!options.appAvailable,
+        version: SERVER_VERSION,
+        locale: requestLocale(req) === 'en' ? 'en' : 'fr'
+      });
+      return html ? htmlReply(html) : htmlReply('<!DOCTYPE html><title>404</title><p>Not found</p>', 404);
     }),
     route('GET', '/legal/:slug', async (req, params) => legalPage(params.slug, req))
   ];
@@ -1537,7 +1553,11 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       }
       if (reply.raw) {
         res.writeHead(reply.status, { ...reply.headers, 'Content-Type': reply.contentType ?? 'application/octet-stream', 'Content-Length': reply.raw.length }).end(reply.raw);
+      } else if (reply.status >= 300 && reply.status < 400 && reply.headers?.Location) {
+        // Redirection : l'en-tête suffit, pas de corps
+        res.writeHead(reply.status, { ...reply.headers, 'Cache-Control': 'no-store' }).end();
       } else {
+        for (const [name, value] of Object.entries(reply.headers ?? {})) res.setHeader(name, value);
         send(res, reply.status, reply.body);
       }
     } catch (err) {

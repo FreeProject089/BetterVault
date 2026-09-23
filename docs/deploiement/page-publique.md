@@ -1,14 +1,27 @@
 # Page publique et annuaire
 
-## Page de présentation (`/about`)
+## Plan du site
 
-Chaque serveur publie une page de présentation : titre, description, lien vers l'application, vers la documentation et vers les documents légaux, et l'état des inscriptions.
+| Adresse | Contenu |
+| --- | --- |
+| `/` | Page d'accueil : ce que fait BetterVault, comment c'est chiffré, ce serveur |
+| `/app` | L'application ; `/auth` et `/connexion` y mènent |
+| `/serveurs` | Serveurs recommandés par l'hébergeur, par région |
+| `/docs` | Cette documentation |
+| `/legal` | Documents légaux, s'ils sont activés |
+| `/admin` | Administration |
+
+L'ancienne adresse `/about` renvoie vers `/`. Une application installée depuis le navigateur s'ouvre directement sur `/app`.
+
+## Page d'accueil (`/`)
+
+Chaque serveur publie une page d'accueil : titre, description, accès à l'application, à la documentation et aux documents légaux, et l'état des inscriptions. Les icônes viennent de Phosphor (licence MIT) ; tout est intégré à la page, qui n'exécute aucun script et ne charge rien d'extérieur.
 
 Réglages, dans l'administration, section **Page publique et annuaire** :
 
 | Champ | Effet |
 | --- | --- |
-| Page de présentation publique | Coupe la page : `/about` renvoie alors « introuvable » |
+| Page d'accueil publique | Coupe la page : `/` mène alors directement à l'application |
 | Titre | Remplace « BetterVault » en haut de la page |
 | Présentation | Un ou plusieurs paragraphes, à la place du texte par défaut |
 
@@ -19,6 +32,8 @@ La documentation est servie directement par le serveur, depuis les fichiers Mark
 ## Annuaire de serveurs
 
 L'annuaire permet de recommander d'autres serveurs BetterVault — les vôtres dans d'autres régions, ou ceux de confiance. Il est **coupé par défaut**.
+
+Activé et rempli, il apparaît à trois endroits : la page **`/serveurs`** (regroupée par région, les serveurs officiels d'abord), un lien dans l'en-tête et le pied de la page d'accueil, et les propositions de l'application au moment de choisir un serveur.
 
 Un serveur par ligne :
 

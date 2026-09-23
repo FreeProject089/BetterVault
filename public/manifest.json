@@ -2,7 +2,7 @@
   "name": "BetterVault",
   "short_name": "BetterVault",
   "description": "Mots de passe, codes 2FA et tâches chiffrés de bout en bout",
-  "start_url": "/",
+  "start_url": "/app",
   "display": "standalone",
   "background_color": "#0d1117",
   "theme_color": "#161b22",

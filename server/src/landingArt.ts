@@ -1,205 +1,144 @@
+import { PHOSPHOR, type PhosphorName } from './phosphorIcons.ts';
+
 /**
- * Illustrations de la page d'accueil : icônes 2,5D et petites animations.
+ * Éléments visuels des pages publiques (accueil, serveurs).
  *
- * Tout est dessiné ici, en SVG intégré à la page, et animé en CSS pur :
- * - la page n'exécute aucun script (sa politique de sécurité l'interdit) ;
- * - elle n'accepte aucune image venue d'ailleurs ;
- * - aucune licence d'icône à suivre, et le rendu reste net à toute taille.
+ * Les icônes viennent de Phosphor (style duotone, licence MIT), un jeu dessiné
+ * à la main et cohérent : chaque icône est posée dans une tuile en relief
+ * (dégradé, reflet, ombre teintée). Tout est en SVG intégré et en CSS : les
+ * pages n'exécutent aucun script et n'acceptent aucune image extérieure.
  *
- * Le principe 2,5D : une dalle isométrique (dessus clair, deux flancs plus
- * sombres) sur laquelle un pictogramme 2D est couché par une transformation
- * isométrique. Un seul gabarit, donc huit icônes du même style.
- *
- * Les couleurs viennent des variables de la page (`--accent`…) : les
- * illustrations suivent le thème clair ou sombre sans rien dupliquer.
- * Quand la personne demande moins de mouvement, tout s'arrête.
+ * Les couleurs viennent des variables de la page (`--accent`…), elles suivent
+ * donc le thème clair ou sombre. Les mouvements s'arrêtent quand la personne
+ * le demande.
  */
 
-/** Pictogrammes 24 × 24, en traits : ils seront couchés sur la dalle */
-const GLYPHS: Record<string, string> = {
-  key: '<circle cx="8" cy="12" r="4"/><path d="M12 12h9M18 12v3M21 12v2"/>',
-  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
-  devices: '<rect x="3" y="5" width="13" height="10" rx="1.5"/><rect x="17.5" y="9" width="4.5" height="10" rx="1"/><path d="M7 19h5"/>',
-  sync: '<path d="M4 12a8 8 0 0 1 14-5M18 3v4h-4M20 12a8 8 0 0 1-14 5M6 21v-4h4"/>',
-  files: '<path d="M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5"/>',
-  share: '<circle cx="9" cy="9" r="3"/><circle cx="17" cy="10" r="2.5"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5M15 15c3 0 6 1.5 6 4"/>',
-  securityKey: '<rect x="3" y="9" width="12" height="6" rx="2"/><circle cx="7" cy="12" r="1.3"/><path d="M15 12h6M19 12v2.5"/>',
-  export: '<path d="M12 3v11M8 10l4 4 4-4M4 16v4h16v-4"/>',
-  server: '<rect x="4" y="4" width="16" height="6" rx="1.5"/><rect x="4" y="14" width="16" height="6" rx="1.5"/><path d="M8 7h.01M8 17h.01"/>'
-};
+export type IconName = PhosphorName;
 
-export type GlyphName = keyof typeof GLYPHS;
+/** Icône seule, en currentColor */
+export function icon(name: IconName, size = 24, label?: string): string {
+  return `<svg class="ph" width="${size}" height="${size}" viewBox="0 0 256 256" fill="currentColor" ${label ? `role="img" aria-label="${label}"` : 'aria-hidden="true"'}>${PHOSPHOR[name]}</svg>`;
+}
 
-/*
- * Géométrie de la dalle, pour une vue de 72 × 64.
- * Le pictogramme de 24 unités est couché par une matrice isométrique :
- * l'axe x part vers la droite et le bas, l'axe y vers la gauche et le bas.
- */
-const U = 0.996; // cos 30° × échelle
-const V = 0.575; // sin 30° × échelle
-const CX = 36;
-const TOP = 10;
-const SIDE = 8; // épaisseur de la dalle
-
-const pt = (x: number, y: number) => `${(CX + (x - y) * U).toFixed(1)},${(TOP + (x + y) * V).toFixed(1)}`;
-
-/** Une icône 2,5D : dalle isométrique, pictogramme couché dessus, ombre portée */
-export function isoIcon(name: GlyphName, options: { size?: number; delay?: number; label?: string } = {}): string {
-  const size = options.size ?? 72;
-  const T = pt(0, 0);
-  const R = pt(24, 0);
-  const B = pt(24, 24);
-  const L = pt(0, 24);
-  const down = (p: string) => p.replace(/,([\d.]+)$/, (_, y) => `,${(Number(y) + SIDE).toFixed(1)}`);
-  const title = options.label ? `<title>${options.label}</title>` : '';
-  // Cadrage serré sur la dalle et son ombre : pas de marge perdue autour
-  return `<svg class="iso" width="${size}" height="${Math.round(size * 56 / 52)}" viewBox="10 5 52 56" ${options.label ? 'role="img"' : 'aria-hidden="true"'} style="--delay:${options.delay ?? 0}s">${title}
-    <ellipse class="iso-shadow" cx="36" cy="57" rx="21" ry="4"/>
-    <g class="iso-body">
-      <polygon class="iso-left" points="${L} ${B} ${down(B)} ${down(L)}"/>
-      <polygon class="iso-right" points="${B} ${R} ${down(R)} ${down(B)}"/>
-      <polygon class="iso-top" points="${T} ${R} ${B} ${L}"/>
-      <g class="iso-glyph" transform="matrix(${U} ${V} ${-U} ${V} ${CX} ${TOP})">${GLYPHS[name]}</g>
-    </g>
-  </svg>`;
+/** Icône dans sa tuile en relief */
+export function tile(name: IconName, size: 'sm' | 'md' | 'lg' = 'md'): string {
+  const px = size === 'lg' ? 34 : size === 'md' ? 24 : 18;
+  return `<span class="tile tile-${size}">${icon(name, px)}</span>`;
 }
 
 /**
- * Coffre-fort isométrique de l'en-tête : un cube, sa porte ronde, et deux
- * dalles qui flottent autour (une clé, un cadenas).
+ * Visuel de l'en-tête : une fenêtre d'application stylisée, le coffre au
+ * centre, et trois cartes qui flottent autour — un code 2FA qui défile, une
+ * empreinte, une clé. On montre ce que fait le produit plutôt qu'un dessin
+ * abstrait.
  */
-export function heroArt(label: string): string {
-  // Cube : 3 faces vues de trois quarts
-  const c = { x: 150, y: 60, w: 96, h: 96 };
-  const dx = c.w * 0.866;
-  const dy = c.w * 0.5;
-  const top = `${c.x},${c.y} ${c.x + dx},${c.y + dy} ${c.x},${c.y + 2 * dy} ${c.x - dx},${c.y + dy}`;
-  const left = `${c.x - dx},${c.y + dy} ${c.x},${c.y + 2 * dy} ${c.x},${c.y + 2 * dy + c.h} ${c.x - dx},${c.y + dy + c.h}`;
-  const right = `${c.x},${c.y + 2 * dy} ${c.x + dx},${c.y + dy} ${c.x + dx},${c.y + dy + c.h} ${c.x},${c.y + 2 * dy + c.h}`;
-  // Centre de la porte, au milieu de la face droite
-  const px = c.x + dx / 2;
-  const py = c.y + 1.5 * dy + c.h / 2;
-  return `<div class="hero-art" role="img" aria-label="${label}">
-    <svg viewBox="0 0 300 300" aria-hidden="true">
-      <defs>
-        <linearGradient id="hero-top" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stop-color="var(--accent)" stop-opacity=".55"/>
-          <stop offset="1" stop-color="var(--accent)" stop-opacity=".25"/>
-        </linearGradient>
-      </defs>
-      <ellipse class="hero-shadow" cx="150" cy="276" rx="104" ry="14"/>
-      <g class="hero-vault">
-        <polygon class="vault-left" points="${left}"/>
-        <polygon class="vault-right" points="${right}"/>
-        <polygon points="${top}" fill="url(#hero-top)" class="vault-top"/>
-        <!-- Porte : une ellipse inclinée comme la face qui la porte -->
-        <g transform="translate(${px} ${py}) matrix(0.866 -0.5 0 1 0 0)">
-          <circle class="vault-door" r="30"/>
-          <circle class="vault-ring" r="22"/>
-          <g class="vault-dial">
-            <circle r="8"/>
-            <path d="M0 -22v8M0 14v8M-22 0h8M14 0h8"/>
-          </g>
-        </g>
-      </g>
-      <g class="hero-chip chip-a" transform="translate(28 44)">${chip('key')}</g>
-      <g class="hero-chip chip-b" transform="translate(214 150)">${chip('lock')}</g>
-      <g class="hero-spark"><circle cx="248" cy="58" r="3"/><circle cx="40" cy="190" r="2.5"/><circle cx="262" cy="96" r="1.8"/></g>
-    </svg>
+export function heroArt(labels: { code: string; unlocked: string; synced: string }): string {
+  return `<div class="hero-art" aria-hidden="true">
+    <div class="glow"></div>
+    <div class="window">
+      <div class="window-bar"><i></i><i></i><i></i></div>
+      <div class="window-body">
+        <span class="tile tile-xl">${icon('vault', 56)}</span>
+        <div class="lines"><span></span><span></span><span class="short"></span></div>
+      </div>
+    </div>
+    <div class="float float-a">${tile('password', 'sm')}<span><small>${labels.code}</small><b class="otp"><span>482</span> <span>913</span></b></span></div>
+    <div class="float float-b">${tile('fingerprint', 'sm')}<span><small>${labels.unlocked}</small><b class="ok">●</b></span></div>
+    <div class="float float-c">${tile('cloud', 'sm')}<span><small>${labels.synced}</small><b class="ok">✓</b></span></div>
   </div>`;
 }
 
-/** Petite dalle pour l'illustration de l'en-tête (même géométrie, à l'échelle) */
-function chip(name: GlyphName): string {
-  const T = pt(0, 0);
-  const R = pt(24, 0);
-  const B = pt(24, 24);
-  const L = pt(0, 24);
-  const down = (p: string) => p.replace(/,([\d.]+)$/, (_, y) => `,${(Number(y) + SIDE).toFixed(1)}`);
-  return `<g transform="scale(.8)">
-    <polygon class="iso-left" points="${L} ${B} ${down(B)} ${down(L)}"/>
-    <polygon class="iso-right" points="${B} ${R} ${down(R)} ${down(B)}"/>
-    <polygon class="iso-top" points="${T} ${R} ${B} ${L}"/>
-    <g class="iso-glyph" transform="matrix(${U} ${V} ${-U} ${V} ${CX} ${TOP})">${GLYPHS[name]}</g>
-  </g>`;
+/** Les trois étapes, reliées par un trait qui s'anime */
+export function stepsArt(steps: Array<{ icon: IconName; title: string; text: string }>): string {
+  return `<ol class="steps">${steps.map((s, i) => `
+    <li>
+      <span class="step-head">${tile(s.icon, 'md')}<span class="step-num">${i + 1}</span></span>
+      <strong>${s.title}</strong>
+      <span>${s.text}</span>
+    </li>`).join('')}
+  </ol>`;
 }
 
-/**
- * Le trajet des données, en trois dalles : l'appareil chiffre, un bloc
- * illisible voyage, le serveur le range. Le pointillé avance pour montrer
- * le sens ; le bloc qui voyage porte un cadenas.
- */
-export function flowArt(labels: [string, string, string]): string {
-  return `<div class="flow" role="img" aria-label="${labels.join(' → ')}">
-    <div class="flow-step">${isoIcon('devices', { size: 84 })}<span>${labels[0]}</span></div>
-    <div class="flow-link" aria-hidden="true"><span class="flow-packet">${isoIcon('lock', { size: 36 })}</span></div>
-    <div class="flow-step">${isoIcon('lock', { size: 84, delay: 0.4 })}<span>${labels[1]}</span></div>
-    <div class="flow-link" aria-hidden="true"><span class="flow-packet" style="animation-delay:1.1s">${isoIcon('lock', { size: 36 })}</span></div>
-    <div class="flow-step">${isoIcon('server', { size: 84, delay: 0.8 })}<span>${labels[2]}</span></div>
-  </div>`;
-}
-
-/** Styles des illustrations : couleurs du thème, mouvements doux, arrêt si demandé */
+/** Styles des pages publiques illustrées */
 export const ART_CSS = `
-.iso{display:block;overflow:visible}
-.iso-top{fill:color-mix(in srgb,var(--accent) 34%,var(--card))}
-.iso-left{fill:color-mix(in srgb,var(--accent) 58%,#000)}
-.iso-right{fill:color-mix(in srgb,var(--accent) 44%,#000)}
-.iso-glyph{fill:none;stroke:#fff;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
-.iso-shadow{fill:#000;opacity:.22}
-.iso-body{animation:iso-float 4.2s ease-in-out infinite;animation-delay:var(--delay,0s)}
-@keyframes iso-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
-/* En clair, le dessus de la dalle est pâle : un trait blanc y disparaîtrait */
-@media (prefers-color-scheme:light){.iso-glyph{stroke:color-mix(in srgb,var(--accent) 70%,#000)}.iso-shadow{opacity:.12}}
+.ph{display:block;flex:0 0 auto}
+.tile{display:inline-grid;place-items:center;flex:0 0 auto;border-radius:14px;color:var(--accent);
+  background:linear-gradient(150deg,color-mix(in srgb,var(--accent) 26%,var(--card)),color-mix(in srgb,var(--accent) 8%,var(--card)));
+  border:1px solid color-mix(in srgb,var(--accent) 30%,var(--border));
+  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 10%,transparent),0 10px 24px -14px color-mix(in srgb,var(--accent) 80%,transparent)}
+.tile-sm{width:34px;height:34px;border-radius:10px}
+.tile-md{width:48px;height:48px}
+.tile-lg{width:60px;height:60px;border-radius:16px}
+.tile-xl{width:104px;height:104px;border-radius:26px}
 
-.hero-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:24px;align-items:center}
-.hero-art svg{width:100%;height:auto;max-width:360px;display:block;margin:0 auto;overflow:visible}
-.vault-top{stroke:color-mix(in srgb,var(--accent) 60%,transparent);stroke-width:1}
-.vault-left{fill:color-mix(in srgb,var(--accent) 30%,var(--card))}
-.vault-right{fill:color-mix(in srgb,var(--accent) 18%,var(--card))}
-.vault-door{fill:var(--card);stroke:color-mix(in srgb,var(--accent) 70%,transparent);stroke-width:2}
-.vault-ring{fill:none;stroke:var(--border);stroke-width:2;stroke-dasharray:3 5}
-.vault-dial{fill:var(--accent);stroke:var(--accent);stroke-width:3;stroke-linecap:round;transform-box:fill-box;transform-origin:center;animation:dial 9s cubic-bezier(.6,0,.4,1) infinite}
-@keyframes dial{0%,12%{transform:rotate(0)}30%,42%{transform:rotate(110deg)}62%,74%{transform:rotate(-40deg)}100%{transform:rotate(0)}}
-.hero-vault{animation:iso-float 6s ease-in-out infinite}
-.hero-shadow{fill:#000;opacity:.25}
-.hero-chip{animation:chip-a 5s ease-in-out infinite}
-.chip-b{animation-name:chip-b;animation-duration:5.6s}
-@keyframes chip-a{0%,100%{transform:translate(28px,44px)}50%{transform:translate(28px,34px)}}
-@keyframes chip-b{0%,100%{transform:translate(214px,150px)}50%{transform:translate(214px,160px)}}
-.hero-spark circle{fill:var(--accent);animation:spark 3s ease-in-out infinite}
-.hero-spark circle:nth-child(2){animation-delay:1s}.hero-spark circle:nth-child(3){animation-delay:2s}
-@keyframes spark{0%,100%{opacity:.15}50%{opacity:.9}}
+/* En-tête : deux colonnes, texte à gauche, démonstration à droite */
+.hero{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:40px;align-items:center;padding:72px 0 24px}
+.hero-art{position:relative;height:360px}
+.glow{position:absolute;inset:10% 8%;border-radius:50%;background:radial-gradient(closest-side,color-mix(in srgb,var(--accent) 38%,transparent),transparent);filter:blur(20px);opacity:.7}
+.window{position:absolute;inset:40px 30px 40px 60px;border-radius:18px;background:var(--card);border:1px solid var(--border);
+  box-shadow:0 30px 60px -30px rgba(0,0,0,.55);overflow:hidden;animation:rise 6s ease-in-out infinite}
+.window-bar{display:flex;gap:6px;padding:12px 14px;border-bottom:1px solid var(--border)}
+.window-bar i{width:9px;height:9px;border-radius:50%;background:var(--border)}
+.window-body{display:flex;flex-direction:column;align-items:center;gap:22px;padding:34px 24px}
+.lines{display:flex;flex-direction:column;gap:9px;width:70%}
+.lines span{height:9px;border-radius:5px;background:color-mix(in srgb,var(--muted) 22%,transparent)}
+.lines .short{width:55%}
+.float{position:absolute;display:flex;align-items:center;gap:10px;padding:10px 14px 10px 10px;border-radius:14px;
+  background:color-mix(in srgb,var(--card) 88%,transparent);border:1px solid var(--border);backdrop-filter:blur(8px);
+  box-shadow:0 18px 40px -22px rgba(0,0,0,.6);font-size:13px}
+.float small{display:block;color:var(--muted);font-size:11px;line-height:1.2}
+.float b{font-size:15px;letter-spacing:.02em}
+.float .ok{color:#3fb950}
+.otp{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+.float-a{top:18px;left:0;animation:rise 5s ease-in-out infinite .4s}
+.float-b{bottom:34px;left:14px;animation:rise 5.6s ease-in-out infinite 1.2s}
+.float-c{top:54%;right:0;animation:rise 6.2s ease-in-out infinite .8s}
+@keyframes rise{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
 
-.features.illustrated li{display:flex;flex-direction:column;gap:10px}
-.features.illustrated .iso{margin:-4px 0 0 -6px}
-.features.illustrated li{transition:border-color .2s ease,transform .2s ease}
-.features.illustrated li:hover{border-color:color-mix(in srgb,var(--accent) 60%,var(--border));transform:translateY(-2px)}
+/* Petite ligne de confiance sous les boutons */
+.trust{display:flex;flex-wrap:wrap;gap:10px 22px;margin:22px 0 0;padding:0;list-style:none;color:var(--muted);font-size:14px}
+.trust li{display:inline-flex;align-items:center;gap:8px}
+.trust .ph{color:var(--accent)}
 
-.flow{display:grid;grid-template-columns:auto minmax(24px,1fr) auto minmax(24px,1fr) auto;align-items:center;gap:6px;margin:24px 0 8px}
-.flow-step{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;font-size:13px;color:var(--muted);max-width:140px}
-.flow-link{position:relative;height:2px;background:repeating-linear-gradient(90deg,var(--border) 0 6px,transparent 6px 12px);background-size:12px 2px;animation:dash 1s linear infinite}
-@keyframes dash{to{background-position:12px 0}}
-.flow-packet{position:absolute;top:-22px;left:0;animation:packet 2.2s ease-in-out infinite}
-@keyframes packet{0%{left:0;opacity:0}15%{opacity:1}85%{opacity:1}100%{left:calc(100% - 36px);opacity:0}}
+/* Fonctions */
+.features{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;padding:0;margin:24px 0 0;list-style:none}
+.features li{display:flex;flex-direction:column;gap:12px;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px;
+  transition:border-color .2s ease,transform .2s ease}
+.features li:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border));transform:translateY(-3px)}
+.features h3{margin:0}
+.features p{margin:0;color:var(--muted);font-size:14.5px}
 
-/* Apparition au défilement, seulement là où le navigateur sait le faire sans script */
+/* Étapes reliées */
+.steps{counter-reset:none;list-style:none;padding:0;margin:26px 0 0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;position:relative}
+.steps::before{content:"";position:absolute;top:24px;left:12%;right:12%;height:2px;
+  background:repeating-linear-gradient(90deg,color-mix(in srgb,var(--accent) 55%,transparent) 0 8px,transparent 8px 16px);
+  background-size:16px 2px;animation:march 1.2s linear infinite}
+@keyframes march{to{background-position:16px 0}}
+.steps li{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;color:var(--muted);font-size:14.5px;padding:0 8px}
+.steps li::before{content:none}
+.steps strong{color:var(--text);font-size:15.5px}
+.step-head{position:relative;background:var(--bg);padding:0 10px}
+.step-num{position:absolute;top:-6px;right:0;width:20px;height:20px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:grid;place-items:center}
+
+/* Apparition au défilement, sans script, là où le navigateur le permet */
 @supports (animation-timeline:view()){
-  .features.illustrated li,.flow{animation:appear linear both;animation-timeline:view();animation-range:entry 0% entry 60%}
-  @keyframes appear{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+  .features li,.steps li,.facts li{animation:appear linear both;animation-timeline:view();animation-range:entry 0% entry 55%}
+  @keyframes appear{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
 }
 
-@media (max-width:760px){
-  .hero-grid{grid-template-columns:1fr}
-  .hero-art{order:-1}
-  .hero-art svg{max-width:220px}
-  .flow{grid-template-columns:1fr;justify-items:center}
-  .flow-link{width:2px;height:28px;background:repeating-linear-gradient(180deg,var(--border) 0 6px,transparent 6px 12px);animation:none}
-  .flow-packet{display:none}
+@media (max-width:860px){
+  .hero{grid-template-columns:1fr;gap:8px;padding-top:40px}
+  .hero-art{height:300px;order:-1}
+  .window{inset:30px 24px 30px 44px}
+  .steps{grid-template-columns:1fr;gap:22px}
+  .steps::before{top:0;bottom:0;left:24px;right:auto;width:2px;height:auto;
+    background:repeating-linear-gradient(180deg,color-mix(in srgb,var(--accent) 55%,transparent) 0 8px,transparent 8px 16px);animation:none}
+  .steps li{flex-direction:column;align-items:flex-start;text-align:left;padding-left:0}
 }
+@media (max-width:420px){.float{font-size:12px}.float-c{display:none}}
 
 @media (prefers-reduced-motion:reduce){
-  .iso-body,.hero-vault,.hero-chip,.vault-dial,.hero-spark circle,.flow-link,.flow-packet,.features.illustrated li,.flow{animation:none!important}
-  .features.illustrated li:hover{transform:none}
+  .window,.float,.steps::before,.features li,.steps li,.facts li{animation:none!important}
+  .features li:hover{transform:none}
 }
 `;

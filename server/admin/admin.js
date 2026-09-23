@@ -42,7 +42,7 @@ const TEXT = {
   registrationOpen: ['Inscriptions ouvertes', 'Registration open'],
   attachmentsEnabled: ['Accepter les fichiers joints', 'Accept file attachments'],
   publicPage: ['Page publique et annuaire', 'Public page and directory'],
-  landingEnabled: ['Page de présentation publique (/about)', 'Public presentation page (/about)'],
+  landingEnabled: ['Page d’accueil publique (à la racine « / »)', 'Public home page (at the root “/”)'],
   landingTitle: ['Titre', 'Title'],
   landingDescription: ['Présentation', 'Description'],
   landingOpen: ['Voir la page', 'View the page'],

@@ -147,9 +147,22 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       res.writeHead(400).end();
       return;
     }
-    if (pathname === '/about' || pathname === '/docs' || pathname.startsWith('/docs/')
+    /*
+     * Plan du site :
+     *   /            page d'accueil (ou l'application si l'accueil est coupé)
+     *   /app         l'application — /auth y mène
+     *   /serveurs    la liste des serveurs recommandés et leur carte
+     *   /docs, /legal, /admin
+     * Les pages d'accueil, de serveurs, de doc et de documents légaux sont
+     * rendues par le serveur ; l'application est un fichier statique.
+     */
+    if (pathname === '/' || pathname === '/about' || pathname === '/serveurs' || pathname === '/docs' || pathname.startsWith('/docs/')
       || pathname === '/legal' || pathname.startsWith('/legal/')) {
       void api(req, res);
+      return;
+    }
+    if (pathname === '/auth' || pathname === '/connexion') {
+      res.writeHead(302, { Location: '/app' }).end();
       return;
     }
     // Les pages « ce n'était pas moi » sont rendues par l'API, pas par l'application

@@ -1,6 +1,7 @@
-const CACHE_NAME = 'bettervault-v5';
+const CACHE_NAME = 'bettervault-v6';
+// L'application vit sous /app ; « / » est la page d'accueil, rendue par le serveur
 const ASSETS_TO_CACHE = [
-  '/',
+  '/app',
   '/index.html',
   '/manifest.json',
   '/brand/logo-on-dark.svg',
@@ -28,7 +29,7 @@ self.addEventListener('fetch', (event) => {
   // ni les pages rendues par le serveur (documents légaux, administration), ni les domaines tiers.
   // Ces pages sont mises en page par le serveur, et suivent sa version et la langue
   // demandée : les garder en cache afficherait une documentation périmée.
-  const serverRendered = ['/legal', '/admin', '/docs', '/about'].some(
+  const serverRendered = url.pathname === '/' || ['/legal', '/admin', '/docs', '/about', '/serveurs', '/auth', '/security'].some(
     (base) => url.pathname === base || url.pathname.startsWith(base + '/')
   );
   if (event.request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/') || serverRendered) return;
@@ -48,6 +49,6 @@ self.addEventListener('fetch', (event) => {
         return cachedResponse;
       }
       return network;
-    }).catch(() => caches.match('/index.html'))
+    }).catch(() => caches.match('/app'))
   );
 });

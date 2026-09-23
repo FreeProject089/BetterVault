@@ -218,8 +218,8 @@ hr{border:none;border-top:1px solid var(--border);margin:32px 0}
 <header><div>
   <picture><source srcset="/admin/logo-on-light.svg" media="(prefers-color-scheme: light)"><img src="/admin/logo-on-dark.svg" alt="" width="26" height="26"></picture>
   <strong>BetterVault · ${t('Documentation', 'Documentation')}</strong>
-  ${ctx.appAvailable ? `<a class="btn" href="/">${t('Ouvrir l’application', 'Open the app')}</a>` : ''}
-  <a class="btn" href="/about">${t('À propos', 'About')}</a>
+  <a class="btn" href="/">${t('Accueil', 'Home')}</a>
+  ${ctx.appAvailable ? `<a class="btn" href="/app">${t('Ouvrir l’application', 'Open the app')}</a>` : ''}
 </div></header>
 <div class="shell">
   <details class="toc" aria-label="${t('Sommaire', 'Contents')}">
