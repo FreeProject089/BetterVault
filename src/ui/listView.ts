@@ -5,6 +5,11 @@ import { expiryInfo, renderExpiryBadge } from '../ui/expiry';
 import { itemTypeOf } from '../types/itemTypes';
 import { queryCredentials } from '../store/credentialFilters';
 import { i18n } from '../i18n';
+import { memberAvatarHtml } from '../ui/memberChip';
+import { accountService } from '../app/services';
+
+/** Adresse de la personne connectée, pour marquer ses propres tâches */
+const myEmail = () => accountService.getAccount()?.email ?? '';
 import type { AppController } from '../main';
 
 /** Liste des éléments de la vue active : filtres, tri, recherche */
@@ -35,6 +40,49 @@ export function renderList(app: AppController): void {
     if (filterBar) filterBar.hidden = true;
     if (listTitle) listTitle.textContent = withTag(i18n.t.tasks.title);
     let tasks = data.tasks.filter(t => t.vaultId === data.activeVaultId && matchesTag(t));
+
+    /*
+     * Coffre partagé : une bande de pastilles filtre par personne. Elle
+     * n'apparaît que s'il y a quelque chose à filtrer — un coffre partagé dont
+     * aucune tâche n'est attribuée n'a pas besoin d'une ligne de plus.
+     */
+    const partage = !!data.vaults.find(v => v.id === data.activeVaultId)?.shared;
+    const moi = myEmail();
+    const attribues = [...new Set(tasks.map(t => t.assignee).filter((e): e is string => !!e))].sort();
+    if (partage && filterBar && attribues.length) {
+      const total = tasks.length;
+      const compte = (test: (t: typeof tasks[number]) => boolean) => tasks.filter(test).length;
+      const pastilles: Array<{ cle: string; libelle: string; compte: number; avatar?: string }> = [
+        { cle: 'all', libelle: app.tr('Toutes', 'All'), compte: total },
+        { cle: 'mine', libelle: app.tr('Les miennes', 'Mine'), compte: compte(t => t.assignee === moi) },
+        { cle: 'none', libelle: app.tr('Non attribuées', 'Unassigned'), compte: compte(t => !t.assignee) },
+        ...attribues.filter(email => email !== moi).map(email => ({
+          cle: email,
+          libelle: email.split('@')[0],
+          compte: compte(t => t.assignee === email),
+          avatar: memberAvatarHtml(email, v => app.escapeHtml(v), { size: 18, me: moi })
+        }))
+      ];
+      filterBar.hidden = false;
+      filterBar.innerHTML = `<div class="filter-bar-scroll">${pastilles.map(p => {
+        const actif = app.taskAssignee === p.cle;
+        return `<button type="button" class="filter-chip ${actif ? 'active' : ''}" data-assignee="${app.escapeHtml(p.cle)}" aria-pressed="${actif}">${p.avatar ?? ''}${app.escapeHtml(p.libelle)}<span class="filter-chip-count">${p.compte}</span></button>`;
+      }).join('')}</div>`;
+      filterBar.onclick = event => {
+        const chip = (event.target as HTMLElement).closest<HTMLElement>('[data-assignee]');
+        if (!chip) return;
+        app.taskAssignee = chip.dataset.assignee!;
+        app.selectedItemId = null;
+        app.renderList();
+        app.renderDetail(null);
+      };
+    } else if (app.taskAssignee !== 'all') {
+      // Plus rien à filtrer : on ne garde pas un filtre invisible actif
+      app.taskAssignee = 'all';
+    }
+    if (app.taskAssignee === 'mine') tasks = tasks.filter(t => t.assignee === moi);
+    else if (app.taskAssignee === 'none') tasks = tasks.filter(t => !t.assignee);
+    else if (app.taskAssignee !== 'all') tasks = tasks.filter(t => t.assignee === app.taskAssignee);
 
     if (app.searchQuery) {
       tasks = tasks.filter(t =>
@@ -93,6 +141,7 @@ export function renderList(app: AppController): void {
             <div class="kanban-card-meta">
               <span class="badge priority-${task.priority}">${prioLabel.toUpperCase()}</span>
               <span>${i18n.formatRelativeDate(task.dueDate || '')}</span>
+              ${task.assignee ? memberAvatarHtml(task.assignee, v => app.escapeHtml(v), { size: 20, me: myEmail(), title: app.tr(`Attribuée à ${task.assignee}`, `Assigned to ${task.assignee}`) }) : ''}
             </div>
           `;
           card.addEventListener('click', () => {
@@ -286,6 +335,7 @@ export function renderList(app: AppController): void {
           <div class="record-sub">${task.dueDate ? i18n.formatRelativeDate(task.dueDate) : statusSub}</div>
         </div>
         <div class="record-badges">
+          ${task.assignee ? memberAvatarHtml(task.assignee, v => app.escapeHtml(v), { size: 22, me: myEmail(), title: app.tr(`Attribuée à ${task.assignee}`, `Assigned to ${task.assignee}`) }) : ''}
           ${task.status === 'blocked' ? `<span class="badge" style="color:var(--accent-red);border-color:rgba(218,54,51,0.4);" title="${app.tr('Bloquée par des dépendances', 'Blocked by dependencies')}">${app.tr('BLOQ', 'BLK')}</span>` : ''}
           ${task.recurrence ? `<span class="badge" style="color:var(--accent-purple);" title="${describeRecurrence(task.recurrence, i18n.getLocale() === 'fr' ? 'fr' : 'en')}">${app.tr('RÉC', 'REC')}</span>` : ''}
           ${task.reminderAt && !task.reminderSent && task.status !== 'completed' ? `<span class="badge" style="color:var(--accent-orange);" title="${new Date(task.reminderAt).toLocaleString(i18n.intlLocale())}">${app.tr('RAP', 'REM')}</span>` : ''}

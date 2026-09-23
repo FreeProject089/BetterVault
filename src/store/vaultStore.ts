@@ -177,7 +177,18 @@ export function normalizeVaultData(input: Partial<UnlockedVaultData> | null | un
     }),
     tasks: (Array.isArray(source.tasks) ? source.tasks : []).map(t => {
       const { rev: _rev, history: _history, conflicts: _conflicts, ...rest } = t;
-      return { ...rest, ...normalizeVersioning(t as unknown as Record<string, unknown>), tags: Array.isArray(t.tags) ? t.tags : [] };
+      /*
+       * L'attribution vient d'un autre membre du coffre partagé : on la traite
+       * comme toute donnée étrangère, une chaîne courte et propre, jamais un
+       * objet ni une valeur sans fin.
+       */
+      const assignee = typeof t.assignee === 'string' ? t.assignee.trim().slice(0, 200) : '';
+      return {
+        ...rest,
+        ...normalizeVersioning(t as unknown as Record<string, unknown>),
+        tags: Array.isArray(t.tags) ? t.tags : [],
+        ...(assignee ? { assignee } : { assignee: undefined })
+      };
     }),
     trash: normalizeTrash(source.trash),
     tagDefs: (Array.isArray(source.tagDefs) ? source.tagDefs : []).map(({ icon, ...tag }) => {

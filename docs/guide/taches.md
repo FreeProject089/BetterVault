@@ -11,11 +11,23 @@ Ouvrez **Tâches** dans la barre latérale. Les tâches appartiennent au coffre 
 | Titre, description | Contenu de la tâche |
 | Priorité | Basse, moyenne, haute, urgente |
 | Échéance | Date limite |
+| Attribuée à | Un membre du coffre, dans un [coffre partagé](partage.md) |
 | Récurrence | Quotidienne, hebdomadaire, mensuelle, annuelle, avec intervalle et date de fin |
 | Rappel | Date et heure d'une notification |
 | Tags | Voir [Coffres et tags](coffres-tags.md) |
 | Dépend de | Tâches à terminer avant celle-ci |
 | Identifiant lié | Accès direct à l'identifiant concerné |
+
+## Attribuer une tâche
+
+Dans un coffre partagé, le champ **Attribuée à** propose les membres du coffre. L'attribution voyage avec la tâche, chiffrée comme le reste : chaque membre voit qui s'en occupe.
+
+- La pastille colorée de la personne apparaît dans la liste et sur les cartes ; sa couleur est calculée depuis son adresse, donc la même partout sans rien synchroniser.
+- Une bande de filtres s'ajoute au-dessus de la liste : **Toutes**, **Les miennes**, **Non attribuées**, puis une pastille par personne, avec le compte.
+- Si la personne quitte le coffre, son nom reste sur la tâche plutôt que de disparaître en silence : vous choisissez la suite.
+- Hors ligne, la liste des membres n'est pas joignable ; le champ reste utilisable avec votre adresse et l'attribution en cours, et le dit.
+
+Dans un coffre personnel, le champ n'apparaît pas : il n'y a personne d'autre.
 
 ## Vues
 

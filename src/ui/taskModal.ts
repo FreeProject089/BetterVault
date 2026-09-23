@@ -6,6 +6,7 @@ import { mountTagInput } from '../ui/tagInput';
 import { mountDateField } from '../ui/dateField';
 import { mountStepper } from '../ui/stepper';
 import { i18n } from '../i18n';
+import { accountService, sharedVaults } from '../app/services';
 import type { AppController } from '../main';
 
 /** Création ou modification d'une tâche */
@@ -16,6 +17,20 @@ export function openCreateTaskModal(app: AppController, linkedCredentialId?: str
   if (!app.canEdit(existing?.vaultId ?? data.activeVaultId)) return;
 
   const targetLinkedCredId = existing ? existing.linkedCredentialId : linkedCredentialId;
+
+  /*
+   * Coffre partagé : la tâche peut être attribuée à un membre. La liste vient du
+   * serveur, alors on part de ce qu'on sait déjà (moi, et la personne
+   * actuellement attribuée) et on complète dès que la réponse arrive : hors
+   * ligne, le champ reste utilisable au lieu d'être vide.
+   */
+  const vaultId = existing?.vaultId ?? data.activeVaultId;
+  const partage = !!data.vaults.find(v => v.id === vaultId)?.shared;
+  const myEmail = accountService.getAccount()?.email ?? '';
+  const connus = [...new Set([existing?.assignee, myEmail].filter((v): v is string => !!v))];
+  const assigneeOptions = connus
+    .map(email => `<option value="${app.escapeHtml(email)}"${email === existing?.assignee ? ' selected' : ''}>${app.escapeHtml(email)}${email === myEmail ? ` (${app.tr('vous', 'you')})` : ''}</option>`)
+    .join('');
 
   const credOptions = data.credentials
     .filter(c => c.vaultId === data.activeVaultId)
@@ -62,6 +77,15 @@ export function openCreateTaskModal(app: AppController, linkedCredentialId?: str
         <label class="form-label">${app.tr('Échéance', 'Due date')}</label>
         <div id="task-due"></div>
       </div>
+      ${partage ? `
+      <div class="form-field">
+        <label class="form-label" for="task-assignee">${app.tr('Attribuée à', 'Assigned to')}</label>
+        <select class="form-input" id="task-assignee">
+          <option value="">${app.tr('Personne', 'Nobody')}</option>
+          ${assigneeOptions}
+        </select>
+        <span class="field-hint" data-assignee-hint>${app.tr('Les autres membres du coffre voient l’attribution.', 'The vault’s other members see the assignment.')}</span>
+      </div>` : ''}
       <div class="form-field">
         <label class="form-label" for="task-desc">Description</label>
         <textarea class="note-editor" id="task-desc" placeholder="${app.tr('Facultatif', 'Optional')}">${existing?.description || ''}</textarea>
@@ -147,6 +171,24 @@ export function openCreateTaskModal(app: AppController, linkedCredentialId?: str
   });
 
   // Choix de priorité : des boutons plutôt qu'une liste déroulante, plus rapides au doigt
+  // La vraie liste des membres arrive du serveur ; le champ marche déjà sans elle
+  const assigneeSelect = box.querySelector<HTMLSelectElement>('#task-assignee');
+  if (assigneeSelect) {
+    void sharedVaults.members(vaultId).then(({ members }) => {
+      if (!assigneeSelect.isConnected) return;
+      const choisi = assigneeSelect.value;
+      const emails = [...new Set(members.filter(m => m.status === 'active').map(m => m.email))];
+      assigneeSelect.innerHTML = `<option value="">${app.tr('Personne', 'Nobody')}</option>`
+        + emails.map(email => `<option value="${app.escapeHtml(email)}">${app.escapeHtml(email)}${email === myEmail ? ` (${app.tr('vous', 'you')})` : ''}</option>`).join('')
+        // La personne attribuée a pu quitter le coffre : on garde son nom plutôt que de l'effacer en silence
+        + (choisi && !emails.includes(choisi) ? `<option value="${app.escapeHtml(choisi)}">${app.escapeHtml(choisi)} (${app.tr('n’est plus membre', 'no longer a member')})</option>` : '');
+      assigneeSelect.value = choisi;
+    }).catch(() => {
+      const hint = box.querySelector<HTMLElement>('[data-assignee-hint]');
+      if (hint) hint.textContent = app.tr('Liste des membres indisponible : serveur injoignable.', 'Member list unavailable: server unreachable.');
+    });
+  }
+
   const priorityInput = box.querySelector('#task-priority') as HTMLInputElement;
   box.querySelector('.priority-picker')?.addEventListener('click', event => {
     const option = (event.target as HTMLElement).closest<HTMLElement>('[data-priority]');
@@ -228,6 +270,7 @@ export function openCreateTaskModal(app: AppController, linkedCredentialId?: str
         dependsOn: dependsOn.length ? dependsOn : undefined,
         reminderAt,
         reminderSent,
+        assignee: assigneeSelect?.value || undefined,
         tags: taskTagInput.getTags()
       });
       app.closeModal();
@@ -242,6 +285,7 @@ export function openCreateTaskModal(app: AppController, linkedCredentialId?: str
         priority,
         dueDate: dueDate || undefined,
         linkedCredentialId: linkedCred,
+        assignee: assigneeSelect?.value || undefined,
         tags: taskTagInput.getTags(),
         recurrence,
         dependsOn: dependsOn.length ? dependsOn : undefined,

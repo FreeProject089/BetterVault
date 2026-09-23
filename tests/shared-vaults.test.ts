@@ -90,6 +90,14 @@ describe('Coffres partagés (application)', () => {
     await alice.shared.refresh();
     expect(alice.shared.mergeInto(createEmptyVaultData()).credentials.map(c => c.title).sort()).toEqual(['Box internet', 'Wi-Fi']);
 
+    // Une tâche attribuée : l'attribution voyage avec la tâche
+    bob.store.addTask({ vaultId, title: 'Changer le mot de passe de la box', status: 'todo', priority: 'medium', tags: [], assignee: alice.email });
+    await bob.shared.flush();
+    await alice.shared.refresh();
+    const chezAlice = alice.shared.mergeInto(createEmptyVaultData()).tasks;
+    expect(chezAlice.map(t => t.title)).toEqual(['Changer le mot de passe de la box']);
+    expect(chezAlice[0].assignee).toBe(alice.email);
+
     // Retrait de Bob : nouvelle clé, Bob perd l'accès
     await alice.shared.removeMember(vaultId, found.userId);
     await bob.shared.refresh();

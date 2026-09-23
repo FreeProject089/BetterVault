@@ -152,6 +152,11 @@ export class AppController {
   selectedItemId: string | null = null;
   searchQuery = '';
   taskViewMode: TaskViewMode = 'list';
+  /**
+   * Filtre des tâches par personne, dans un coffre partagé : « toutes »,
+   * « les miennes », « non attribuées », ou l'adresse d'un membre.
+   */
+  taskAssignee: 'all' | 'mine' | 'none' | string = 'all';
   public totpInterval: number | null = null;
   private autoLockTimeout: number | null = null;
   private readonly AUTO_LOCK_DELAY_MS = 5 * 60 * 1000; // 5 minutes d'inactivité

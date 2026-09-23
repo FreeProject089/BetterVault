@@ -35,6 +35,8 @@ export interface Task {
   status: TaskStatus;
   priority: Priority;
   dueDate?: string; // ISO date string
+  /** Email du membre à qui la tâche est attribuée, dans un coffre partagé */
+  assignee?: string;
   linkedCredentialId?: string;
   tags: string[];
   subtasks?: SubTask[];

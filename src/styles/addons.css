@@ -4339,3 +4339,58 @@ label.check,
   border: 1px solid var(--border-subtle);
   background: linear-gradient(135deg, var(--p-accent) 50%, var(--p-bg) 50%);
 }
+
+/* ── Pastille d'une personne (tâche attribuée, membre d'un coffre) ─────────
+   La teinte vient de l'adresse : reconnaître qui est qui d'un coup d'œil, sans
+   photo à charger. Le fond reste sombre ou clair selon le thème, seule la
+   teinte change. */
+.member-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--dot-size, 26px);
+  height: var(--dot-size, 26px);
+  border-radius: 50%;
+  font-size: calc(var(--dot-size, 26px) * 0.44);
+  font-weight: 600;
+  line-height: 1;
+  color: hsl(var(--dot-hue, 260) 70% 82%);
+  background: hsl(var(--dot-hue, 260) 45% 22%);
+  border: 1px solid hsl(var(--dot-hue, 260) 45% 34%);
+  user-select: none;
+}
+:root[data-theme="light"] .member-dot {
+  color: hsl(var(--dot-hue, 260) 60% 26%);
+  background: hsl(var(--dot-hue, 260) 70% 90%);
+  border-color: hsl(var(--dot-hue, 260) 45% 72%);
+}
+/* Sa propre pastille : un liseré d'accent, pour se retrouver dans une liste */
+.member-dot-self { box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 3px var(--accent); }
+
+.member-chip { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.member-chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Liste des membres d'un coffre partagé ────────────────────────────────
+   Un en-tête qui compte, un rôle dit en clair sous chaque adresse, et les
+   invitations en attente reconnaissables sans lire. */
+.member-count {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding-bottom: var(--space-1);
+}
+.member-role-summary {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Invitation pas encore acceptée : la ligne est en retrait, pas éteinte */
+.member-row-pending { border-style: dashed; }
+
+/* Pastille de filtre portant un avatar : la teinte reste lisible sur la puce */
+.filter-chip .member-dot { margin-right: 2px; }

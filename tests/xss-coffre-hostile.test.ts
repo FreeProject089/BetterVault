@@ -101,3 +101,29 @@ describe('Coffre hostile : icônes', () => {
     expect(propre).not.toContain('script');
   });
 });
+
+describe('Coffre hostile : attribution d’une tâche', () => {
+  it('ramène l’attribution à une chaîne courte, ou la retire', () => {
+    const base = { id: 'task-abcdefgh', vaultId: 'vault-abcdefgh', title: 'T', status: 'todo', priority: 'medium', tags: [], createdAt: 1, updatedAt: 1 };
+    const data = normalizeVaultData({
+      vaults: [{ id: 'vault-abcdefgh', name: 'V', type: 'personal', createdAt: 1, updatedAt: 1 }],
+      activeVaultId: 'vault-abcdefgh',
+      tasks: [
+        { ...base, id: 'task-aaaaaaaa', assignee: `  ${CHARGE}  ` },
+        { ...base, id: 'task-bbbbbbbb', assignee: 'x'.repeat(5000) },
+        // Un objet à la place du texte ne doit pas se retrouver dans le HTML
+        { ...base, id: 'task-cccccccc', assignee: { toString: () => 'piege' } },
+        { ...base, id: 'task-dddddddd', assignee: '   ' },
+        { ...base, id: 'task-eeeeeeee', assignee: 'bob@exemple.fr' }
+      ]
+    } as unknown as UnlockedVaultData);
+
+    const par = (id: string) => data.tasks.find(t => t.id === id)!;
+    // La charge reste du texte : c'est l'affichage qui échappe, mais elle est bornée et rognée
+    expect(par('task-aaaaaaaa').assignee).toBe(CHARGE);
+    expect(par('task-bbbbbbbb').assignee!.length).toBe(200);
+    expect(par('task-cccccccc').assignee).toBeUndefined();
+    expect(par('task-dddddddd').assignee).toBeUndefined();
+    expect(par('task-eeeeeeee').assignee).toBe('bob@exemple.fr');
+  });
+});

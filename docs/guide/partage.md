@@ -18,6 +18,10 @@ Vous en devenez propriétaire.
 
 La personne voit l'invitation dans la barre latérale et l'accepte ou la refuse. Si le serveur envoie des emails, elle est aussi prévenue par email.
 
+La liste des membres affiche, pour chacun : sa pastille colorée (la couleur vient de son adresse), son adresse, **ce que son rôle permet écrit en clair**, et l'état de son invitation. Vous êtes en tête de liste, les invitations en attente à la fin. Le rôle se change dans la liste même, sans passer par l'onglet **Rôles**.
+
+Les tâches d'un coffre partagé peuvent être **attribuées** à un membre : voir [Tâches](taches.md#attribuer-une-tache).
+
 ## Rôles et permissions
 
 | Rôle | Ajouter et modifier | Pièces jointes | Exporter | Gérer les membres | Gérer les rôles | Supprimer le coffre |

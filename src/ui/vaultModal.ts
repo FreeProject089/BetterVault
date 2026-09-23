@@ -1,4 +1,5 @@
 import { ACTION_ICONS, VAULT_ICON } from './icons';
+import { memberAvatarHtml } from './memberChip';
 import { vaultStore } from '../store/vaultStore';
 import { renderItemIcon, type ItemIcon } from '../icons/iconLibrary';
 import { type SharedMember, type SharedPermission, type SharedRole } from '../account/cloudClient';
@@ -369,23 +370,51 @@ export function openVaultModal(app: AppController, vaultId?: string): void {
     .filter(r => includeOwner || r.builtin !== 'owner')
     .map(r => `<option value="${r.id}" ${r.id === selected ? 'selected' : ''}>${app.escapeHtml(app.roleLabel(r))}</option>`).join('');
 
+  /** Ce qu'un rôle permet, en deux ou trois mots plutôt qu'une liste de cases */
+  const roleSummary = (role: SharedRole | undefined): string => {
+    if (!role) return '';
+    if (role.builtin === 'owner') return tr('Tout, y compris supprimer le coffre', 'Everything, including deleting the vault');
+    const accordees = EDITABLE_PERMISSIONS.filter(p => role.permissions.includes(p));
+    if (accordees.length === 0) return tr('Lecture seule', 'Read only');
+    return accordees.map(p => PERMISSION_LABELS[p]).join(' · ');
+  };
+
   const renderMembers = () => {
     const host = $<HTMLElement>('[data-members]')!;
-    host.innerHTML = members.map(member => {
+    /*
+     * Ordre utile : soi d'abord, puis les membres actifs par adresse, puis les
+     * invitations en attente. Sans ça, se retrouver dans une liste de dix
+     * personnes demandait de la lire en entier.
+     */
+    const ordonnes = [...members].sort((a, b) => {
+      if ((a.email === myEmail) !== (b.email === myEmail)) return a.email === myEmail ? -1 : 1;
+      if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
+      return a.email.localeCompare(b.email);
+    });
+    const attente = members.filter(m => m.status === 'invited').length;
+    const actifs = members.length - attente;
+
+    const entete = `
+      <div class="member-count">
+        <span>${tr(`${actifs} membre${actifs > 1 ? 's' : ''}`, `${actifs} member${actifs === 1 ? '' : 's'}`)}</span>
+        ${attente ? `<span class="status-pill off">${tr(`${attente} invitation${attente > 1 ? 's' : ''} en attente`, `${attente} pending invitation${attente === 1 ? '' : 's'}`)}</span>` : ''}
+      </div>`;
+
+    host.innerHTML = entete + ordonnes.map(member => {
       const role = roles.find(r => r.id === member.roleId);
       const self = member.email === myEmail;
       const editable = permissions.has('manage_members') && role?.builtin !== 'owner' && !self;
       return `
-        <div class="member-row" data-user="${member.userId}">
-          <div class="member-avatar">${app.escapeHtml(member.email.charAt(0).toUpperCase())}</div>
+        <div class="member-row${member.status === 'invited' ? ' member-row-pending' : ''}" data-user="${member.userId}">
+          ${memberAvatarHtml(member.email, v => app.escapeHtml(v), { size: 32, me: myEmail })}
           <div class="member-main">
             <div class="member-email">${app.escapeHtml(member.email)}${self ? ` <span class="field-hint">(${tr('vous', 'you')})</span>` : ''}</div>
-            <div class="field-hint">${member.status === 'invited' ? `<span class="status-pill off">${tr('Invitation envoyée', 'Invitation sent')}</span>` : ''}
-              <button type="button" class="link-btn" data-fingerprint="${app.escapeHtml(member.publicKey ?? '')}">${tr('Empreinte de clé', 'Key fingerprint')}</button></div>
+            <div class="member-role-summary">${app.escapeHtml(roleSummary(role))}</div>
+            <div class="field-hint">${member.status === 'invited' ? `<span class="status-pill off">${tr('Invitation envoyée', 'Invitation sent')}</span> ` : ''}<button type="button" class="link-btn" data-fingerprint="${app.escapeHtml(member.publicKey ?? '')}">${tr('Empreinte de clé', 'Key fingerprint')}</button></div>
           </div>
           ${editable
-            ? `<select class="form-input member-role" data-role-select>${roleOptions(member.roleId, isOwner && member.status === 'active')}</select>
-               <button type="button" class="icon-btn" data-remove title="${tr('Retirer', 'Remove')}" aria-label="${tr('Retirer', 'Remove')}">${ACTION_ICONS.trash}</button>`
+            ? `<select class="form-input member-role" data-role-select aria-label="${tr('Rôle de', 'Role of')} ${app.escapeHtml(member.email)}">${roleOptions(member.roleId, isOwner && member.status === 'active')}</select>
+               <button type="button" class="icon-btn" data-remove title="${tr('Retirer', 'Remove')}" aria-label="${tr('Retirer du coffre', 'Remove from vault')} ${app.escapeHtml(member.email)}">${ACTION_ICONS.trash}</button>`
             : `<span class="vault-type-badge shared">${app.escapeHtml(role ? app.roleLabel(role) : '')}</span>`}
         </div>`;
     }).join('');

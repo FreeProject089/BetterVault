@@ -5,6 +5,8 @@ import { calculatePasswordEntropy } from '../crypto/vaultCrypto';
 import { describeRecurrence, getDependents, getOpenBlockers, planTaskCompletion } from '../tasks/taskEngine';
 import { expiryInfo } from '../ui/expiry';
 import { ACTION_ICONS } from '../ui/icons';
+import { memberChipHtml } from '../ui/memberChip';
+import { accountService } from '../app/services';
 import { renderVersioning, wireVersioning } from '../ui/versionsPanel';
 import { itemTypeOf } from '../types/itemTypes';
 import { i18n } from '../i18n';
@@ -141,6 +143,13 @@ export function renderDetail(app: AppController, id: string | null): void {
           <div class="field-group">
             <div class="field-label">${app.tr('Échéance', 'Due date')}</div>
             <div class="field-box"><span class="field-val">${task.dueDate}</span></div>
+          </div>
+        ` : ''}
+
+        ${task.assignee ? `
+          <div class="field-group">
+            <div class="field-label">${app.tr('Attribuée à', 'Assigned to')}</div>
+            <div class="field-box">${memberChipHtml(task.assignee, v => app.escapeHtml(v), { size: 24, me: accountService.getAccount()?.email ?? '' })}</div>
           </div>
         ` : ''}
 
