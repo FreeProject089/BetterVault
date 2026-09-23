@@ -138,10 +138,10 @@ export function snakeSteps(steps: SnakeStep[], stepLabel: string): string {
   }
   m += ` L50,${H}`;
   // Une seule teinte (l'accent), qui fonce jusqu'au violet du bandeau ; les étapes gardent leur couleur
-  const stops = '<stop offset="0" stop-color="#7773e8"/><stop offset="0.75" stop-color="#7773e8"/><stop offset="1" stop-color="#4a3ad1"/>';
+  const stops = '<stop offset="0" stop-color="#a9a6ff"/><stop offset="0.3" stop-color="#7773e8"/><stop offset="0.55" stop-color="#c9c7ff"/><stop offset="0.8" stop-color="#7773e8"/><stop offset="1" stop-color="#4a3ad1"/>';
   const grad = (id: string) => `<defs><linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="${H}">${stops}</linearGradient></defs>`;
   return `<div class="snake" style="--rows:${n};--k:${(H / (n * 100)).toFixed(4)}">
-    <svg class="snake-path snake-wide" viewBox="0 0 100 ${H}" preserveAspectRatio="none" aria-hidden="true">${grad('snake-a')}<path d="${d}" stroke="url(#snake-a)" vector-effect="non-scaling-stroke"/></svg>
+    <svg class="snake-path snake-wide" viewBox="0 0 100 ${H}" preserveAspectRatio="none" aria-hidden="true">${grad('snake-a')}<path d="${d}" stroke="url(#snake-a)" vector-effect="non-scaling-stroke"/><path class="snake-sheen" d="${d}" vector-effect="non-scaling-stroke"/></svg>
     <svg class="snake-path snake-narrow" viewBox="0 0 100 ${H}" preserveAspectRatio="none" aria-hidden="true">${grad('snake-b')}<path d="${m}" stroke="url(#snake-b)" vector-effect="non-scaling-stroke"/></svg>
     <ol class="snake-steps">${steps.map((s, i) => `
       <li class="snake-step ${i % 2 === 0 ? 'art-left' : 'art-right'}" style="--c:${colors[i % colors.length]}">
@@ -342,6 +342,9 @@ export const ART_CSS = `
 .snake-path{position:absolute;left:0;top:0;width:100%;height:calc(100% * var(--k));overflow:visible;pointer-events:none}
 .snake-path path{fill:none;stroke-linecap:round}
 .snake-wide path{stroke-width:26px;transition:stroke-dashoffset .15s linear}
+/* Reflet : un trait blanc fin et translucide sur le ruban, comme un tube satiné */
+.snake-wide .snake-sheen{stroke:#fff;stroke-width:7px;opacity:.28;mix-blend-mode:screen;transform:translate(-4px,-4px)}
+@media (prefers-color-scheme:light){.snake-wide .snake-sheen{opacity:.55}}
 .snake-narrow{display:none}
 .snake-narrow path{stroke-width:12px}
 .snake-steps{position:relative;list-style:none;margin:0;padding:0;display:grid;grid-template-rows:repeat(var(--rows),minmax(340px,auto))}

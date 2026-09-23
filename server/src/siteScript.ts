@@ -41,7 +41,7 @@ export const SITE_JS = `(() => {
   if (serpent && large) {
     const NS = 'http://www.w3.org/2000/svg';
     const bandeau = document.querySelector('.band');
-    let chemin = null, longueur = 0;
+    let chemin = null, chemins = [], longueur = 0;
     const tracer = () => {
       if (innerWidth <= 860) { serpent.classList.remove('measured'); return; }
       const box = serpent.getBoundingClientRect();
@@ -89,29 +89,34 @@ export const SITE_JS = `(() => {
       large.setAttribute('viewBox', '0 0 ' + W + ' ' + fin);
       large.setAttribute('preserveAspectRatio', 'xMinYMin meet');
       large.style.height = fin + 'px';
-      // Une seule teinte : l'accent de la page, qui fonce jusqu'au violet du bandeau
+      /*
+       * Dégradé violet le long du ruban, qui s'éclaircit vers le blanc par
+       * endroits (comme un reflet qui glisse), puis fonce jusqu'au bandeau.
+       */
       const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7773e8';
+      const clair = 'color-mix(in srgb, ' + accent + ' 45%, #ffffff)';
       let grad = large.querySelector('linearGradient');
       grad.setAttribute('y2', String(fin));
-      grad.replaceChildren(...[[0, accent], [0.75, accent], [1, '#4a3ad1']].map(([offset, color]) => {
+      grad.replaceChildren(...[[0, clair], [0.28, accent], [0.52, clair], [0.78, accent], [1, '#4a3ad1']].map(([offset, color]) => {
         const stop = document.createElementNS(NS, 'stop');
         stop.setAttribute('offset', String(offset));
-        stop.setAttribute('stop-color', color);
+        stop.style.stopColor = color;
         return stop;
       }));
-      chemin = large.querySelector('path');
-      chemin.setAttribute('d', d);
-      chemin.removeAttribute('vector-effect');
+      // Le ruban et son reflet suivent le même tracé et se dessinent ensemble
+      chemins = [...large.querySelectorAll('path')];
+      chemins.forEach(c => { c.setAttribute('d', d); c.removeAttribute('vector-effect'); });
+      chemin = chemins[0];
       longueur = chemin.getTotalLength();
-      chemin.style.strokeDasharray = String(longueur);
+      chemins.forEach(c => { c.style.strokeDasharray = String(longueur); });
       serpent.classList.add('measured');
       dessiner();
     };
     const dessiner = () => {
-      if (!chemin || calme) { if (chemin) chemin.style.strokeDashoffset = '0'; return; }
+      if (!chemin || calme) { chemins.forEach(c => { c.style.strokeDashoffset = '0'; }); return; }
       const r = serpent.getBoundingClientRect();
       const vu = Math.min(Math.max((innerHeight * 0.9 - r.top) / (r.height + 80), 0), 1);
-      chemin.style.strokeDashoffset = String(longueur * (1 - vu));
+      chemins.forEach(c => { c.style.strokeDashoffset = String(longueur * (1 - vu)); });
     };
     tracer();
     addEventListener('load', tracer);
