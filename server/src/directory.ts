@@ -7,7 +7,8 @@
  * rien n'y figure que l'hébergeur n'ait saisi lui-même.
  */
 
-import { ART_CSS, heroArt, icon, stepsArt, tile, type IconName } from './landingArt.ts';
+import { ART_CSS, artAccount, artCipher, artDevices, artUnlock, heroArt, icon, snakeSteps, tile, type IconName } from './landingArt.ts';
+import { CHROME_CSS, siteFooter, siteHeader, type ChromeContext } from './siteChrome.ts';
 
 export interface DirectoryEntry {
   name: string;
@@ -123,77 +124,53 @@ const FEATURES: Array<[IconName, string, string, string, string]> = [
    'Full account export, files included, import onto another server, and permanent deletion whenever you decide.']
 ];
 
-/** Styles communs aux pages publiques : couleurs, typographie, en-tête, pied */
+/** Styles communs aux pages publiques : couleurs, typographie, boutons */
 function baseCss(): string {
   return `
 :root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#7773e8;color-scheme:dark}
 @media (prefers-color-scheme:light){:root{--bg:#f6f8fa;--card:#fff;--border:#d0d7de;--text:#1f2328;--muted:#59636e;--accent:#5754c7;color-scheme:light}}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+html{scroll-behavior:smooth;scroll-padding-top:80px}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow-x:hidden}
 a{color:var(--accent)}
-.skip{position:absolute;left:-9999px}.skip:focus{left:12px;top:12px;z-index:9;background:var(--card);padding:8px 12px;border-radius:8px}
-header{position:sticky;top:0;z-index:5;border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--card) 88%,transparent);backdrop-filter:blur(10px)}
-.bar{max-width:1120px;margin:0 auto;padding:10px 20px;display:flex;align-items:center;gap:6px}
-.brand{display:inline-flex;align-items:center;gap:10px;margin-right:auto;color:var(--text);text-decoration:none;font-weight:700;font-size:15px}
-.brand picture{display:flex}.brand img{width:28px;height:28px}
-.bar nav{display:flex;align-items:center;gap:4px}
-.bar nav a{display:inline-flex;align-items:center;min-height:44px;padding:0 12px;border-radius:10px;color:var(--muted);text-decoration:none;font-size:14px;font-weight:500}
-.bar nav a:hover,.bar nav a[aria-current]{color:var(--text);background:color-mix(in srgb,var(--muted) 12%,transparent)}
-main{max-width:1120px;margin:0 auto;padding:0 20px 72px}
-section{padding:64px 0 0}
-h1{font-size:clamp(32px,5.2vw,52px);line-height:1.08;letter-spacing:-0.025em;margin:0 0 18px}
-h1 em{font-style:normal;color:var(--accent)}
+main{max-width:1120px;margin:0 auto;padding:0 20px 88px}
+section{padding:80px 0 0}
+h1{font-size:clamp(34px,5.4vw,56px);line-height:1.06;letter-spacing:-0.03em;margin:0 0 18px}
+h1 em{font-style:normal;background:linear-gradient(100deg,var(--accent),#6cb6f5);-webkit-background-clip:text;background-clip:text;color:transparent}
 .lede{font-size:clamp(17px,2.1vw,19px);color:var(--muted);max-width:56ch;margin:0 0 12px}
-h2{font-size:clamp(22px,3vw,28px);letter-spacing:-0.015em;margin:0 0 8px}
-.section-lede{color:var(--muted);margin:0;max-width:62ch}
+.eyebrow{display:inline-block;font-size:12.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin:0 0 10px}
+h2{font-size:clamp(26px,3.4vw,38px);letter-spacing:-0.02em;line-height:1.15;margin:0 0 10px}
+.section-lede{color:var(--muted);margin:0;max-width:62ch;font-size:17px}
 h3{font-size:16px;margin:0 0 6px}
-.actions{display:flex;flex-wrap:wrap;gap:12px;margin:28px 0 0}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:48px;padding:0 22px;border-radius:12px;border:1px solid var(--border);color:var(--text);text-decoration:none;font-weight:600;background:var(--card)}
-.btn:hover{border-color:var(--accent)}
-.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 12px 30px -14px var(--accent)}
-.btn.primary:hover{filter:brightness(1.08)}
-.btn.small{min-height:40px;padding:0 14px;font-size:14px}
+.actions{display:flex;flex-wrap:wrap;gap:12px;margin:30px 0 0}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:52px;padding:0 24px;border-radius:14px;border:1px solid var(--border);
+  color:var(--text);text-decoration:none;font-weight:650;font-size:15.5px;background:var(--card);transition:transform .15s,border-color .15s,filter .15s,box-shadow .15s}
+.btn:hover{border-color:var(--accent);transform:translateY(-1px)}
+.btn .arrow{transition:transform .15s}.btn:hover .arrow{transform:translateX(3px)}
+.btn.primary{background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 88%,#fff),var(--accent));border-color:transparent;color:#fff;
+  box-shadow:0 16px 34px -16px var(--accent),inset 0 1px 0 rgba(255,255,255,.25)}
+.btn.primary:hover{filter:brightness(1.06);box-shadow:0 20px 40px -16px var(--accent),inset 0 1px 0 rgba(255,255,255,.25)}
+.btn.small{min-height:40px;padding:0 14px;font-size:14px;border-radius:10px}
 .note{color:var(--muted);font-size:14px;margin:16px 0 0}
 .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;padding:0;margin:24px 0 0;list-style:none}
 .facts li{display:flex;gap:14px;align-items:flex-start;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px}
 .facts strong{display:block}.meta{color:var(--muted);font-size:14px}
-.cta{margin-top:64px;padding:36px;border-radius:20px;border:1px solid color-mix(in srgb,var(--accent) 35%,var(--border));
-  background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 16%,var(--card)),var(--card));display:flex;flex-wrap:wrap;gap:20px;align-items:center;justify-content:space-between}
-.cta h2{margin:0}.cta p{margin:6px 0 0;color:var(--muted)}
-footer{border-top:1px solid var(--border);margin-top:64px;padding:24px 0 0;display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center;font-size:14px}
-footer a{display:inline-flex;align-items:center;min-height:44px;padding:0 4px;color:var(--muted);text-decoration:none}
-footer a:hover{color:var(--text);text-decoration:underline}
-footer .meta{margin-right:auto}
+.cta{margin-top:80px;padding:40px;border-radius:24px;border:1px solid color-mix(in srgb,var(--accent) 35%,var(--border));
+  background:radial-gradient(500px 220px at 90% 10%,color-mix(in srgb,var(--accent) 22%,transparent),transparent),var(--card);display:flex;flex-wrap:wrap;gap:20px;align-items:center;justify-content:space-between}
+.cta h2{margin:0;font-size:clamp(22px,2.8vw,30px)}.cta p{margin:6px 0 0;color:var(--muted)}
 .badge{display:inline-flex;align-items:center;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;border:1px solid color-mix(in srgb,var(--accent) 55%,transparent);color:var(--accent)}
-@media (max-width:640px){section{padding:44px 0 0}.btn{flex:1 1 100%}.bar nav a.hide-sm{display:none}.cta{padding:24px}}
+@media (max-width:640px){section{padding:56px 0 0}.actions .btn{flex:1 1 100%}.cta{padding:26px}}
 `;
 }
 
-/** En-tête commun : marque, navigation, accès à l'application */
-function header(ctx: LandingContext, current: 'home' | 'servers'): string {
-  const t = (a: string, b: string) => (ctx.locale === 'fr' ? a : b);
-  const serversOn = ctx.page.directoryEnabled && ctx.page.servers.length > 0;
-  return `<a class="skip" href="#contenu">${t('Aller au contenu', 'Skip to content')}</a>
-<header><div class="bar">
-  <a class="brand" href="/"><picture><source srcset="/admin/logo-on-light.svg" media="(prefers-color-scheme: light)"><img src="/admin/logo-on-dark.svg" alt="" width="28" height="28"></picture>BetterVault</a>
-  <nav aria-label="${t('Navigation principale', 'Main navigation')}">
-    ${serversOn ? `<a class="hide-sm" href="/serveurs"${current === 'servers' ? ' aria-current="page"' : ''}>${t('Serveurs', 'Servers')}</a>` : ''}
-    <a class="hide-sm" href="/docs">${t('Documentation', 'Documentation')}</a>
-    ${ctx.appAvailable ? `<a class="btn primary small" href="/app">${t('Ouvrir l’application', 'Open the app')}</a>` : ''}
-  </nav>
-</div></header>`;
-}
-
-function footer(ctx: LandingContext): string {
-  const t = (a: string, b: string) => (ctx.locale === 'fr' ? a : b);
-  return `<footer>
-    <span class="meta">BetterVault ${escapeHtml(ctx.version)}${ctx.operatorName ? ` · ${escapeHtml(ctx.operatorName)}` : ''}</span>
-    ${ctx.page.directoryEnabled && ctx.page.servers.length ? `<a href="/serveurs">${t('Serveurs', 'Servers')}</a>` : ''}
-    <a href="/docs">${t('Documentation', 'Documentation')}</a>
-    ${ctx.legalEnabled ? `<a href="/legal">${t('Confidentialité et conditions', 'Privacy and terms')}</a>` : ''}
-    <a href="/admin">${t('Administration', 'Administration')}</a>
-  </footer>`;
-}
+const chrome = (ctx: LandingContext): ChromeContext => ({
+  locale: ctx.locale,
+  appAvailable: ctx.appAvailable,
+  serversOn: ctx.page.directoryEnabled && ctx.page.servers.length > 0,
+  legalEnabled: ctx.legalEnabled,
+  version: ctx.version,
+  operatorName: ctx.operatorName
+});
 
 function page(ctx: LandingContext, title: string, description: string, body: string): string {
   return `<!DOCTYPE html>
@@ -205,10 +182,11 @@ function page(ctx: LandingContext, title: string, description: string, body: str
 <meta name="description" content="${escapeHtml(description)}">
 <link rel="icon" type="image/svg+xml" href="/admin/logo-on-dark.svg" media="(prefers-color-scheme: dark)">
 <link rel="icon" type="image/svg+xml" href="/admin/logo-on-light.svg" media="(prefers-color-scheme: light)">
-<style>${baseCss()}${ART_CSS}</style>
+<style>${baseCss()}${CHROME_CSS}${ART_CSS}</style>
 </head>
 <body>
 ${body}
+${siteFooter(chrome(ctx))}
 </body>
 </html>`;
 }
@@ -222,7 +200,6 @@ export function renderLanding(ctx: LandingContext): string {
     : `<p class="lede">${t(
         'Vos mots de passe, vos codes 2FA et vos fichiers, chiffrés sur votre appareil avant d’arriver ici. Ce serveur garde le coffre, sans jamais pouvoir l’ouvrir.',
         'Your passwords, 2FA codes and files, encrypted on your device before they get here. This server keeps the vault without ever being able to open it.')}</p>`;
-  // Titre par défaut : une promesse, avec le mot qui compte mis en avant
   const heading = ctx.page.title
     ? escapeHtml(ctx.page.title)
     : t('Vos secrets, <em>chiffrés chez vous</em>.', 'Your secrets, <em>encrypted at home</em>.');
@@ -231,8 +208,51 @@ export function renderLanding(ctx: LandingContext): string {
     <li>${tile(ic, 'md')}<h3>${t(tf, te)}</h3><p>${t(df, de)}</p></li>`).join('');
 
   const serversOn = ctx.page.directoryEnabled && ctx.page.servers.length > 0;
+  const start = ctx.appAvailable ? '/app' : '/docs/guide/premiers-pas';
 
-  const body = `${header(ctx, 'home')}
+  const steps = snakeSteps([
+    {
+      title: t('Créez votre compte', 'Create your account'),
+      subtitle: t('Un email, un mot de passe principal. C’est tout.', 'An email and a master password. That’s it.'),
+      text: t('Votre mot de passe ne quitte jamais l’appareil : il sert à fabriquer la clé du coffre, avec Argon2id. Notez la clé de secours affichée à la fin.', 'Your password never leaves the device: it derives the vault key with Argon2id. Write down the recovery key shown at the end.'),
+      art: artAccount({ email: 'Email', password: t('Mot de passe principal', 'Master password'), strong: t('Solide', 'Strong'), button: t('Créer mon coffre', 'Create my vault'), chip: t('Clé créée sur l’appareil', 'Key made on device') })
+    },
+    {
+      title: t('Ajoutez vos accès', 'Add your logins'),
+      subtitle: t('Tout est chiffré avant de partir.', 'Everything is encrypted before it leaves.'),
+      text: t('Importez depuis Bitwarden, 1Password, Chrome ou un fichier. Le serveur ne reçoit qu’un bloc illisible — essayez la bascule pour voir ce qu’il voit.', 'Import from Bitwarden, 1Password, Chrome or a file. The server only receives an unreadable blob — try the toggle to see what it sees.'),
+      art: artCipher({ you: t('Ce que vous voyez', 'What you see'), server: t('Ce que voit le serveur', 'What the server sees'), rows: [['GitHub', 'marie.dupont'], ['Banque', 'n° 04 22 81'], ['Netflix', 'marie@exemple.fr']] })
+    },
+    {
+      title: t('Retrouvez-les partout', 'Find them everywhere'),
+      subtitle: t('Bureau, téléphone, navigateur.', 'Desktop, phone, browser.'),
+      text: t('Chaque appareil reçoit le coffre chiffré et le déchiffre pour lui. Deux modifications faites en même temps sont fusionnées, rien ne se perd.', 'Each device receives the encrypted vault and decrypts it for itself. Two edits made at the same time are merged, nothing is lost.'),
+      art: artDevices({ synced: t('Synchronisé', 'Synced') })
+    },
+    {
+      title: t('Vous seul l’ouvrez', 'Only you can open it'),
+      subtitle: t('Empreinte, visage ou clé de sécurité.', 'Fingerprint, face or security key.'),
+      text: t('Déverrouillez d’un geste, remplissez les formulaires de connexion et vos codes 2FA. Même l’hébergeur de ce serveur ne peut pas lire votre coffre.', 'Unlock in one gesture, fill sign-in forms and your 2FA codes. Even the operator of this server cannot read your vault.'),
+      art: artUnlock({ code: t('Code 2FA · GitHub', '2FA code · GitHub'), unlocked: t('Déverrouillé', 'Unlocked') })
+    }
+  ], t('Étape', 'Step'));
+
+  const faq: Array<[string, string, string, string]> = [
+    ['Que se passe-t-il si j’oublie mon mot de passe principal ?', 'What if I forget my master password?',
+     'La clé de secours, donnée à la création du compte, permet d’en choisir un nouveau. Sans elle, personne — pas même l’hébergeur — ne peut rouvrir le coffre : c’est le prix d’un chiffrement réel.',
+     'The recovery key, given when you create the account, lets you choose a new one. Without it nobody — not even the operator — can reopen the vault: that is the price of real encryption.'],
+    ['Le serveur peut-il lire mes données ?', 'Can the server read my data?',
+     'Non. Il stocke des blocs chiffrés en AES-256-GCM avec une clé qu’il n’a jamais reçue. Une fuite de la base ne révèle aucun mot de passe.',
+     'No. It stores blocks encrypted with AES-256-GCM using a key it never received. A database leak reveals no password.'],
+    ['Puis-je partir avec mes données ?', 'Can I leave with my data?',
+     'Oui : export complet chiffré, fichiers compris, ou formats Bitwarden, 1Password, KeePass, CSV. Le même export s’importe sur un autre serveur.',
+     'Yes: full encrypted export, files included, or Bitwarden, 1Password, KeePass, CSV formats. The same export imports onto another server.'],
+    ['Puis-je héberger mon propre serveur ?', 'Can I host my own server?',
+     'Oui, avec Docker en quelques minutes. La documentation couvre l’installation, les sauvegardes S3, la grappe de serveurs et les documents légaux.',
+     'Yes, with Docker in a few minutes. The documentation covers installation, S3 backups, server clusters and legal documents.']
+  ];
+
+  const body = `${siteHeader(chrome(ctx), 'home')}
 <main id="contenu">
   <section class="hero">
     <div>
@@ -240,10 +260,8 @@ export function renderLanding(ctx: LandingContext): string {
       ${ctx.page.title ? `<p class="meta">${escapeHtml(title)}</p>` : ''}
       ${intro}
       <div class="actions">
-        ${ctx.appAvailable
-          ? `<a class="btn primary" href="/app">${icon('vault', 20)}${ctx.registrationOpen ? t('Créer un coffre', 'Create a vault') : t('Ouvrir l’application', 'Open the app')}</a>`
-          : `<a class="btn primary" href="/docs/guide/premiers-pas">${t('Premiers pas', 'Getting started')}</a>`}
-        <a class="btn" href="/docs">${t('Lire la documentation', 'Read the documentation')}</a>
+        <a class="btn primary" href="${start}">${icon('safe', 20)}${t('Premiers pas', 'Get started')}<span class="arrow" aria-hidden="true">→</span></a>
+        <a class="btn" href="/docs">${icon('files', 20)}${t('Documentation', 'Documentation')}</a>
       </div>
       <ul class="trust">
         <li>${icon('lockKey', 18)}${t('Chiffré sur l’appareil', 'Encrypted on device')}</li>
@@ -257,23 +275,42 @@ export function renderLanding(ctx: LandingContext): string {
     ${heroArt({ code: t('Code 2FA', '2FA code'), unlocked: t('Déverrouillé par empreinte', 'Unlocked by fingerprint'), synced: t('Synchronisé', 'Synced') })}
   </section>
 
-  <section>
+  <section id="fonctions">
+    <p class="eyebrow">${t('Fonctionnalités', 'Features')}</p>
     <h2>${t('Tout ce qu’il faut, rien de lisible par le serveur', 'Everything you need, nothing the server can read')}</h2>
     <p class="section-lede">${t('Un seul coffre pour vos accès, vos codes et vos documents, sur tous vos appareils.', 'One vault for your logins, codes and documents, on all your devices.')}</p>
     <ul class="features">${features}</ul>
   </section>
 
-  <section>
-    <h2>${t('Comment ça marche', 'How it works')}</h2>
-    ${stepsArt([
-      { icon: 'devices', title: t('Votre mot de passe reste chez vous', 'Your password stays with you'), text: t('Il ne quitte jamais l’appareil : il sert à fabriquer la clé du coffre.', 'It never leaves the device: it derives the vault key.') },
-      { icon: 'lockKey', title: t('Le coffre part chiffré', 'The vault leaves encrypted'), text: t('Le serveur stocke un bloc illisible, daté, et rien d’autre.', 'The server stores an unreadable, timestamped blob and nothing else.') },
-      { icon: 'server', title: t('Chaque appareil déchiffre pour lui', 'Each device decrypts for itself'), text: t('Perdre le serveur ne révèle rien ; un mot de passe oublié se répare avec la clé de secours.', 'Losing the server reveals nothing; a forgotten password is fixed with the recovery key.') }
-    ])}
+  <section id="comment">
+    <p class="eyebrow">${t('Comment ça marche', 'How it works')}</p>
+    <h2>${t('Quatre étapes, aucune clé confiée', 'Four steps, no key handed over')}</h2>
+    <p class="section-lede">${t('De la création du compte au déverrouillage, votre clé reste sur vos appareils.', 'From creating the account to unlocking, your key stays on your devices.')}</p>
+    ${steps}
+  </section>
+
+  <div class="band">
+    <div class="band-in">
+      <span class="safe">${icon('safe', 80)}</span>
+      <div>
+        <h2>${t('Chiffrement de bout en bout, sans exception', 'End-to-end encryption, no exceptions')}</h2>
+        <p>${t('Mots de passe, codes 2FA, notes, tâches, pièces jointes et coffres partagés : tout est chiffré sur l’appareil. Le code est ouvert, vous pouvez le vérifier.', 'Passwords, 2FA codes, notes, tasks, attachments and shared vaults: everything is encrypted on the device. The code is open, you can check it.')}</p>
+        <a class="btn" href="${start}">${t('Premiers pas', 'Get started')}<span class="arrow" aria-hidden="true">→</span></a>
+      </div>
+    </div>
+  </div>
+
+  <section id="questions">
+    <p class="eyebrow">${t('Questions', 'Questions')}</p>
+    <h2>${t('Questions fréquentes', 'Frequently asked questions')}</h2>
+    <div class="faq">${faq.map(([qf, qe, af, ae], i) => `
+      <details${i === 0 ? ' open' : ''}><summary>${t(qf, qe)}</summary><p>${t(af, ae)}</p></details>`).join('')}
+    </div>
   </section>
 
   <section>
-    <h2>${t('Ce serveur', 'This server')}</h2>
+    <p class="eyebrow">${t('Ce serveur', 'This server')}</p>
+    <h2>${escapeHtml(ctx.operatorName || t('Hébergeur indépendant', 'Independent operator'))}</h2>
     <ul class="facts">
       <li>${tile('server', 'sm')}<span><strong>${escapeHtml(ctx.operatorName || t('Hébergeur indépendant', 'Independent operator'))}</strong><span class="meta">${t('Responsable de ce serveur', 'Responsible for this server')}</span></span></li>
       <li>${tile('key', 'sm')}<span><strong>${ctx.registrationOpen ? t('Inscriptions ouvertes', 'Sign-ups open') : t('Sur invitation', 'Invitation only')}</strong><span class="meta">${t('Adresse à saisir dans l’application', 'Address to enter in the app')}</span></span></li>
@@ -288,10 +325,8 @@ export function renderLanding(ctx: LandingContext): string {
     </div>
     ${serversOn
       ? `<a class="btn" href="/serveurs">${icon('globe', 20)}${t('Voir les serveurs', 'See the servers')}</a>`
-      : ctx.appAvailable ? `<a class="btn primary" href="/app">${t('Commencer', 'Get started')}</a>` : ''}
+      : `<a class="btn primary" href="${start}">${t('Premiers pas', 'Get started')}<span class="arrow" aria-hidden="true">→</span></a>`}
   </div>
-
-  ${footer(ctx)}
 </main>`;
 
   return page(ctx, title, t('Gestionnaire de mots de passe chiffré de bout en bout : mots de passe, codes 2FA, fichiers et tâches.', 'End-to-end encrypted password manager: passwords, 2FA codes, files and tasks.'), body);
@@ -311,7 +346,7 @@ export function renderServersPage(ctx: LandingContext): string | null {
     const region = s.region || t('Autres', 'Other');
     regions.set(region, [...(regions.get(region) ?? []), s]);
   }
-  const body = `${header(ctx, 'servers')}
+  const body = `${siteHeader(chrome(ctx), 'servers')}
 <main id="contenu">
   <section>
     <h1>${t('Serveurs BetterVault', 'BetterVault servers')}</h1>
@@ -331,7 +366,6 @@ export function renderServersPage(ctx: LandingContext): string | null {
       </li>`).join('')}
     </ul>
   </section>`).join('')}
-  ${footer(ctx)}
 </main>
 <style>
 .server-region h2{display:flex;align-items:center;gap:10px}

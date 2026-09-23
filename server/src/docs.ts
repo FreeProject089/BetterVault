@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, normalize, sep } from 'node:path';
 import { markdownToHtml } from './legal.ts';
+import { CHROME_CSS, siteFooter, siteHeader, type ChromeContext } from './siteChrome.ts';
 
 /**
  * Documentation servie par le serveur, directement depuis les fichiers Markdown
@@ -139,7 +140,35 @@ export interface DocsContext {
   root: string;
   locale: 'fr' | 'en';
   appAvailable: boolean;
+  /** En-tête et pied communs au site ; sans eux, une barre minimale */
+  chrome?: ChromeContext;
 }
+
+/**
+ * Ordre et titres du sommaire, repris de `mkdocs.yml` quand il est là : c'est
+ * l'ordre pensé pour la lecture (« Premiers pas » avant « Raccourcis »), pas
+ * l'ordre alphabétique des fichiers.
+ */
+function navOrder(root: string): Map<string, { index: number; title: string }> {
+  const order = new Map<string, { index: number; title: string }>();
+  const file = join(root, '..', 'mkdocs.yml');
+  if (!existsSync(file)) return order;
+  let index = 0;
+  for (const match of readFileSync(file, 'utf8').matchAll(/^\s*-\s+(.+?):\s+([a-z0-9/-]+)\.md\s*$/gm)) {
+    order.set(match[2], { index: index++, title: match[1].replace(/^["']|["']$/g, '').trim() });
+  }
+  return order;
+}
+
+const SECTION_ICONS: Record<string, string> = {
+  '': '<path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  guide: '<path d="M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5"/><path d="M9 7h6"/>',
+  deploiement: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>',
+  applications: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
+  developpement: '<path d="M8 8l-4 4 4 4M16 8l4 4-4 4M13 5l-2 14"/>'
+};
+const sectionIcon = (section: string) =>
+  `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SECTION_ICONS[section] ?? SECTION_ICONS.guide}</svg>`;
 
 /** Page demandée, ou null si elle n'existe pas (ou sort du dossier) */
 export function renderDocPage(path: string, ctx: DocsContext): string | null {
@@ -148,18 +177,42 @@ export function renderDocPage(path: string, ctx: DocsContext): string | null {
   const file = normalize(join(ctx.root, `${wanted}.md`));
   if (!file.startsWith(ctx.root + sep) || !existsSync(file)) return null;
 
-  const pages = listDocs(ctx.root);
-  const current = pages.find(p => p.path === wanted);
+  const nav = navOrder(ctx.root);
+  const pages = listDocs(ctx.root)
+    .map(p => ({ ...p, title: nav.get(p.path)?.title ?? p.title }))
+    .sort((a, b) => (nav.get(a.path)?.index ?? 1e6) - (nav.get(b.path)?.index ?? 1e6) || 0);
+  const at = pages.findIndex(p => p.path === wanted);
+  const current = pages[at];
   const markdown = readFileSync(file, 'utf8');
   const fr = ctx.locale === 'fr';
   const t = (a: string, b: string) => (fr ? a : b);
+  const sectionLabel = (s: string) => SECTIONS[s]?.[fr ? 0 : 1] ?? s;
 
   const sections = [...new Set(pages.map(p => p.section))].map(section => {
-    const label = SECTIONS[section]?.[fr ? 0 : 1] ?? section;
     const links = pages.filter(p => p.section === section).map(p =>
       `<a href="/docs/${p.path}"${p.path === wanted ? ' aria-current="page"' : ''}>${escapeHtml(p.title)}</a>`).join('');
-    return `<div class="doc-group"><span>${escapeHtml(label)}</span>${links}</div>`;
+    return `<div class="doc-group"><span>${sectionIcon(section)}${escapeHtml(sectionLabel(section))}</span>${links}</div>`;
   }).join('');
+
+  const content = renderMarkdown(markdown);
+  // « Sur cette page » : les titres de niveau 2 de la page
+  const headings = [...content.matchAll(/<h2 id="([^"]+)">([\s\S]*?)<\/h2>/g)].map(m => [m[1], m[2].replace(/<[^>]+>/g, '')]);
+  const onPage = headings.length > 1
+    ? `<aside class="onpage" aria-label="${t('Sur cette page', 'On this page')}"><span>${t('Sur cette page', 'On this page')}</span>${headings.map(([id, text]) => `<a href="#${id}">${text}</a>`).join('')}</aside>`
+    : '<aside class="onpage"></aside>';
+
+  const prev = at > 0 ? pages[at - 1] : null;
+  const next = at >= 0 && at < pages.length - 1 ? pages[at + 1] : null;
+  const pager = `<nav class="pager" aria-label="${t('Pages voisines', 'Adjacent pages')}">
+    ${prev ? `<a class="prev" href="/docs/${prev.path === 'index' ? '' : prev.path}"><small>← ${t('Précédent', 'Previous')}</small><b>${escapeHtml(prev.title)}</b></a>` : '<span></span>'}
+    ${next ? `<a class="next" href="/docs/${next.path}"><small>${t('Suivant', 'Next')} →</small><b>${escapeHtml(next.title)}</b></a>` : '<span></span>'}
+  </nav>`;
+
+  const crumbs = `<nav class="crumbs" aria-label="${t('Fil d’Ariane', 'Breadcrumb')}"><a href="/docs">Documentation</a>${current && current.section ? `<span>/</span><span>${escapeHtml(sectionLabel(current.section))}</span>` : ''}</nav>`;
+
+  const header = ctx.chrome
+    ? siteHeader(ctx.chrome, 'docs')
+    : `<header class="site-bar"><div class="site-bar-in"><a class="site-brand" href="/"><picture><source srcset="/admin/logo-on-light.svg" media="(prefers-color-scheme: light)"><img src="/admin/logo-on-dark.svg" alt="" width="28" height="28"></picture><span>BetterVault</span></a><nav class="site-links"><a href="/docs" aria-current="page">Documentation</a></nav>${ctx.appAvailable ? `<div class="site-actions"><a class="site-cta" href="/app">${t('Premiers pas', 'Get started')}<span aria-hidden="true">→</span></a></div>` : ''}</div></header>`;
 
   return `<!DOCTYPE html>
 <html lang="${ctx.locale}">
@@ -167,67 +220,109 @@ export function renderDocPage(path: string, ctx: DocsContext): string | null {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${escapeHtml(current?.title ?? 'Documentation')} · BetterVault</title>
+<link rel="icon" type="image/svg+xml" href="/admin/logo-on-dark.svg" media="(prefers-color-scheme: dark)">
+<link rel="icon" type="image/svg+xml" href="/admin/logo-on-light.svg" media="(prefers-color-scheme: light)">
 <style>
-:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#7773e8;color-scheme:dark}
-@media (prefers-color-scheme:light){:root{--bg:#f6f8fa;--card:#fff;--border:#d0d7de;--text:#1f2328;--muted:#656d76;--accent:#5754c7;color-scheme:light}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-.tabs{margin:16px 0;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--card)}
+:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#7773e8;--code:#0b0f14;color-scheme:dark}
+@media (prefers-color-scheme:light){:root{--bg:#ffffff;--card:#f6f8fa;--border:#d8dee4;--text:#1f2328;--muted:#59636e;--accent:#5754c7;--code:#f6f8fa;color-scheme:light}}
+*{box-sizing:border-box}
+html{scroll-padding-top:84px;scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+${CHROME_CSS}
+.docs-hero{border-bottom:1px solid var(--border);background:radial-gradient(700px 240px at 15% 0%,color-mix(in srgb,var(--accent) 16%,transparent),transparent),var(--bg)}
+.docs-hero-in{max-width:1320px;margin:0 auto;padding:16px 20px;display:flex;align-items:center;gap:12px;font-size:14px;color:var(--muted)}
+.docs-hero-in b{color:var(--text)}
+.shell{max-width:1320px;margin:0 auto;padding:0 20px;display:grid;gap:40px}
+.sidebar{padding:24px 0}
+.sidebar nav{display:flex;flex-direction:column;gap:22px;font-size:14px}
+.sidenav{display:none!important}
+.doc-group{display:flex;flex-direction:column;gap:1px}
+.doc-group>span{display:flex;align-items:center;gap:8px;color:var(--text);font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:0 10px 6px}
+.doc-group>span svg{color:var(--accent)}
+.doc-group a{display:flex;align-items:center;min-height:36px;padding:5px 10px 5px 12px;margin-left:7px;border-left:1px solid var(--border);color:var(--muted);text-decoration:none;transition:color .15s,border-color .15s,background-color .15s}
+.doc-group a:hover{color:var(--text);border-left-color:var(--muted)}
+.doc-group a[aria-current]{color:var(--accent);border-left:2px solid var(--accent);padding-left:11px;font-weight:600;background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 12%,transparent),transparent)}
+.toc{border:1px solid var(--border);border-radius:12px;background:var(--card);padding:4px 12px;margin-top:16px}
+.toc summary{padding:10px 2px;font-weight:600;cursor:pointer;min-height:44px;display:flex;align-items:center}
+.toc[open] summary{margin-bottom:10px;border-bottom:1px solid var(--border)}
+.doc{min-width:0;padding:28px 0 72px;max-width:780px}
+.crumbs{display:flex;flex-wrap:wrap;gap:8px;font-size:13px;color:var(--muted);margin-bottom:10px}
+.crumbs a{color:var(--muted);text-decoration:none}.crumbs a:hover{color:var(--accent)}
+.doc h1{font-size:clamp(28px,4vw,40px);line-height:1.15;letter-spacing:-.025em;margin:0 0 18px}
+.doc h1+p{font-size:18px;color:var(--muted)}
+.doc h2{margin:48px 0 12px;padding-top:20px;border-top:1px solid var(--border);font-size:24px;letter-spacing:-.015em}
+.doc h3{margin:30px 0 8px;font-size:18px}
+.doc h2 a,.doc h3 a{color:inherit}
+a{color:var(--accent);text-underline-offset:3px}
+code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:.86em;padding:2px 6px;border-radius:6px;background:color-mix(in srgb,var(--accent) 10%,var(--card));border:1px solid color-mix(in srgb,var(--accent) 18%,var(--border))}
+pre{position:relative;background:var(--code);border:1px solid var(--border);border-radius:12px;padding:16px 18px;overflow-x:auto;margin:18px 0}
+pre::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:12px 0 0 12px;background:var(--accent);opacity:.8}
+pre code{border:0;padding:0;background:none;font-size:13.5px;line-height:1.6}
+.table{overflow-x:auto;margin:18px 0;border:1px solid var(--border);border-radius:12px}
+table{border-collapse:collapse;width:100%;font-size:14.5px}
+th,td{border-bottom:1px solid var(--border);padding:10px 14px;text-align:left;vertical-align:top}
+tr:last-child td{border-bottom:0}
+th{background:var(--card);font-size:13px;font-weight:700;letter-spacing:.02em}
+tbody tr:hover td{background:color-mix(in srgb,var(--card) 60%,transparent)}
+.admo{margin:20px 0;padding:14px 16px 14px 46px;position:relative;border:1px solid color-mix(in srgb,var(--accent) 30%,var(--border));border-radius:12px;background:color-mix(in srgb,var(--accent) 7%,var(--bg))}
+.admo::before{content:"i";position:absolute;left:14px;top:14px;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font:700 12px/1 Georgia,serif;color:#fff;background:var(--accent)}
+.admo strong{display:block;margin-bottom:4px}.admo p{margin:.3em 0}.admo p:last-child{margin-bottom:0}
+.admo-warning,.admo-danger,.admo-caution{border-color:color-mix(in srgb,#d29922 45%,var(--border));background:color-mix(in srgb,#d29922 8%,var(--bg))}
+.admo-warning::before,.admo-danger::before,.admo-caution::before{content:"!";background:#d29922}
+.admo-tip,.admo-success{border-color:color-mix(in srgb,#3fb950 45%,var(--border));background:color-mix(in srgb,#3fb950 7%,var(--bg))}
+.admo-tip::before,.admo-success::before{content:"✓";background:#3fb950}
+hr{border:none;border-top:1px solid var(--border);margin:36px 0}
+.tabs{margin:18px 0;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--card)}
 .tabs>input{position:absolute;opacity:0;pointer-events:none}
 .tabs>label{display:inline-flex;align-items:center;min-height:44px;padding:0 16px;cursor:pointer;color:var(--muted);font-size:14px;font-weight:600;border-bottom:2px solid transparent}
 .tabs>input:checked+label{color:var(--text);border-bottom-color:var(--accent)}
 .tabs>input:focus-visible+label{outline:2px solid var(--accent);outline-offset:-2px}
-.tab-panel{display:none;padding:4px 16px 12px;border-top:1px solid var(--border)}
+.tab-panel{display:none;padding:4px 16px 12px;border-top:1px solid var(--border);background:var(--bg)}
 .tabs>input:nth-of-type(1):checked~.tab-panel:nth-of-type(1),.tabs>input:nth-of-type(2):checked~.tab-panel:nth-of-type(2),.tabs>input:nth-of-type(3):checked~.tab-panel:nth-of-type(3),.tabs>input:nth-of-type(4):checked~.tab-panel:nth-of-type(4),.tabs>input:nth-of-type(5):checked~.tab-panel:nth-of-type(5),.tabs>input:nth-of-type(6):checked~.tab-panel:nth-of-type(6){display:block}
-.cards>ul{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
-.cards>ul>li{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin:0}
-header{position:sticky;top:0;z-index:2;background:var(--card);border-bottom:1px solid var(--border)}
-header div{max-width:1160px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:12px}
-header picture{display:flex}header img{width:26px;height:26px}header strong{margin-right:auto}
-.shell{max-width:1160px;margin:0 auto;padding:24px 16px 64px;display:grid;gap:28px}
-nav{display:flex;flex-direction:column;gap:18px;font-size:14px}
-.doc-group{display:flex;flex-direction:column;gap:2px}
-.doc-group span{color:var(--muted);font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:0 8px 4px}
-nav a{display:flex;align-items:center;min-height:44px;padding:8px 10px;border-radius:8px;color:var(--text);text-decoration:none}
-.toc{border:1px solid var(--border);border-radius:12px;background:var(--card);padding:4px 12px}
-.toc summary{padding:10px 2px;font-weight:600;cursor:pointer}
-.toc[open] summary{margin-bottom:6px;border-bottom:1px solid var(--border)}
-nav a:hover{background:var(--card)}
-nav a[aria-current]{background:var(--accent);color:#fff;font-weight:600}
-main{min-width:0}h1{font-size:30px;line-height:1.2;margin:0 0 16px}h2{margin-top:36px;font-size:21px}h3{font-size:17px}
-a{color:var(--accent)}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;padding:1px 5px;border:1px solid var(--border);border-radius:5px}
-pre{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;overflow-x:auto}
-pre code{border:0;padding:0;font-size:13px;line-height:1.5}
-.table{overflow-x:auto}table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
-th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}th{background:var(--card)}
-.admo{margin:16px 0;padding:12px 14px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;background:var(--card)}
-.admo strong{display:block;margin-bottom:4px}.admo p:last-child{margin-bottom:0}
-.admo-warning,.admo-danger{border-left-color:#d29922}.admo-tip,.admo-success{border-left-color:#3fb950}
-hr{border:none;border-top:1px solid var(--border);margin:32px 0}
-.btn{display:inline-flex;align-items:center;min-height:38px;padding:0 14px;border-radius:9px;border:1px solid var(--border);color:var(--text);text-decoration:none;font-size:14px;font-weight:600}
+.cards>ul{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+.cards>ul>li{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px 18px;margin:0;transition:border-color .15s,transform .15s}
+.cards>ul>li:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border));transform:translateY(-2px)}
+.pager{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:56px}
+.pager a{display:flex;flex-direction:column;gap:2px;padding:14px 18px;border:1px solid var(--border);border-radius:14px;text-decoration:none;transition:border-color .15s}
+.pager a:hover{border-color:var(--accent)}
+.pager small{color:var(--muted);font-size:12.5px}.pager b{color:var(--text)}
+.pager .next{text-align:right}
+.edit{display:inline-block;margin-top:18px;font:12px ui-monospace,Menlo,Consolas,monospace;color:var(--muted);text-decoration:none}
+.onpage{display:none}
 @media (min-width:1000px){
-  .shell{grid-template-columns:248px minmax(0,1fr)}
-  /* Sur grand écran le sommaire est toujours là, sans dépliant */
-  .toc{border:0;background:none;padding:0;position:sticky;top:74px;align-self:start;max-height:calc(100vh - 96px);overflow-y:auto}
-  .toc summary{display:none}
-  nav a{min-height:36px;padding:6px 10px}
+  .shell{grid-template-columns:260px minmax(0,1fr)}
+  .sidebar{position:sticky;top:64px;align-self:start;max-height:calc(100vh - 64px);overflow-y:auto;padding-right:8px;border-right:1px solid var(--border)}
+  .toc{display:none}
+  .sidenav{display:flex!important}
 }
-@media (max-width:560px){main{font-size:15.5px}h1{font-size:26px}pre{padding:12px;font-size:12.5px}}
+@media (min-width:1260px){
+  .shell{grid-template-columns:260px minmax(0,1fr) 220px}
+  .onpage{display:flex;flex-direction:column;gap:2px;position:sticky;top:64px;align-self:start;padding:28px 0;font-size:13.5px}
+  .onpage span{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;margin-bottom:8px}
+  .onpage a{color:var(--muted);text-decoration:none;padding:4px 0 4px 12px;border-left:1px solid var(--border)}
+  .onpage a:hover{color:var(--text);border-left-color:var(--accent)}
+}
+@media (max-width:560px){.doc{font-size:15.5px}pre{padding:12px 14px;font-size:12.5px}.pager{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
-<header><div>
-  <picture><source srcset="/admin/logo-on-light.svg" media="(prefers-color-scheme: light)"><img src="/admin/logo-on-dark.svg" alt="" width="26" height="26"></picture>
-  <strong>BetterVault · ${t('Documentation', 'Documentation')}</strong>
-  <a class="btn" href="/">${t('Accueil', 'Home')}</a>
-  ${ctx.appAvailable ? `<a class="btn" href="/app">${t('Ouvrir l’application', 'Open the app')}</a>` : ''}
-</div></header>
+${header}
 <div class="shell">
-  <details class="toc" aria-label="${t('Sommaire', 'Contents')}">
-    <summary>${t('Sommaire', 'Contents')}</summary>
-    <nav>${sections}</nav>
-  </details>
-  <main>${renderMarkdown(markdown)}</main>
+  <div class="sidebar">
+    <details class="toc" aria-label="${t('Sommaire', 'Contents')}">
+      <summary>${t('Sommaire de la documentation', 'Documentation contents')}</summary>
+      <nav>${sections}</nav>
+    </details>
+    <nav class="sidenav" aria-label="${t('Sommaire', 'Contents')}">${sections}</nav>
+  </div>
+  <main class="doc" id="contenu">
+    ${crumbs}
+    ${content}
+    ${pager}
+  </main>
+  ${onPage}
 </div>
+${ctx.chrome ? siteFooter(ctx.chrome) : ''}
 </body>
 </html>`;
 }

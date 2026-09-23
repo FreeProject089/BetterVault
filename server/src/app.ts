@@ -46,6 +46,7 @@ import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.ts';
 import { createWebauthn, parseRpId, type AssertionInput } from './webauthn.ts';
 import { DEFAULT_PUBLIC_PAGE, publicDirectory, renderLanding, renderServersPage } from './directory.ts';
 import { renderDocPage } from './docs.ts';
+import type { ChromeContext } from './siteChrome.ts';
 
 /**
  * API BetterVault : le serveur ne stocke que des données chiffrées côté client.
@@ -1037,10 +1038,22 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       return { status: 200, raw: payload, contentType: 'application/octet-stream' };
     },
   });
+  /** En-tête et pied communs des pages publiques */
+  const siteChrome = (req: IncomingMessage): ChromeContext => {
+    const page = settings.publicPage ?? DEFAULT_PUBLIC_PAGE;
+    return {
+      locale: requestLocale(req) === 'en' ? 'en' : 'fr',
+      appAvailable: !!options.appAvailable,
+      serversOn: page.directoryEnabled && page.servers.length > 0,
+      legalEnabled: settings.legal.enabled,
+      version: SERVER_VERSION,
+      operatorName: settings.legal.operatorName ?? ''
+    };
+  };
   const legalPage = (slug: string, req: IncomingMessage): Reply => {
     const lang = new URL(req.url ?? '/', 'http://localhost').searchParams.get('lang');
     const locale = lang === 'en' || lang === 'fr' ? lang : requestLocale(req);
-    const html = renderLegalPage(legalDir, slug, legalContext(), locale);
+    const html = renderLegalPage(legalDir, slug, legalContext(), locale, { ...siteChrome(req), locale });
     if (!html) throw new HttpError(404, 'not_found', 'Document inconnu');
     return { status: 200, raw: Buffer.from(html), contentType: 'text/html; charset=utf-8' };
   };
@@ -1487,7 +1500,8 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         const html = renderDocPage(page, {
           root: docsDir,
           locale: requestLocale(req) === 'en' ? 'en' : 'fr',
-          appAvailable: !!options.appAvailable
+          appAvailable: !!options.appAvailable,
+          chrome: siteChrome(req)
         });
         return html ? htmlReply(html) : htmlReply('<!DOCTYPE html><title>404</title><p>Not found</p>', 404);
       }

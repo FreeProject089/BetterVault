@@ -1,3 +1,4 @@
+import { CHROME_CSS, siteFooter, siteHeader, type ChromeContext } from './siteChrome.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -168,7 +169,7 @@ export function fillTemplate(template: string, values: Record<string, string>, f
   return text.replace(/\{\{(\w+)\}\}/g, (_, key: string) => values[key] || (locale === 'en' ? `[${key} to be completed]` : `[${key} à compléter]`));
 }
 
-export function renderLegalPage(root: string, slug: string, context: LegalContext, requested: LegalLocale = 'fr'): string | null {
+export function renderLegalPage(root: string, slug: string, context: LegalContext, requested: LegalLocale = 'fr', chrome?: ChromeContext): string | null {
   if (!context.legal.enabled) return null;
   const doc = LEGAL_DOCUMENTS.find(d => d.slug === slug);
   if (!doc) return null;
@@ -218,8 +219,9 @@ export function renderLegalPage(root: string, slug: string, context: LegalContex
 :root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#7773e8;color-scheme:dark}
 @media (prefers-color-scheme:light){:root{--bg:#f6f8fa;--card:#fff;--border:#d0d7de;--text:#1f2328;--muted:#656d76;--accent:#5754c7;color-scheme:light}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-header{border-bottom:1px solid var(--border);background:var(--card)}header div{max-width:860px;margin:0 auto;padding:14px 16px;display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center}
-header strong{margin-right:auto}nav{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px}nav a{color:var(--muted);text-decoration:none}nav a[aria-current]{color:var(--accent);font-weight:600}
+${CHROME_CSS}
+.legalbar{border-bottom:1px solid var(--border);background:var(--card)}.legalbar>div{max-width:860px;margin:0 auto;padding:14px 16px;display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center}
+.legalbar strong{margin-right:auto}.docnav{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px}.docnav a{color:var(--muted);text-decoration:none}.docnav a[aria-current]{color:var(--accent);font-weight:600}
 main{max-width:860px;margin:0 auto;padding:24px 16px 64px}h1{font-size:28px;line-height:1.25}h2{margin-top:32px;font-size:20px}h3{font-size:16px}
 a{color:var(--accent)}code{font-size:13px;padding:1px 5px;border:1px solid var(--border);border-radius:5px}
 .table{overflow-x:auto}table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px}th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}th{background:var(--card)}
@@ -230,15 +232,17 @@ hr{border:none;border-top:1px solid var(--border);margin:32px 0}.meta{color:var(
 .langs a:hover{color:var(--text)}
 .langs a[aria-current]{background:var(--accent);color:#fff;font-weight:600}
 .home{color:var(--text);text-decoration:none}.docnav{flex-basis:100%}
-@media (max-width:560px){header div{padding:12px}h1{font-size:23px}main{padding:18px 12px 48px}}
+@media (max-width:560px){.legalbar>div{padding:12px}h1{font-size:23px}main{padding:18px 12px 48px}}
 </style>
 </head>
 <body>
-<header><div><strong><a class="home" href="/">${escapeHtml(legal.operatorName || 'BetterVault')}</a></strong>${switcher}<nav class="docnav">${nav}</nav></div></header>
+${chrome ? siteHeader({ ...chrome, locale }, 'legal') : ''}
+<div class="legalbar"><div><strong><a class="home" href="/">${escapeHtml(legal.operatorName || 'BetterVault')}</a></strong>${switcher}<nav class="docnav">${nav}</nav></div></div>
 <main>
 ${legalConfigured(legal) ? '' : notice}
 ${body}
 </main>
+${chrome ? siteFooter({ ...chrome, locale }) : ''}
 </body>
 </html>`;
 }

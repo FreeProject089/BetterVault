@@ -30,6 +30,7 @@ COPY server/src ./server/src
 COPY server/admin ./server/admin
 COPY server/legal ./server/legal
 COPY docs ./docs
+COPY mkdocs.yml ./mkdocs.yml
 
 RUN mkdir -p /data && chown node:node /data
 USER node

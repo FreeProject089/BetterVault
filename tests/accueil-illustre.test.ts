@@ -23,7 +23,8 @@ describe('Page d’accueil', () => {
     const html = renderLanding(base);
     expect(html.match(/<li><span class="tile tile-md">/g)?.length).toBe(8);
     expect(html).toContain('class="hero-art"');
-    expect(html).toContain('class="steps"');
+    expect(html).toContain('class="snake"');
+    expect(html).toContain('href="/app">Premiers pas');
   });
 
   it('mène à l’application sous /app, pas à la racine', () => {
@@ -35,7 +36,7 @@ describe('Page d’accueil', () => {
   it('ne charge rien d’ailleurs et n’exécute rien', () => {
     const html = renderLanding(base);
     expect(html).not.toMatch(/<script/i);
-    expect(html).not.toMatch(/(src|href|srcset)="https?:\/\//);
+    expect(html).not.toMatch(/(src|srcset)="https?:\/\//);
     expect(html).not.toMatch(/url\(https?:/);
   });
 
