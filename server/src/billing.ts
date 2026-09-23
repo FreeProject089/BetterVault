@@ -188,12 +188,19 @@ export type StripeCall = <T>(method: 'GET' | 'POST', path: string, form?: Record
  *
  * Renvoie les offres complétées des identifiants créés, et leur nombre.
  */
-export async function createMissingStripePrices(plans: BillingPlan[], stripe: StripeCall): Promise<{ plans: BillingPlan[]; created: number }> {
+export async function createMissingStripePrices(plans: BillingPlan[], stripe: StripeCall): Promise<{ plans: BillingPlan[]; created: number; error?: unknown }> {
   let created = 0;
   const out: BillingPlan[] = [];
-  for (const plan of plans) {
+  /*
+   * Une erreur en cours de route n'efface pas ce qui a déjà été créé : on
+   * renvoie les offres complétées jusque-là (le reste tel quel) et l'erreur,
+   * pour que l'appelant enregistre les identifiants obtenus. Sans cela, une
+   * nouvelle tentative recréait des produits et des prix en double dans Stripe.
+   */
+  for (const [index, plan] of plans.entries()) {
     let productId = plan.stripeProductId;
     const prices: BillingPrice[] = [];
+    try {
     for (const price of plan.prices) {
       if (price.stripePriceId) { prices.push(price); continue; }
       if (price.amount === undefined || !price.currency || !price.interval) throw new HttpError(400, 'invalid_price', `Offre ${plan.id} : montant, devise ou période manquant`);
@@ -217,6 +224,10 @@ export async function createMissingStripePrices(plans: BillingPlan[], stripe: St
       if (!/^price_[A-Za-z0-9]+$/.test(String(made?.id))) throw new HttpError(502, 'stripe_error', 'Stripe : identifiant de prix inattendu');
       prices.push({ ...price, stripePriceId: made.id, mode: price.interval === 'once' ? 'payment' : 'subscription' });
       created++;
+    }
+    } catch (error) {
+      const partiel = { ...plan, prices: [...prices, ...plan.prices.slice(prices.length)], ...(productId ? { stripeProductId: productId } : {}) };
+      return { plans: [...out, partiel, ...plans.slice(index + 1)], created, error };
     }
     out.push({ ...plan, prices, ...(productId ? { stripeProductId: productId } : {}) });
   }

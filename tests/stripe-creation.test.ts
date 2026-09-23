@@ -63,3 +63,24 @@ describe('Offres créées dans Stripe', () => {
     expect(calls[0].form.product).toBe('prod_Existe');
   });
 });
+
+describe('Création interrompue', () => {
+  it('garde ce qui a déjà été créé quand Stripe échoue en cours de route', async () => {
+    const plan = normalizePlan({ id: 'plus', name: 'Plus', prices: [
+      { id: 'mensuel', amount: 490, currency: 'eur', interval: 'month' },
+      { id: 'annuel', amount: 4900, currency: 'eur', interval: 'year' }
+    ] });
+    let n = 0;
+    const stripe: StripeCall = async <T>(_m: 'GET' | 'POST', path: string) => {
+      n++;
+      if (n === 3) throw new Error('Stripe indisponible');
+      return { id: path === 'products' ? 'prod_A' : `price_P${n}` } as T;
+    };
+    const { plans, created, error } = await createMissingStripePrices([plan], stripe);
+    expect(error).toBeInstanceOf(Error);
+    expect(created).toBe(1);
+    expect(plans[0].stripeProductId).toBe('prod_A');
+    expect(plans[0].prices[0].stripePriceId).toBe('price_P2');
+    expect(plans[0].prices[1].stripePriceId).toBe('');
+  });
+});

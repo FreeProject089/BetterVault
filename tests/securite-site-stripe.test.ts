@@ -57,7 +57,10 @@ describe('Stripe', () => {
   it('refuse un identifiant renvoyé par Stripe qui ne ressemble pas à un prix', async () => {
     const plan = normalizePlan({ id: 'plus', name: 'Plus', prices: [{ id: 'mensuel', amount: 490, currency: 'eur', interval: 'month' }] });
     const stripe: StripeCall = async <T>(_m: 'GET' | 'POST', path: string) => ({ id: path === 'products' ? 'prod_A1' : 'price_"><script>' }) as T;
-    await expect(createMissingStripePrices([plan], stripe)).rejects.toThrow(/identifiant de prix inattendu/);
+    // L'erreur est renvoyée (pour enregistrer ce qui a déjà été créé), et l'identifiant n'est pas gardé
+    const { error, plans } = await createMissingStripePrices([plan], stripe);
+    expect(String(error)).toMatch(/identifiant de prix inattendu/);
+    expect(plans[0].prices[0].stripePriceId).toBe('');
   });
 });
 
