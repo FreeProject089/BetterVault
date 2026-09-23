@@ -112,7 +112,7 @@ export const CHROME_CSS = `
 .site-menu nav{position:absolute;right:0;top:52px;min-width:230px;display:flex;flex-direction:column;padding:8px;border:1px solid var(--border);border-radius:14px;background:var(--card);box-shadow:0 24px 48px -20px rgba(0,0,0,.5)}
 .site-menu nav a{min-height:44px;color:var(--text)}
 @media (max-width:860px){.site-links{display:none}.site-login{display:none}.site-menu{display:block}.site-bar .site-brand{margin-right:auto}}
-@media (max-width:420px){.site-cta{padding:0 12px}.site-brand span{display:none}}
+@media (max-width:420px){.site-cta{padding:0 12px}.site-bar .site-brand span{display:none}}
 
 .site-footer{margin-top:0;border-top:1px solid var(--border);background:color-mix(in srgb,var(--card) 60%,var(--bg));font-size:14px}
 .site-footer-in{max-width:1180px;margin:0 auto;padding:48px 20px 28px;display:grid;grid-template-columns:minmax(0,1.6fr) repeat(3,minmax(0,1fr));gap:32px}
