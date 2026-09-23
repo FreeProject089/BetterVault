@@ -108,8 +108,8 @@ export interface SnakeStep { title: string; subtitle: string; text: string; art:
 
 /**
  * « Comment ça marche » : les étapes, reliées par un seul ruban continu qui
- * serpente derrière les illustrations — sa couleur change d'une étape à
- * l'autre par un dégradé — avant de se jeter dans le bandeau qui suit.
+ * serpente derrière les illustrations — dans la couleur d'accent, qui fonce
+ * vers la fin — avant de se jeter dans le bandeau qui suit.
  *
  * Deux tracés : un large sur ordinateur (le ruban contourne chaque
  * illustration), un étroit sur téléphone (il ondule dans la marge gauche).
@@ -137,7 +137,8 @@ export function snakeSteps(steps: SnakeStep[], stepLabel: string): string {
     m += ` C92,${y0 + 14} 92,${y0 + 36} 50,${y0 + 50} C8,${y0 + 64} 8,${y0 + 86} 50,${y0 + 100}`;
   }
   m += ` L50,${H}`;
-  const stops = colors.slice(0, n).map((col, i) => `<stop offset="${((i + 0.5) / n).toFixed(3)}" stop-color="${col}"/>`).join('');
+  // Une seule teinte (l'accent), qui fonce jusqu'au violet du bandeau ; les étapes gardent leur couleur
+  const stops = '<stop offset="0" stop-color="#7773e8"/><stop offset="0.75" stop-color="#7773e8"/><stop offset="1" stop-color="#4a3ad1"/>';
   const grad = (id: string) => `<defs><linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="${H}">${stops}</linearGradient></defs>`;
   return `<div class="snake" style="--rows:${n};--k:${(H / (n * 100)).toFixed(4)}">
     <svg class="snake-path snake-wide" viewBox="0 0 100 ${H}" preserveAspectRatio="none" aria-hidden="true">${grad('snake-a')}<path d="${d}" stroke="url(#snake-a)" vector-effect="non-scaling-stroke"/></svg>

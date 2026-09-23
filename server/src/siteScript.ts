@@ -32,7 +32,7 @@ export const SITE_JS = `(() => {
    * Ruban des étapes, sur grand écran : tracé d'après la place réelle de
    * chaque maquette. Il fait le tour de chacune par l'extérieur, traverse
    * entre deux étapes, puis descend se jeter dans le bandeau. Sa couleur est
-   * celle de l'étape qu'il entoure, et finit dans celle du bandeau.
+   * l'accent de la page, qui fonce jusqu'à celle du bandeau.
    * Il se dessine au fil du défilement (longueur de trait), jusqu'au bas de
    * l'écran.
    */
@@ -89,20 +89,16 @@ export const SITE_JS = `(() => {
       large.setAttribute('viewBox', '0 0 ' + W + ' ' + fin);
       large.setAttribute('preserveAspectRatio', 'xMinYMin meet');
       large.style.height = fin + 'px';
-      // Dégradé : chaque couleur au niveau de son étape, puis celle du bandeau
+      // Une seule teinte : l'accent de la page, qui fonce jusqu'au violet du bandeau
+      const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7773e8';
       let grad = large.querySelector('linearGradient');
       grad.setAttribute('y2', String(fin));
-      grad.replaceChildren(...cartes.map(k => {
+      grad.replaceChildren(...[[0, accent], [0.75, accent], [1, '#4a3ad1']].map(([offset, color]) => {
         const stop = document.createElementNS(NS, 'stop');
-        stop.setAttribute('offset', (((k.t + k.b) / 2) / fin).toFixed(3));
-        stop.setAttribute('stop-color', k.c);
+        stop.setAttribute('offset', String(offset));
+        stop.setAttribute('stop-color', color);
         return stop;
-      }), (() => {
-        const stop = document.createElementNS(NS, 'stop');
-        stop.setAttribute('offset', '1');
-        stop.setAttribute('stop-color', '#4a3ad1');
-        return stop;
-      })());
+      }));
       chemin = large.querySelector('path');
       chemin.setAttribute('d', d);
       chemin.removeAttribute('vector-effect');
