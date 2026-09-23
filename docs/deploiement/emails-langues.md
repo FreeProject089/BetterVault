@@ -19,6 +19,12 @@ L'aperçu suit votre saisie en direct ; rien n'est enregistré avant **Enregistr
 
 Le sujet tient sur une ligne : un saut de ligne y ouvrirait un nouvel en-tête d'email (`Bcc: …`), il est donc remplacé par une espace.
 
+### Apparence
+
+Les emails suivent le thème du lecteur : clairs par défaut, sombres dans les clients qui le demandent (Apple Mail, Outlook, Gmail sur mobile). Un client qui ignore les styles affiche la version claire, toujours lisible.
+
+L'en-tête porte l'icône de l'application, chargée depuis `PUBLIC_URL`. Sans adresse publique, elle est remplacée par l'initiale « B ».
+
 ### Langue d'envoi
 
 Chaque email part dans la langue du compte. Pour les comptes qui n'en ont pas choisi, c'est la **langue d'envoi par défaut**, réglée en haut de l'onglet (anglais tant que vous n'avez rien choisi).

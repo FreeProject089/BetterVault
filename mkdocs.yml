@@ -73,6 +73,8 @@ nav:
       - Documents légaux: deploiement/documents-legaux.md
       - Emails et langues: deploiement/emails-langues.md
       - Espace payant (Stripe): deploiement/offres-stripe.md
+      - Page d'administration: deploiement/administration.md
+      - Dépannage: deploiement/depannage.md
   - Applications:
       - Bureau et mobile: applications/bureau-mobile.md
       - Biométrie et remplissage automatique: applications/biometrie-autofill.md
