@@ -39,7 +39,7 @@ describe('Page d’accueil', () => {
   it('ne charge rien d’ailleurs et n’exécute rien', () => {
     const html = renderLanding(base);
     // Un seul script, servi par le serveur lui-même ; aucun script en ligne
-    expect(html.match(/<script[^>]*>/gi)).toEqual(['<script src="/site.js" defer>']);
+    expect(html.match(/<script[^>]*>/gi)).toEqual([expect.stringMatching(/^<script src="\/site\.js\?v=[0-9a-f]{10}" defer>$/)]);
     expect(html).not.toMatch(/<script>[^<]/i);
     expect(html).not.toMatch(/(src|srcset)="https?:\/\//);
     expect(html).not.toMatch(/url\(https?:/);

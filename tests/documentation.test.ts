@@ -155,6 +155,6 @@ describe('Rendu de chaque page de la documentation', () => {
     const html = renderDocPage('applications/bureau-mobile', { root, locale: 'fr', appAvailable: true })!;
     expect(html).toMatch(/<div class="tabs"><input type="radio" name="onglets-0" id="onglets-0-0" checked><label for="onglets-0-0">Android<\/label>/);
     // Seul le script du site, servi par le serveur : les onglets, eux, n’en ont pas besoin
-    expect(html.match(/<script[^>]*>/gi)).toEqual(['<script src="/site.js" defer>']);
+    expect(html.match(/<script[^>]*>/gi)).toEqual([expect.stringMatching(/^<script src="\/site\.js\?v=[0-9a-f]{10}" defer>$/)]);
   });
 });

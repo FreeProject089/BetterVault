@@ -1,3 +1,4 @@
+import { SITE_JS_TAG } from './siteScript.ts';
 import { CHROME_CSS, siteFooter, siteHeader, type ChromeContext } from './siteChrome.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -236,7 +237,7 @@ hr{border:none;border-top:1px solid var(--border);margin:32px 0}.meta{color:var(
 .home{color:var(--text);text-decoration:none}.docnav{flex-basis:100%}
 @media (max-width:560px){.legalbar>div{padding:12px}h1{font-size:23px}main{padding:18px 12px 48px}}
 </style>
-<script src="/site.js" defer></script>
+${SITE_JS_TAG}
 </head>
 <body>
 ${chrome ? siteHeader({ ...chrome, locale }, 'legal') : ''}

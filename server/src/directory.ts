@@ -7,6 +7,7 @@
  * rien n'y figure que l'hébergeur n'ait saisi lui-même.
  */
 
+import { SITE_JS_TAG } from './siteScript.ts';
 import { ART_CSS, artAccount, artCipher, artDevices, artUnlock, circled, faqList, heroArt, highlight, icon, snakeSteps, tile, underline, vaultFeatures, type IconName } from './landingArt.ts';
 import { CHROME_CSS, DEFAULT_LINKS, ICONS, pageLangCode, siteFooter, siteHeader, translator, type ChromeContext, type PageLang, type SiteLinks } from './siteChrome.ts';
 
@@ -226,7 +227,7 @@ function page(ctx: LandingContext, title: string, description: string, body: str
 <link rel="icon" type="image/svg+xml" href="/admin/logo-on-dark.svg" media="(prefers-color-scheme: dark)">
 <link rel="icon" type="image/svg+xml" href="/admin/logo-on-light.svg" media="(prefers-color-scheme: light)">
 <style>${baseCss()}${CHROME_CSS}${ART_CSS}</style>
-<script src="/site.js" defer></script>
+${SITE_JS_TAG}
 </head>
 <body>
 ${body}

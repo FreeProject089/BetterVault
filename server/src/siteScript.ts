@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 /**
  * Script des pages publiques, servi à /site.js (même origine, aucune
  * dépendance). Il n'ajoute que du confort : chaque page reste complète sans
@@ -56,19 +58,27 @@ export const SITE_JS = `(() => {
       cartes.forEach((k, i) => {
         const haut = k.t - M, bas = k.b + M, milieu = (k.l + k.r) / 2;
         const bord = k.gauche ? k.l - M : k.r + M, s = k.gauche ? 1 : -1;
-        if (i === 0) d += 'M' + (milieu + s * 70) + ',' + haut;
-        // Le tour de la maquette, coins arrondis
-        d += ' H' + (bord + s * R) + ' Q' + bord + ',' + haut + ' ' + bord + ',' + (haut + R)
+        // Première maquette : le ruban arrive par le haut ; les suivantes, par la traversée
+        if (i === 0) d += 'M' + (milieu + s * 70) + ',' + haut + ' H' + (bord + s * R);
+        // Le tour de la maquette par l'extérieur, coins arrondis
+        d += ' Q' + bord + ',' + haut + ' ' + bord + ',' + (haut + R)
           + ' V' + (bas - R) + ' Q' + bord + ',' + bas + ' ' + (bord + s * R) + ',' + bas;
+        const x0 = bord + s * R;
         const suite = cartes[i + 1];
         if (suite) {
-          // Traversée vers la maquette suivante, en S entre les deux rangées
-          const haut2 = suite.t - M, x2 = (suite.l + suite.r) / 2;
-          const D = Math.max(18, Math.min(70, (haut2 - bas) / 2));
-          d += ' H' + (x2 - s * D) + ' C' + x2 + ',' + bas + ' ' + x2 + ',' + haut2 + ' ' + (x2 + s * D) + ',' + haut2;
+          /*
+           * Traversée vers la maquette suivante, de l'autre côté : un seul S
+           * large, d'un coin à l'autre, tangentes horizontales aux deux bouts.
+           * Avant, un S serré dans un petit écart vertical faisait une marche.
+           */
+          const haut2 = suite.t - M;
+          const bord2 = suite.gauche ? suite.l - M : suite.r + M;
+          const x1 = bord2 - s * R;
+          const mx = (x0 + x1) / 2;
+          d += ' C' + mx + ',' + bas + ' ' + mx + ',' + haut2 + ' ' + x1 + ',' + haut2;
         } else {
-          // Dernière : vers le centre, puis tout droit dans le bandeau
-          const D = 60;
+          // Dernière : un quart de tour vers le centre, puis tout droit dans le bandeau
+          const D = Math.min(90, Math.abs(cx - x0));
           d += ' H' + (cx - s * D) + ' Q' + cx + ',' + bas + ' ' + cx + ',' + (bas + D) + ' V' + fin;
         }
       });
@@ -181,3 +191,10 @@ export const SITE_JS = `(() => {
   document.addEventListener('keydown', e => { if (e.key === 'Escape') menus.forEach(m => { m.open = false; }); });
 })();
 `;
+
+/**
+ * Balise du script, avec l'empreinte de son contenu dans l'adresse : le
+ * navigateur garde /site.js en cache, et une nouvelle version doit être
+ * prise tout de suite, pas à l'expiration du cache.
+ */
+export const SITE_JS_TAG = `<script src="/site.js?v=${createHash('sha256').update(SITE_JS).digest('hex').slice(0, 10)}" defer></script>`;
