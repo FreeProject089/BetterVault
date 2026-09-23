@@ -1,5 +1,9 @@
 # Fabriquer les fichiers pour macOS et iOS
 
+:::warning[Pas encore publié]
+Les versions macOS et iOS ne sont pas encore publiées : cette page sert à les construire soi-même.
+:::
+
 Cette page est la marche à suivre quand vous avez un Mac sous la main. Tout le
 code Apple est déjà dans le dépôt (Touch ID, Face ID, trousseau, extension de
 mots de passe) ; ce qui manque, c'est une machine Apple pour le compiler et le

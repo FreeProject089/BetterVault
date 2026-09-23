@@ -27,10 +27,41 @@ describe('Documentation servie par le serveur', () => {
 
   it('rend les blocs de code et les encadrés sans les interpréter', () => {
     const html = renderMarkdown('# T\n\n```bash\ndocker compose up -d && echo "<script>"\n```\n\n!!! tip "Astuce"\n    Un conseil.\n');
-    expect(html).toContain('<pre><code>docker compose up -d &amp;&amp; echo &quot;&lt;script&gt;&quot;</code></pre>');
+    expect(html).toContain('<code>docker compose up -d &amp;&amp; echo &quot;&lt;script&gt;&quot;</code></pre>');
+    expect(html).toContain('<span class="code-lang">bash</span>');
     expect(html).toContain('class="admo admo-tip"');
     expect(html).toContain('<strong>Astuce</strong>');
     expect(html).not.toContain('<script>');
+  });
+
+  it('comprend les blocs B.MD et les liens relatifs entre pages', () => {
+    const html = renderMarkdown([
+      'Voir [Docker](docker.md#volumes) et [la sécurité](../securite.md).',
+      '',
+      ':::steps',
+      ':::step[Installer]',
+      'Lancer :kbd[Ctrl+K].',
+      ':::',
+      ':::',
+      '',
+      ':::faq',
+      ':::q[Une question ?]',
+      'Une réponse ==importante==.',
+      ':::',
+      ':::',
+      '',
+      ':::warning[Attention]',
+      'Texte.',
+      ':::'
+    ].join('\n'), 'deploiement/installation');
+    expect(html).toContain('href="/docs/deploiement/docker#volumes"');
+    expect(html).toContain('href="/docs/securite"');
+    expect(html).toContain('<ol class="doc-steps"><li><strong>Installer</strong>');
+    expect(html).toContain('<kbd>Ctrl</kbd>');
+    expect(html).toContain('<summary>Une question ?</summary>');
+    expect(html).toContain('<mark>importante</mark>');
+    expect(html).toContain('class="admo admo-warning"');
+    expect(html).not.toContain(':::');
   });
 
   it('échappe le HTML venu du Markdown', () => {

@@ -64,17 +64,30 @@ export function listDocs(root: string): DocPage[] {
 }
 
 /**
- * Markdown étendu : blocs de code (```) et encadrés MkDocs (!!! note "Titre"),
- * que le rendu des documents légaux ne connaît pas.
+ * Markdown étendu : blocs de code (```), encadrés et onglets MkDocs, et les
+ * blocs B.MD (better.markdown, https://bettercommunity.ch/dev/bmd) les plus
+ * utiles à une documentation — encadrés, repliables, questions, étapes,
+ * cartes, onglets, colonnes — ainsi que quelques éléments en ligne
+ * (:badge, :kbd, :button, ==surligné==).
+ *
+ * `page` est le chemin de la page affichée (« guide/premiers-pas ») : il sert
+ * à transformer les liens relatifs vers d'autres fichiers (« docker.md »,
+ * « ../securite.md#sessions ») en adresses de la documentation.
  */
-export function renderMarkdown(markdown: string): string {
+export function renderMarkdown(markdown: string, page = ''): string {
   const blocks: string[] = [];
+  let groupe = 0;
   let text = markdown.replace(/\r\n/g, '\n');
 
   /** Met un morceau de HTML de côté ; `indent` garde la place dans un bloc indenté */
   const bloc = (html: string, indent = '') => {
     blocks.push(html);
     return `\n${indent}@@BLOC${blocks.length - 1}@@\n`;
+  };
+  /** Même chose, dans le fil d'un paragraphe */
+  const enLigne = (html: string) => {
+    blocks.push(html);
+    return `@@BLOC${blocks.length - 1}@@`;
   };
   const retrait = (body: string) => body.replace(/^[ \t]{1,4}/gm, '');
 
@@ -84,57 +97,175 @@ export function renderMarkdown(markdown: string): string {
    * onglet) : le repère garde la même indentation, sinon il coupait le bloc
    * qui le contient et la suite s'affichait en vrac.
    */
-  text = text.replace(/^([ \t]*)```[\w-]*\n([\s\S]*?)^[ \t]*```[ \t]*$/gm, (_, indent: string, code: string) => {
+  text = text.replace(/^([ \t]*)```([\w-]*)\n([\s\S]*?)^[ \t]*```[ \t]*$/gm, (_, indent: string, lang: string, code: string) => {
     const sansRetrait = code.split('\n').map(line => (line.startsWith(indent) ? line.slice(indent.length) : line)).join('\n');
-    return bloc(`<pre><code>${escapeHtml(sansRetrait.replace(/\n$/, ''))}</code></pre>`, indent).replace(/^\n/, '').replace(/\n$/, '');
+    const label = lang ? `<span class="code-lang">${escapeHtml(lang)}</span>` : '';
+    return bloc(`<pre>${label}<code>${escapeHtml(sansRetrait.replace(/\n$/, ''))}</code></pre>`, indent).replace(/^\n/, '').replace(/\n$/, '');
   });
 
   /*
-   * Onglets MkDocs : « === "Android" » suivis de lignes indentées, à la suite.
-   * Rendus en onglets CSS (boutons radio) : la page n'exécute aucun script.
-   * Avant, ils s'affichaient en texte brut (« === "Android" »).
+   * Liens entre pages : écrits comme dans l'éditeur (« docker.md »,
+   * « ../securite.md#sessions »), ils deviennent des adresses de la
+   * documentation. Avant, ils restaient affichés tels quels, crochets compris.
    */
-  let groupe = 0;
-  text = text.replace(/(?:^===[ \t]+"[^"]*"[ \t]*\n(?:[ \t]+.*\n?|\n)*)+/gm, entier => {
-    const onglets = [...entier.matchAll(/^===[ \t]+"([^"]*)"[ \t]*\n((?:[ \t]+.*\n?|\n)*)/gm)];
-    const nom = `onglets-${groupe++}`;
-    const boutons = onglets.map((o, i) =>
-      `<input type="radio" name="${nom}" id="${nom}-${i}"${i === 0 ? ' checked' : ''}><label for="${nom}-${i}">${escapeHtml(o[1])}</label>`).join('');
-    const panneaux = onglets.map(o => `<div class="tab-panel">${renderInner(retrait(o[2]))}</div>`).join('');
-    return bloc(`<div class="tabs">${boutons}${panneaux}</div>`);
+  const dossier = page.includes('/') ? page.slice(0, page.lastIndexOf('/')) : '';
+  text = text.replace(/\]\(((?:\.\.\/|\.\/)?[a-z0-9/_-]+)\.md(#[\w-]+)?\)/gi, (entier, cible: string, ancre = '') => {
+    const parts = dossier ? dossier.split('/') : [];
+    for (const seg of cible.split('/')) {
+      if (seg === '..') parts.pop();
+      else if (seg && seg !== '.') parts.push(seg);
+    }
+    const chemin = parts.join('/');
+    return `](/docs/${chemin === 'index' ? '' : chemin}${ancre})`;
   });
 
-  /*
-   * Cartes MkDocs : seule la forme exacte « <div class="grid cards" markdown> »
-   * est reconnue. Tout autre HTML écrit dans le Markdown reste échappé.
-   * Avant, ces deux lignes s'affichaient en texte sur l'accueil de la doc.
-   */
-  text = text.replace(/^<div class="grid cards" markdown>[ \t]*\n([\s\S]*?)^<\/div>[ \t]*$/gm, (_, inner: string) =>
-    bloc(`<div class="cards">${markdownToHtml(inner)}</div>`));
+  // Éléments B.MD en ligne
+  const attrs = (raw = '') => Object.fromEntries([...raw.matchAll(/([\w-]+)=(?:"([^"]*)"|([^\s}]+))/g)].map(m => [m[1], m[2] ?? m[3]]));
+  const sureUrl = (url = '') => (/^(https:\/\/|\/(?!\/)|#|mailto:)/.test(url) ? url : '');
+  text = text
+    .replace(/:badge\[([^\]]+)\](?:\{[^}]*\})?/g, (_, v: string) => enLigne(`<span class="badge">${escapeHtml(v)}</span>`))
+    .replace(/:tag\[([^\]]+)\](?:\{[^}]*\})?/g, (_, v: string) => enLigne(`<span class="badge">${escapeHtml(v)}</span>`))
+    .replace(/:kbd\[([^\]]+)\]/g, (_, v: string) => enLigne(v.split('+').map(k => `<kbd>${escapeHtml(k.trim())}</kbd>`).join('<span class="kbd-plus">+</span>')))
+    .replace(/:(?:button|btn)\[([^\]]+)\]\{([^}]*)\}/g, (entier, label: string, raw: string) => {
+      const href = sureUrl(attrs(raw).href);
+      return href ? enLigne(`<a class="doc-btn" href="${escapeHtml(href)}">${escapeHtml(label)}</a>`) : entier;
+    })
+    .replace(/==([^=\n]+)==/g, (_, v: string) => enLigne(`<mark>${escapeHtml(v)}</mark>`));
 
-  // Encadrés : « !!! tip "Titre" » suivi de lignes indentées
-  text = text.replace(/^!!!\s+(\w+)(?:\s+"([^"]*)")?\n((?:[ \t]+.*\n?|\n)*)/gm, (_, kind: string, title: string | undefined, body: string) =>
-    bloc(`<aside class="admo admo-${escapeHtml(kind)}">${title ? `<strong>${escapeHtml(title)}</strong>` : ''}${renderInner(retrait(body))}</aside>`));
-
+  const html0 = fragment(text);
+  let html = html0;
   /*
    * Un bloc peut en contenir d'autres (du code dans un encadré, un encadré
    * dans un onglet) : on remplace jusqu'à ce qu'il n'en reste aucun.
    */
-  let html = markdownToHtml(text);
-  for (let tour = 0; tour < 8 && html.includes('@@BLOC'); tour++) {
+  for (let tour = 0; tour < 12 && html.includes('@@BLOC'); tour++) {
     html = html
       .replace(/<p>@@BLOC(\d+)@@<\/p>/g, (entier, i: string) => blocks[Number(i)] ?? entier)
       .replace(/@@BLOC(\d+)@@/g, (entier, i: string) => blocks[Number(i)] ?? entier);
   }
   return html;
 
-  /** Contenu d'un onglet ou d'un encadré : les encadrés imbriqués sont reconnus aussi */
-  function renderInner(body: string): string {
-    const withAdmo = body.replace(/^!!!\s+(\w+)(?:\s+"([^"]*)")?\n((?:[ \t]+.*\n?|\n)*)/gm, (_, kind: string, title: string | undefined, inner: string) =>
-      bloc(`<aside class="admo admo-${escapeHtml(kind)}">${title ? `<strong>${escapeHtml(title)}</strong>` : ''}${markdownToHtml(retrait(inner))}</aside>`));
-    return markdownToHtml(withAdmo);
+  /** Un morceau de document : blocs MkDocs et B.MD, puis le Markdown de base */
+  function fragment(source: string): string {
+    let t = directives(source);
+
+    /*
+     * Onglets MkDocs : « === "Android" » suivis de lignes indentées, à la suite.
+     * Rendus en onglets CSS (boutons radio) : la page n'exécute aucun script.
+     */
+    t = t.replace(/(?:^===[ \t]+"[^"]*"[ \t]*\n(?:[ \t]+.*\n?|\n)*)+/gm, entier => {
+      const onglets = [...entier.matchAll(/^===[ \t]+"([^"]*)"[ \t]*\n((?:[ \t]+.*\n?|\n)*)/gm)];
+      return bloc(tabs(onglets.map(o => [o[1], fragment(retrait(o[2]))])));
+    });
+
+    /*
+     * Cartes MkDocs : seule la forme exacte « <div class="grid cards" markdown> »
+     * est reconnue. Tout autre HTML écrit dans le Markdown reste échappé.
+     */
+    t = t.replace(/^<div class="grid cards" markdown>[ \t]*\n([\s\S]*?)^<\/div>[ \t]*$/gm, (_, inner: string) =>
+      bloc(`<div class="cards">${markdownToHtml(inner)}</div>`));
+
+    // Encadrés MkDocs : « !!! tip "Titre" » suivi de lignes indentées
+    t = t.replace(/^!!!\s+(\w+)(?:\s+"([^"]*)")?\n((?:[ \t]+.*\n?|\n)*)/gm, (_, kind: string, title: string | undefined, body: string) =>
+      bloc(callout(kind, title, fragment(retrait(body)))));
+
+    return markdownToHtml(t);
+  }
+
+  function callout(kind: string, title: string | undefined, inner: string): string {
+    const k = CALLOUT_KIND[kind.toLowerCase()] ?? 'note';
+    return `<aside class="admo admo-${k}">${title ? `<strong>${escapeHtml(title)}</strong>` : ''}${inner}</aside>`;
+  }
+
+  function tabs(onglets: Array<[string, string]>): string {
+    const nom = `onglets-${groupe++}`;
+    const boutons = onglets.map(([titre], i) =>
+      `<input type="radio" name="${nom}" id="${nom}-${i}"${i === 0 ? ' checked' : ''}><label for="${nom}-${i}">${escapeHtml(titre)}</label>`).join('');
+    return `<div class="tabs">${boutons}${onglets.map(([, corps]) => `<div class="tab-panel">${corps}</div>`).join('')}</div>`;
+  }
+
+  /*
+   * Blocs B.MD : « :::nom[Titre]{attributs} » … « ::: ». Ils s'imbriquent
+   * (une étape dans des étapes, un onglet dans des onglets) : on repère la
+   * fermeture qui correspond en comptant les ouvertures.
+   */
+  function directives(source: string): string {
+    const lines = source.split('\n');
+    const out: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const open = /^[ \t]*:::([a-z][\w-]*)(?:\[([^\]]*)\])?(?:\{([^}]*)\})?[ \t]*$/i.exec(lines[i]);
+      if (!open) { out.push(lines[i]); continue; }
+      let depth = 1, j = i + 1;
+      for (; j < lines.length; j++) {
+        if (/^[ \t]*:::[a-z]/i.test(lines[j])) depth++;
+        else if (/^[ \t]*:::[ \t]*$/.test(lines[j]) && --depth === 0) break;
+      }
+      const body = lines.slice(i + 1, j).join('\n');
+      out.push(bloc(directive(open[1].toLowerCase(), open[2], attrs(open[3]), body)));
+      i = j;
+    }
+    return out.join('\n');
+  }
+
+  /** Les enfants directs d'un bloc conteneur (étapes, onglets, questions, cartes) */
+  function enfants(body: string, noms: string[]): Array<{ title?: string; attrs: Record<string, string>; body: string }> {
+    const lines = body.split('\n');
+    const list: Array<{ title?: string; attrs: Record<string, string>; body: string }> = [];
+    for (let i = 0; i < lines.length; i++) {
+      const open = /^[ \t]*:::([a-z][\w-]*)(?:\[([^\]]*)\])?(?:\{([^}]*)\})?[ \t]*$/i.exec(lines[i]);
+      if (!open || !noms.includes(open[1].toLowerCase())) continue;
+      let depth = 1, j = i + 1;
+      for (; j < lines.length; j++) {
+        if (/^[ \t]*:::[a-z]/i.test(lines[j])) depth++;
+        else if (/^[ \t]*:::[ \t]*$/.test(lines[j]) && --depth === 0) break;
+      }
+      list.push({ title: open[2], attrs: attrs(open[3]), body: lines.slice(i + 1, j).join('\n') });
+      i = j;
+    }
+    return list;
+  }
+
+  function directive(name: string, title: string | undefined, a: Record<string, string>, body: string): string {
+    if (CALLOUT_KIND[name] || name === 'callout' || name === 'custom') return callout(name, title ?? a.title, fragment(body));
+    switch (name) {
+      case 'details': case 'collapse': case 'spoiler':
+        return `<details class="doc-details"${'open' in a ? ' open' : ''}><summary>${escapeHtml(title || 'Détails')}</summary><div>${fragment(body)}</div></details>`;
+      case 'faq':
+        return `<div class="doc-faq">${title ? `<p class="doc-faq-title">${escapeHtml(title)}</p>` : ''}${enfants(body, ['q', 'question']).map(q =>
+          `<details${'open' in q.attrs ? ' open' : ''}><summary>${escapeHtml(q.title ?? '')}</summary><div>${fragment(q.body)}</div></details>`).join('')}</div>`;
+      case 'steps':
+        return `${title ? `<p class="doc-steps-title">${escapeHtml(title)}</p>` : ''}<ol class="doc-steps">${enfants(body, ['step']).map(s =>
+          `<li${'done' in s.attrs ? ' class="done"' : ''}>${s.title ? `<strong>${escapeHtml(s.title)}</strong>` : ''}${fragment(s.body)}</li>`).join('')}</ol>`;
+      case 'cards': case 'grid':
+        return `<div class="doc-cards"${a.cols ? ` style="--cols:${Math.min(4, Math.max(1, Number(a.cols) || 3))}"` : ''}>${enfants(body, ['card', 'ref']).map(c => card(c.title, c.attrs, c.body)).join('') || fragment(body)}</div>`;
+      case 'card': case 'ref':
+        return `<div class="doc-cards">${card(title, a, body)}</div>`;
+      case 'tabs':
+        return tabs(enfants(body, ['tab']).map(o => [o.attrs.title ?? o.title ?? '', fragment(o.body)]));
+      case 'columns': case 'row':
+        return `<div class="doc-columns">${enfants(body, ['column', 'col']).map(c => `<div>${fragment(c.body)}</div>`).join('')}</div>`;
+      case 'center': case 'left': case 'right':
+        return `<div style="text-align:${name}">${fragment(body)}</div>`;
+      default:
+        // Bloc inconnu : son contenu reste lisible, sans la syntaxe
+        return fragment(body);
+    }
+  }
+
+  function card(title: string | undefined, a: Record<string, string>, body: string): string {
+    const href = sureUrl(a.href?.replace(/^([a-z0-9/_-]+)\.md$/i, '/docs/$1'));
+    const inner = `${title ? `<strong>${escapeHtml(title)}</strong>` : ''}${fragment(body)}`;
+    return href ? `<a class="doc-card" href="${escapeHtml(href)}">${inner}<span class="doc-card-go" aria-hidden="true">→</span></a>` : `<div class="doc-card">${inner}</div>`;
   }
 }
+
+/** Noms d'encadrés B.MD et MkDocs → famille de couleur */
+const CALLOUT_KIND: Record<string, string> = {
+  note: 'note', info: 'note', abstract: 'note', callout: 'note', custom: 'note', question: 'note',
+  tip: 'tip', hint: 'tip', success: 'tip', check: 'tip', example: 'tip',
+  warning: 'warning', caution: 'warning', important: 'warning', attention: 'warning',
+  danger: 'danger', error: 'danger', failure: 'danger', bug: 'danger'
+};
 
 export interface DocsContext {
   root: string;
@@ -191,10 +322,12 @@ export function renderDocPage(path: string, ctx: DocsContext): string | null {
   const sections = [...new Set(pages.map(p => p.section))].map(section => {
     const links = pages.filter(p => p.section === section).map(p =>
       `<a href="/docs/${p.path}"${p.path === wanted ? ' aria-current="page"' : ''}>${escapeHtml(p.title)}</a>`).join('');
-    return `<div class="doc-group"><span>${sectionIcon(section)}${escapeHtml(sectionLabel(section))}</span>${links}</div>`;
+    // Chaque catégorie se replie ; celle de la page affichée est ouverte
+    const ouverte = pages.some(p => p.section === section && p.path === wanted) || section === '';
+    return `<details class="doc-group"${ouverte ? ' open' : ''}><summary>${sectionIcon(section)}<span>${escapeHtml(sectionLabel(section))}</span><svg class="chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></summary><div class="doc-links">${links}</div></details>`;
   }).join('');
 
-  const content = renderMarkdown(markdown);
+  const content = renderMarkdown(markdown, wanted);
   // « Sur cette page » : les titres de niveau 2 de la page
   const headings = [...content.matchAll(/<h2 id="([^"]+)">([\s\S]*?)<\/h2>/g)].map(m => [m[1], m[2].replace(/<[^>]+>/g, '')]);
   const onPage = headings.length > 1
@@ -234,14 +367,22 @@ ${CHROME_CSS}
 .docs-hero-in b{color:var(--text)}
 .shell{max-width:1320px;margin:0 auto;padding:0 20px;display:grid;gap:40px}
 .sidebar{padding:24px 0}
-.sidebar nav{display:flex;flex-direction:column;gap:22px;font-size:14px}
+.sidebar nav{display:flex;flex-direction:column;gap:6px;font-size:14px}
 .sidenav{display:none!important}
-.doc-group{display:flex;flex-direction:column;gap:1px}
-.doc-group>span{display:flex;align-items:center;gap:8px;color:var(--text);font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:0 10px 6px}
-.doc-group>span svg{color:var(--accent)}
-.doc-group a{display:flex;align-items:center;min-height:36px;padding:5px 10px 5px 12px;margin-left:7px;border-left:1px solid var(--border);color:var(--muted);text-decoration:none;transition:color .15s,border-color .15s,background-color .15s}
-.doc-group a:hover{color:var(--text);border-left-color:var(--muted)}
-.doc-group a[aria-current]{color:var(--accent);border-left:2px solid var(--accent);padding-left:11px;font-weight:600;background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 12%,transparent),transparent)}
+.doc-group{border-radius:8px}
+.doc-group>summary{list-style:none;display:flex;align-items:center;gap:8px;min-height:36px;padding:0 8px;border-radius:8px;cursor:pointer;color:var(--text);font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;user-select:none}
+.doc-group>summary::-webkit-details-marker{display:none}
+.doc-group>summary:hover{background:color-mix(in srgb,var(--muted) 10%,transparent)}
+.doc-group>summary>svg:first-child{color:var(--accent);flex:0 0 auto}
+.doc-group>summary span{flex:1}
+.doc-group .chev{color:var(--muted);transition:transform .2s}
+.doc-group[open] .chev{transform:rotate(90deg)}
+.doc-links{display:flex;flex-direction:column;gap:1px;margin:2px 0 6px}
+.doc-group[open] .doc-links{animation:fold .22s ease-out}
+@keyframes fold{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.doc-links a{display:flex;align-items:center;min-height:34px;padding:5px 10px 5px 12px;margin-left:15px;border-left:1px solid var(--border);color:var(--muted);text-decoration:none;transition:color .15s,border-color .15s,background-color .15s}
+.doc-links a:hover{color:var(--text);border-left-color:var(--muted)}
+.doc-links a[aria-current]{color:var(--accent);border-left:2px solid var(--accent);padding-left:11px;font-weight:600;background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 12%,transparent),transparent)}
 .toc{border:1px solid var(--border);border-radius:12px;background:var(--card);padding:4px 12px;margin-top:16px}
 .toc summary{padding:10px 2px;font-weight:600;cursor:pointer;min-height:44px;display:flex;align-items:center}
 .toc[open] summary{margin-bottom:10px;border-bottom:1px solid var(--border)}
@@ -255,16 +396,16 @@ ${CHROME_CSS}
 .doc h2 a,.doc h3 a{color:inherit}
 a{color:var(--accent);text-underline-offset:3px}
 code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:.86em;padding:2px 6px;border-radius:6px;background:color-mix(in srgb,var(--accent) 10%,var(--card));border:1px solid color-mix(in srgb,var(--accent) 18%,var(--border))}
-pre{position:relative;background:var(--code);border:1px solid var(--border);border-radius:12px;padding:16px 18px;overflow-x:auto;margin:18px 0}
-pre::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:12px 0 0 12px;background:var(--accent);opacity:.8}
+pre{position:relative;background:var(--code);border:1px solid var(--border);border-radius:9px;padding:16px 18px;overflow-x:auto;margin:18px 0}
+pre::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:9px 0 0 9px;background:var(--accent);opacity:.8}
 pre code{border:0;padding:0;background:none;font-size:13.5px;line-height:1.6}
-.table{overflow-x:auto;margin:18px 0;border:1px solid var(--border);border-radius:12px}
+.table{overflow-x:auto;margin:18px 0;border:1px solid var(--border);border-radius:9px}
 table{border-collapse:collapse;width:100%;font-size:14.5px}
 th,td{border-bottom:1px solid var(--border);padding:10px 14px;text-align:left;vertical-align:top}
 tr:last-child td{border-bottom:0}
 th{background:var(--card);font-size:13px;font-weight:700;letter-spacing:.02em}
 tbody tr:hover td{background:color-mix(in srgb,var(--card) 60%,transparent)}
-.admo{margin:20px 0;padding:14px 16px 14px 46px;position:relative;border:1px solid color-mix(in srgb,var(--accent) 30%,var(--border));border-radius:12px;background:color-mix(in srgb,var(--accent) 7%,var(--bg))}
+.admo{margin:20px 0;padding:14px 16px 14px 46px;position:relative;border:1px solid color-mix(in srgb,var(--accent) 30%,var(--border));border-radius:9px;background:color-mix(in srgb,var(--accent) 7%,var(--bg))}
 .admo::before{content:"i";position:absolute;left:14px;top:14px;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font:700 12px/1 Georgia,serif;color:#fff;background:var(--accent)}
 .admo strong{display:block;margin-bottom:4px}.admo p{margin:.3em 0}.admo p:last-child{margin-bottom:0}
 .admo-warning,.admo-danger,.admo-caution{border-color:color-mix(in srgb,#d29922 45%,var(--border));background:color-mix(in srgb,#d29922 8%,var(--bg))}
@@ -283,12 +424,47 @@ hr{border:none;border-top:1px solid var(--border);margin:36px 0}
 .cards>ul>li{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px 18px;margin:0;transition:border-color .15s,transform .15s}
 .cards>ul>li:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border));transform:translateY(-2px)}
 .pager{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:56px}
-.pager a{display:flex;flex-direction:column;gap:2px;padding:14px 18px;border:1px solid var(--border);border-radius:14px;text-decoration:none;transition:border-color .15s}
+.pager a{display:flex;flex-direction:column;gap:2px;padding:14px 18px;border:1px solid var(--border);border-radius:9px;text-decoration:none;transition:border-color .15s}
 .pager a:hover{border-color:var(--accent)}
 .pager small{color:var(--muted);font-size:12.5px}.pager b{color:var(--text)}
 .pager .next{text-align:right}
 .edit{display:inline-block;margin-top:18px;font:12px ui-monospace,Menlo,Consolas,monospace;color:var(--muted);text-decoration:none}
 .onpage{display:none}
+.badge{display:inline-flex;align-items:center;padding:1px 8px;border-radius:6px;font-size:12px;font-weight:700;color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);vertical-align:1px}
+kbd{display:inline-block;min-width:22px;padding:1px 6px;border:1px solid var(--border);border-bottom-width:2px;border-radius:6px;background:var(--card);font:600 12px/1.6 ui-monospace,Menlo,Consolas,monospace;text-align:center}
+.kbd-plus{margin:0 3px;color:var(--muted)}
+mark{background:linear-gradient(104deg,transparent .5%,color-mix(in srgb,#ffc62e 55%,transparent) 2.5%,color-mix(in srgb,#ffc62e 45%,transparent) 96%,transparent 98%);color:inherit;padding:0 .15em;border-radius:3px}
+.doc-btn{display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:0 16px;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;text-decoration:none}
+.doc-btn:hover{filter:brightness(1.08)}
+.code-lang{position:absolute;top:8px;right:12px;font:600 11px ui-monospace,Menlo,monospace;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.admo-note{}
+.admo-danger{border-color:color-mix(in srgb,#f85149 45%,var(--border));background:color-mix(in srgb,#f85149 7%,var(--bg))}
+.admo-danger::before{content:"×";background:#f85149}
+.doc-details,.doc-faq details{margin:12px 0;border:1px solid var(--border);border-radius:10px;background:var(--card);overflow:hidden}
+.doc-details>summary,.doc-faq summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px;padding:0 16px;cursor:pointer;font-weight:600}
+.doc-details>summary::-webkit-details-marker,.doc-faq summary::-webkit-details-marker{display:none}
+.doc-details>summary::after,.doc-faq summary::after{content:"";width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg) translateY(-2px);transition:transform .2s;flex:0 0 auto}
+.doc-details[open]>summary::after,.doc-faq details[open] summary::after{transform:rotate(-135deg)}
+.doc-details>div,.doc-faq details>div{padding:0 16px 12px;border-top:1px solid var(--border)}
+.doc-faq{margin:16px 0}.doc-faq details{margin:0 0 -1px;border-radius:0}.doc-faq details:first-of-type{border-radius:10px 10px 0 0}.doc-faq details:last-of-type{border-radius:0 0 10px 10px}
+.doc-faq-title,.doc-steps-title{font-weight:700;margin:18px 0 8px}
+.doc-steps{list-style:none;counter-reset:step;padding:0;margin:18px 0}
+.doc-steps>li{position:relative;counter-increment:step;padding:0 0 18px 44px;margin:0}
+.doc-steps>li::before{content:counter(step);position:absolute;left:0;top:0;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent);font-weight:800;font-size:13px}
+.doc-steps>li::after{content:"";position:absolute;left:13.5px;top:32px;bottom:4px;width:1px;background:var(--border)}
+.doc-steps>li:last-child::after{display:none}
+.doc-steps>li.done::before{content:"✓";background:#3fb950;color:#fff}
+.doc-steps>li>strong{display:block;line-height:28px}
+.doc-steps>li>p:first-of-type{margin-top:2px}
+.doc-cards{display:grid;grid-template-columns:repeat(var(--cols,2),minmax(0,1fr));gap:12px;margin:18px 0}
+.doc-card{position:relative;display:flex;flex-direction:column;gap:4px;padding:16px 40px 16px 18px;border:1px solid var(--border);border-radius:10px;background:var(--card);color:var(--text);text-decoration:none;transition:border-color .15s,transform .15s,box-shadow .15s}
+.doc-card strong{font-size:15.5px}
+.doc-card p{margin:0;color:var(--muted);font-size:14.5px}
+a.doc-card:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 14px 30px -22px var(--accent)}
+.doc-card-go{position:absolute;right:16px;top:16px;color:var(--accent);font-weight:700;transition:transform .15s}
+a.doc-card:hover .doc-card-go{transform:translateX(3px)}
+.doc-columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px;margin:14px 0}
+@media (max-width:640px){.doc-cards{grid-template-columns:1fr}}
 @media (min-width:1000px){
   .shell{grid-template-columns:260px minmax(0,1fr)}
   .sidebar{position:sticky;top:64px;align-self:start;max-height:calc(100vh - 64px);overflow-y:auto;padding-right:8px;border-right:1px solid var(--border)}

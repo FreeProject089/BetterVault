@@ -2,31 +2,43 @@
 
 BetterVault réunit un gestionnaire de mots de passe, un authentificateur 2FA et un gestionnaire de tâches dans une seule application, chiffrée de bout en bout.
 
-La même interface fonctionne dans le navigateur, en application de bureau (Windows, macOS, Linux), sur mobile (Android, iOS) et en extension de navigateur.
-
-## Ce que fait BetterVault
-
-- **Identifiants** : mots de passe avec historique, champs personnalisés, passkeys, dates d'expiration
-- **Autres types d'éléments** : notes sécurisées, cartes bancaires, identités, clés SSH, fichiers et dossiers de fichiers
-- **2FA** : codes TOTP, ajout par QR code
-- **Générateur** : mots de passe et phrases secrètes Diceware
-- **Audit** : mots de passe faibles, réutilisés, sans 2FA ou présents dans des fuites connues
-- **Tâches** : liste, Kanban, matrice d'Eisenhower, calendrier, dépendances, récurrences, rappels
-- **Organisation** : plusieurs coffres, tags colorés, types d’éléments personnalisés
-- **Import / export** : KeePass, 1Password, Bitwarden, FIDO CXF, CSV, JSON chiffré
-- **Synchronisation** : serveur auto-hébergé qui ne voit jamais les données en clair
+La même interface fonctionne aujourd'hui dans le **navigateur**, en application de **bureau Windows et Linux**, et sur **Android**. macOS et iOS ne sont pas encore publiés.
 
 ## Par où commencer
 
-<div class="grid cards" markdown>
+:::cards{cols=2}
+:::card[Utiliser BetterVault]{href=guide/premiers-pas.md}
+Créer un compte, ajouter ses premiers identifiants et codes 2FA.
+:::
+:::card[Héberger son serveur]{href=deploiement/installation.md}
+Installer un serveur avec Docker en quelques minutes et y synchroniser ses appareils.
+:::
+:::card[Comprendre la sécurité]{href=securite.md}
+Ce qui est chiffré, avec quoi, et ce que le serveur voit réellement.
+:::
+:::card[Contribuer]{href=developpement/contribuer.md}
+Lancer le projet en local, construire les paquets, proposer une modification.
+:::
+:::
 
-- **Utiliser BetterVault** — créer un compte, ajouter ses identifiants : [Premiers pas](guide/premiers-pas.md)
-- **Héberger son serveur** — synchroniser plusieurs appareils : [Docker](deploiement/docker.md)
-- **Comprendre la sécurité** — ce qui est chiffré et comment : [Sécurité](securite.md)
-- **Contribuer** — lancer le projet en local : [Contribuer](developpement/contribuer.md)
-- **Construire les paquets** — bureau, mobile, extension, Docker : [Construire l'application](developpement/build.md)
+## Ce que fait BetterVault
 
-</div>
+| | |
+| --- | --- |
+| **Identifiants** | Mots de passe avec historique, champs personnalisés, passkeys, dates d'expiration |
+| **Autres éléments** | Notes sécurisées, cartes bancaires, identités, clés SSH, fichiers et dossiers |
+| **2FA** | Codes TOTP, ajout par QR code |
+| **Générateur** | Mots de passe et phrases secrètes Diceware |
+| **Audit** | Mots de passe faibles, réutilisés, sans 2FA ou présents dans des fuites connues |
+| **Tâches** | Liste, Kanban, matrice d'Eisenhower, calendrier, dépendances, récurrences, rappels |
+| **Organisation** | Plusieurs coffres, tags colorés, types d'éléments personnalisés |
+| **Import / export** | KeePass, 1Password, Bitwarden, FIDO CXF, CSV, JSON chiffré |
+| **Synchronisation** | Serveur auto-hébergé qui ne voit jamais les données en clair |
 
-!!! warning "Mot de passe principal"
-    Le mot de passe principal chiffre le coffre. Personne, pas même l'administrateur du serveur, ne peut le récupérer ni déchiffrer vos données sans lui.
+:::warning[Mot de passe principal]
+Le mot de passe principal chiffre le coffre. Personne, pas même l'administrateur du serveur, ne peut le récupérer ni déchiffrer vos données sans lui. Gardez la clé de secours affichée à la création du compte.
+:::
+
+## Écrire dans cette documentation
+
+Les pages sont en Markdown, avec les blocs **B.MD** (encadrés, étapes, cartes, onglets, questions…). La syntaxe complète est décrite dans le [guide B.MD](https://bettercommunity.ch/blog/markdown-guide) et sur la [page du projet](https://bettercommunity.ch/dev/bmd).

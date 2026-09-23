@@ -1,5 +1,9 @@
 # Biométrie et remplissage automatique
 
+:::note[Disponibilité aujourd'hui]
+Versions publiées : **web**, **Windows**, **Linux** et **Android**. Le code macOS, iOS et de l'extension de navigateur est dans le dépôt, mais ces versions ne sont pas encore publiées ni testées sur l'appareil.
+:::
+
 ## Déverrouillage biométrique
 
 **Compte et synchronisation > Cet appareil > Déverrouillage biométrique**, puis confirmez avec le mot de passe principal.

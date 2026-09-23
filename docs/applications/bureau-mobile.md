@@ -2,6 +2,10 @@
 
 Les applications utilisent [Tauri 2](https://v2.tauri.app) : la même interface que le site, avec un cœur Rust.
 
+:::note[Disponibilité aujourd'hui]
+Versions publiées : **web**, **Windows**, **Linux** et **Android**. Le code macOS, iOS et de l'extension de navigateur est dans le dépôt, mais ces versions ne sont pas encore publiées ni testées sur l'appareil.
+:::
+
 ## Ce qui existe par plateforme
 
 | Plateforme | Installation | Déverrouillage rapide | Remplissage des formulaires |
