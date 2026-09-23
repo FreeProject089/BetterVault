@@ -198,9 +198,11 @@ export function renderLegalPage(root: string, slug: string, context: LegalContex
   const body = markdownToHtml(fillTemplate(readFileSync(templatePath, 'utf8'), values, flags, locale))
     .replace(/href="\/legal\/(\w+)"/g, `href="/legal/$1?lang=${locale}"`);
   const nav = LEGAL_DOCUMENTS.map(d => `<a href="/legal/${d.slug}${query}"${d.slug === slug ? ' aria-current="page"' : ''}>${escapeHtml(legalTitle(d, locale))}</a>`).join('');
-  const switcher = locale === 'en'
-    ? `<a class="lang" href="/legal/${slug}?lang=fr" hreflang="fr" lang="fr">Français</a>`
-    : `<a class="lang" href="/legal/${slug}?lang=en" hreflang="en" lang="en">English</a>`;
+  // Choix de langue : les deux langues côte à côte, celle affichée marquée
+  const switcher = `<nav class="langs" aria-label="${locale === 'en' ? 'Language' : 'Langue'}">${(['fr', 'en'] as const)
+    .filter(l => existsSync(join(root, `${slug}.${l}.md`)))
+    .map(l => `<a href="/legal/${slug}?lang=${l}" hreflang="${l}" lang="${l}"${l === locale ? ' aria-current="true"' : ''}><span aria-hidden="true">${l.toUpperCase()}</span> ${l === 'fr' ? 'Français' : 'English'}</a>`)
+    .join('')}</nav>`;
   const notice = locale === 'en'
     ? '<p class="meta"><strong>Template not completed:</strong> the operator of this server must fill in their details on the administration page.</p>'
     : '<p class="meta"><strong>Modèle non complété :</strong> l’hébergeur de ce serveur doit renseigner ses informations dans la page d’administration.</p>';
@@ -222,12 +224,17 @@ main{max-width:860px;margin:0 auto;padding:24px 16px 64px}h1{font-size:28px;line
 a{color:var(--accent)}code{font-size:13px;padding:1px 5px;border:1px solid var(--border);border-radius:5px}
 .table{overflow-x:auto}table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px}th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}th{background:var(--card)}
 hr{border:none;border-top:1px solid var(--border);margin:32px 0}.meta{color:var(--muted);font-size:13px}
-.lang{font-size:13px;padding:3px 10px;border:1px solid var(--border);border-radius:999px;text-decoration:none}
+.langs{display:inline-flex;gap:2px;padding:3px;border:1px solid var(--border);border-radius:999px;background:var(--bg)}
+.langs a{display:inline-flex;align-items:center;gap:6px;font-size:13px;padding:4px 11px;border-radius:999px;color:var(--muted);text-decoration:none}
+.langs a span{font-size:10.5px;font-weight:700;letter-spacing:.04em;opacity:.8}
+.langs a:hover{color:var(--text)}
+.langs a[aria-current]{background:var(--accent);color:#fff;font-weight:600}
+.home{color:var(--text);text-decoration:none}.docnav{flex-basis:100%}
 @media (max-width:560px){header div{padding:12px}h1{font-size:23px}main{padding:18px 12px 48px}}
 </style>
 </head>
 <body>
-<header><div><strong>${escapeHtml(legal.operatorName || 'BetterVault')}</strong>${switcher}<nav>${nav}</nav></div></header>
+<header><div><strong><a class="home" href="/">${escapeHtml(legal.operatorName || 'BetterVault')}</a></strong>${switcher}<nav class="docnav">${nav}</nav></div></header>
 <main>
 ${legalConfigured(legal) ? '' : notice}
 ${body}
