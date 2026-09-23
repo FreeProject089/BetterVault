@@ -154,6 +154,7 @@ describe('Rendu de chaque page de la documentation', () => {
   it('rend les onglets sans script, le premier ouvert', () => {
     const html = renderDocPage('applications/bureau-mobile', { root, locale: 'fr', appAvailable: true })!;
     expect(html).toMatch(/<div class="tabs"><input type="radio" name="onglets-0" id="onglets-0-0" checked><label for="onglets-0-0">Android<\/label>/);
-    expect(html).not.toMatch(/<script/i);
+    // Seul le script du site, servi par le serveur : les onglets, eux, n’en ont pas besoin
+    expect(html.match(/<script[^>]*>/gi)).toEqual(['<script src="/site.js" defer>']);
   });
 });
