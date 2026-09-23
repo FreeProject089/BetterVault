@@ -19,6 +19,9 @@ export function openShortcutsModal(app: AppController): void {
     help: tr('Afficher les raccourcis', 'Show shortcuts')
   };
   let recording: ShortcutAction | null = null;
+  // Les changements restent un brouillon jusqu'à « Enregistrer »
+  let draft = { ...app.shortcuts };
+  const dirty = () => SHORTCUT_ORDER.some(a => draft[a] !== app.shortcuts[a]);
 
   const box = app.openModal(`
     <div class="modal-header">
@@ -34,22 +37,35 @@ export function openShortcutsModal(app: AppController): void {
       </div>
       <div class="form-error" data-shortcut-error role="alert" hidden></div>
     </div>
-    <div class="modal-footer">
-      <button class="btn-primary btn-ghost" data-shortcut-reset-all>${tr('Tout rétablir', 'Reset all')}</button>
-      <button class="btn-primary" data-close>${tr('Fermer', 'Close')}</button>
+    <div class="modal-footer shortcut-footer">
+      <button type="button" class="btn-primary btn-ghost shortcut-btn" data-shortcut-reset-all>${tr('Valeurs par défaut', 'Reset to defaults')}</button>
+      <span class="shortcut-status" data-shortcut-status role="status" aria-live="polite"></span>
+      <button type="button" class="btn-primary btn-ghost shortcut-btn" data-close>${tr('Fermer', 'Close')}</button>
+      <button type="button" class="btn-primary shortcut-btn" data-shortcut-save disabled>${tr('Enregistrer', 'Save')}</button>
     </div>
   `);
 
   const list = box.querySelector('[data-shortcut-list]') as HTMLElement;
   const errorEl = box.querySelector('[data-shortcut-error]') as HTMLElement;
+  const statusEl = box.querySelector('[data-shortcut-status]') as HTMLElement;
+  const saveBtn = box.querySelector('[data-shortcut-save]') as HTMLButtonElement;
   const showError = (text: string) => {
     errorEl.textContent = text;
     errorEl.hidden = !text;
   };
+  const setStatus = (text: string, tone: '' | 'pending' | 'success' = '') => {
+    statusEl.textContent = text;
+    statusEl.dataset.tone = tone;
+  };
+  const refreshFooter = () => {
+    saveBtn.disabled = !dirty();
+    if (dirty()) setStatus(tr('Modifications non enregistrées', 'Unsaved changes'), 'pending');
+    else if (statusEl.dataset.tone === 'pending') setStatus('');
+  };
 
   const render = () => {
     list.innerHTML = SHORTCUT_ORDER.map(action => {
-      const binding = app.shortcuts[action];
+      const binding = draft[action];
       const custom = binding !== DEFAULT_SHORTCUTS[action];
       return `
         <div class="shortcut-row ${custom ? 'custom' : ''}">
@@ -60,6 +76,7 @@ export function openShortcutsModal(app: AppController): void {
           </span>
         </div>`;
     }).join('');
+    refreshFooter();
   };
 
   const onKey = (e: KeyboardEvent) => {
@@ -68,16 +85,15 @@ export function openShortcutsModal(app: AppController): void {
     e.stopPropagation();
     if (e.key === 'Escape') return stopRecording();
     if (e.key === 'Backspace' || e.key === 'Delete') {
-      app.shortcuts = { ...app.shortcuts, [recording]: '' };
-      saveShortcuts(app.shortcuts);
+      draft = { ...draft, [recording]: '' };
       return stopRecording();
     }
     const combo = bindingFromEvent(e);
     if (!combo) return;
-    const problem = checkBinding(app.shortcuts, recording, combo);
+    const problem = checkBinding(draft, recording, combo);
     if (problem?.kind === 'reserved') return showError(tr(`${formatBinding(combo)} est réservé par le navigateur ou le système`, `${formatBinding(combo)} is reserved by the browser or system`));
     if (problem?.kind === 'needsModifier') return showError(tr('Ajoutez Ctrl, Cmd ou Alt : une lettre seule gênerait la saisie', 'Add Ctrl, Cmd or Alt: a single letter would get in the way of typing'));
-    const next = { ...app.shortcuts, [recording]: combo };
+    const next = { ...draft, [recording]: combo };
     // Combinaison déjà prise : elle est retirée de l'autre action, qui est signalée
     if (problem?.kind === 'conflict') {
       next[problem.action] = '';
@@ -85,8 +101,7 @@ export function openShortcutsModal(app: AppController): void {
     } else {
       showError('');
     }
-    app.shortcuts = next;
-    saveShortcuts(next);
+    draft = next;
     stopRecording();
   };
 
@@ -102,11 +117,10 @@ export function openShortcutsModal(app: AppController): void {
     const target = e.target as HTMLElement;
     const reset = target.closest<HTMLElement>('[data-shortcut-reset]')?.dataset.shortcutReset as ShortcutAction | undefined;
     if (reset) {
-      const problem = checkBinding(app.shortcuts, reset, DEFAULT_SHORTCUTS[reset]);
-      const next = { ...app.shortcuts, [reset]: DEFAULT_SHORTCUTS[reset] };
+      const problem = checkBinding(draft, reset, DEFAULT_SHORTCUTS[reset]);
+      const next = { ...draft, [reset]: DEFAULT_SHORTCUTS[reset] };
       if (problem?.kind === 'conflict') next[problem.action] = '';
-      app.shortcuts = next;
-      saveShortcuts(next);
+      draft = next;
       showError('');
       render();
       return;
@@ -122,10 +136,25 @@ export function openShortcutsModal(app: AppController): void {
   });
 
   box.querySelector('[data-shortcut-reset-all]')?.addEventListener('click', () => {
-    app.shortcuts = { ...DEFAULT_SHORTCUTS };
-    saveShortcuts(app.shortcuts);
+    if (recording) stopRecording();
+    draft = { ...DEFAULT_SHORTCUTS };
     showError('');
     render();
+    if (!dirty()) setStatus(tr('Déjà aux valeurs par défaut', 'Already at defaults'), 'success');
+  });
+
+  saveBtn.addEventListener('click', () => {
+    if (recording) stopRecording();
+    try {
+      saveShortcuts(draft);
+    } catch {
+      showError(tr('Enregistrement impossible sur cet appareil', 'Could not save on this device'));
+      return;
+    }
+    app.shortcuts = { ...draft };
+    render();
+    setStatus(tr('Raccourcis enregistrés', 'Shortcuts saved'), 'success');
+    app.showToast(tr('Raccourcis enregistrés', 'Shortcuts saved'), 'success');
   });
 
   // Fermeture pendant l'enregistrement : le clavier est relâché

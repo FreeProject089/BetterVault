@@ -7,6 +7,7 @@ import { queryCredentials } from '../store/credentialFilters';
 import { i18n } from '../i18n';
 import { memberAvatarHtml } from '../ui/memberChip';
 import { accountService } from '../app/services';
+import { toggleTaskCompletion } from '../ui/detailView';
 
 /** Adresse de la personne connectée, pour marquer ses propres tâches */
 const myEmail = () => accountService.getAccount()?.email ?? '';
@@ -137,7 +138,10 @@ export function renderList(app: AppController): void {
           card.className = `kanban-card ${app.selectedItemId === task.id ? 'selected' : ''}`;
           const prioLabel = (i18n.t.common as any)[task.priority] || task.priority;
           card.innerHTML = `
-            <div class="kanban-card-title" title="${app.escapeHtml(task.title)}">${app.escapeHtml(task.title)}</div>
+            <div class="kanban-card-head">
+              ${taskCheckHtml(app, task)}
+              <div class="kanban-card-title" title="${app.escapeHtml(task.title)}">${app.escapeHtml(task.title)}</div>
+            </div>
             <div class="kanban-card-meta">
               <span class="badge priority-${task.priority}">${prioLabel.toUpperCase()}</span>
               <span>${i18n.formatRelativeDate(task.dueDate || '')}</span>
@@ -150,6 +154,7 @@ export function renderList(app: AppController): void {
             app.renderDetail(task.id);
             document.getElementById('detail-container')?.classList.add('mobile-active');
           });
+          bindTaskCheck(app, card, task);
           cardsBox.appendChild(card);
         });
 
@@ -195,7 +200,10 @@ export function renderList(app: AppController): void {
           const card = document.createElement('div');
           card.className = `kanban-card ${app.selectedItemId === task.id ? 'selected' : ''}`;
           card.innerHTML = `
-            <div class="kanban-card-title" title="${app.escapeHtml(task.title)}">${app.escapeHtml(task.title)}</div>
+            <div class="kanban-card-head">
+              ${taskCheckHtml(app, task)}
+              <div class="kanban-card-title" title="${app.escapeHtml(task.title)}">${app.escapeHtml(task.title)}</div>
+            </div>
             <div class="kanban-card-meta">
               <span class="badge priority-${task.priority}">${task.priority.toUpperCase()}</span>
               ${task.status === 'blocked' ? `<span class="badge" style="color:var(--accent-red);">${app.tr('BLOQUÉE', 'BLOCKED')}</span>` : ''}
@@ -208,6 +216,7 @@ export function renderList(app: AppController): void {
             app.renderDetail(task.id);
             document.getElementById('detail-container')?.classList.add('mobile-active');
           });
+          bindTaskCheck(app, card, task);
           body.appendChild(card);
         });
         grid.appendChild(cell);
@@ -319,17 +328,10 @@ export function renderList(app: AppController): void {
       row.className = `record-row ${app.selectedItemId === task.id ? 'selected' : ''}`;
       const isDone = task.status === 'completed';
       const isInProgress = task.status === 'in_progress';
-      const dotColor = isDone ? 'var(--accent-green)' : isInProgress ? 'var(--accent-blue)' : 'var(--text-muted)';
-      const iconBg = isDone ? '35,134,54' : isInProgress ? 'var(--accent-rgb)' : '110,118,129';
 
       const statusSub = isInProgress ? i18n.t.tasks.statusInProgress : i18n.t.common.noDueDate;
       row.innerHTML = `
-        <div class="record-icon" style="color:${dotColor};background-color:rgba(${iconBg},0.1);">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <polyline points="9 11 12 14 22 4"></polyline>
-            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
-          </svg>
-        </div>
+        ${taskCheckHtml(app, task, true)}
         <div class="record-info">
           <div class="record-title" title="${app.escapeHtml(task.title)}" style="${isDone ? 'text-decoration:line-through;opacity:0.5;' : ''}">${app.escapeHtml(task.title)}</div>
           <div class="record-sub">${task.dueDate ? i18n.formatRelativeDate(task.dueDate) : statusSub}</div>
@@ -349,6 +351,7 @@ export function renderList(app: AppController): void {
         app.renderDetail(task.id);
         document.getElementById('detail-container')?.classList.add('mobile-active');
       });
+      bindTaskCheck(app, row, task);
       container.appendChild(row);
     });
     return;
@@ -433,5 +436,41 @@ export function renderList(app: AppController): void {
       if (e.key === 'Enter') open();
     });
     container.appendChild(row);
+  });
+}
+
+/**
+ * Case à cocher d'une tâche : on la termine (ou la rouvre) directement depuis
+ * la liste, sans l'ouvrir. Un vrai bouton, donc atteignable au clavier.
+ */
+function taskCheckHtml(app: AppController, task: Task, large = false): string {
+  const done = task.status === 'completed';
+  const label = done
+    ? app.tr(`Rouvrir « ${task.title} »`, `Reopen "${task.title}"`)
+    : app.tr(`Terminer « ${task.title} »`, `Complete "${task.title}"`);
+  return `<button type="button" class="task-check ${large ? 'task-check-lg' : ''} ${done ? 'is-done' : ''}" data-task-check aria-pressed="${done}" aria-label="${app.escapeHtml(label)}" title="${app.escapeHtml(label)}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 12.5 10 17 19 7.5"></polyline></svg>
+  </button>`;
+}
+
+/** Le clic sur la case ne sélectionne pas la ligne ; la coche s'anime avant le nouveau rendu */
+function bindTaskCheck(app: AppController, host: HTMLElement, task: Task): void {
+  const button = host.querySelector<HTMLButtonElement>('[data-task-check]');
+  if (!button) return;
+  button.addEventListener('keydown', event => event.stopPropagation());
+  button.addEventListener('click', event => {
+    event.stopPropagation();
+    if (button.classList.contains('is-completing')) return;
+    button.classList.add('is-completing');
+    button.classList.toggle('is-done', task.status !== 'completed');
+    host.classList.add('task-completing');
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    window.setTimeout(() => {
+      toggleTaskCompletion(app, task);
+      // Si rien n'a changé (tâche bloquée), la case reprend son état
+      button.classList.remove('is-completing');
+      button.classList.toggle('is-done', vaultStore.getData().tasks.find(t => t.id === task.id)?.status === 'completed');
+      host.classList.remove('task-completing');
+    }, reduced ? 0 : 260);
   });
 }

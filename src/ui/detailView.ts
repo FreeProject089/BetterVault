@@ -215,30 +215,7 @@ export function renderDetail(app: AppController, id: string | null): void {
       document.getElementById('detail-container')?.classList.remove('mobile-active');
     });
 
-    document.getElementById('btn-toggle-task-status')?.addEventListener('click', () => {
-      if (task.status === 'completed') {
-        const reopenedStatus = getOpenBlockers(task, vaultStore.getData().tasks).length > 0 ? 'blocked' : 'todo';
-        vaultStore.updateTask(task.id, { status: reopenedStatus, completedAt: undefined });
-        app.showToast(app.tr('Tâche rouverte', 'Task reopened'), 'success');
-        return;
-      }
-
-      const plan = planTaskCompletion(task, vaultStore.getData().tasks);
-      if (plan.blockers.length > 0) {
-        const names = plan.blockers.map(b => `"${b.title}"`).join(', ');
-        app.showToast(`${app.tr('Terminez d’abord', 'Complete first')} : ${names}`, 'error', 5000);
-        return;
-      }
-
-      vaultStore.updateTask(task.id, plan.updates);
-      plan.unblockedIds.forEach(unblockedId => vaultStore.updateTask(unblockedId, { status: 'todo' }));
-      if (plan.nextOccurrence) {
-        vaultStore.addTask(plan.nextOccurrence);
-        app.showToast(`${app.tr('Tâche terminée — prochaine occurrence le', 'Task completed — next occurrence on')} ${plan.nextOccurrence.dueDate}`, 'success', 4000);
-      } else {
-        app.showToast(app.tr('Tâche terminée', 'Task completed'), 'success');
-      }
-    });
+    document.getElementById('btn-toggle-task-status')?.addEventListener('click', () => toggleTaskCompletion(app, task));
 
     document.querySelectorAll('.dep-task-row').forEach(el => {
       el.addEventListener('click', () => {
@@ -818,4 +795,33 @@ export function renderDetail(app: AppController, id: string | null): void {
   document.getElementById('btn-detail-back-cred')?.addEventListener('click', () => {
     document.getElementById('detail-container')?.classList.remove('mobile-active');
   });
+}
+
+/**
+ * Termine ou rouvre une tâche : dépendances, récurrence et tâches débloquées
+ * sont traitées au même endroit, que l'on parte de la fiche ou de la liste.
+ */
+export function toggleTaskCompletion(app: AppController, task: Task): void {
+  if (task.status === 'completed') {
+    const reopenedStatus = getOpenBlockers(task, vaultStore.getData().tasks).length > 0 ? 'blocked' : 'todo';
+    vaultStore.updateTask(task.id, { status: reopenedStatus, completedAt: undefined });
+    app.showToast(app.tr('Tâche rouverte', 'Task reopened'), 'success');
+    return;
+  }
+
+  const plan = planTaskCompletion(task, vaultStore.getData().tasks);
+  if (plan.blockers.length > 0) {
+    const names = plan.blockers.map(b => `"${b.title}"`).join(', ');
+    app.showToast(`${app.tr('Terminez d’abord', 'Complete first')} : ${names}`, 'error', 5000);
+    return;
+  }
+
+  vaultStore.updateTask(task.id, plan.updates);
+  plan.unblockedIds.forEach(unblockedId => vaultStore.updateTask(unblockedId, { status: 'todo' }));
+  if (plan.nextOccurrence) {
+    vaultStore.addTask(plan.nextOccurrence);
+    app.showToast(`${app.tr('Tâche terminée — prochaine occurrence le', 'Task completed — next occurrence on')} ${plan.nextOccurrence.dueDate}`, 'success', 4000);
+  } else {
+    app.showToast(app.tr('Tâche terminée', 'Task completed'), 'success');
+  }
 }

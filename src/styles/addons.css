@@ -4020,6 +4020,10 @@ button.shortcut-key:hover { border-color: var(--accent); }
   .sidebar-collapsed .nav-item-right { display: flex; }
   .sidebar-collapsed .nav-item.active { box-shadow: inset 2px 0 0 var(--accent); }
 
+  /* Tags : une seule entrée qui ouvre le sélecteur, au lieu de pastilles muettes */
+  .sidebar-collapsed #tag-list > .nav-item:not(.tag-picker-entry) { display: none; }
+  .sidebar-collapsed #tag-list > .tag-picker-entry { display: flex; }
+
   .sidebar-collapsed .sidebar-footer { padding: 8px; }
   .sidebar-collapsed .sidebar-footer > div,
   .sidebar-collapsed .sidebar-footer > div > div { flex-direction: column; gap: 6px !important; }
@@ -4509,10 +4513,35 @@ label.check,
   background-color: var(--bg-secondary);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
 }
+/*
+ * La place se mesure sur la barre elle-même, pas sur la fenêtre : la colonne
+ * de liste reste étroite sur un grand écran. Le titre cède d'abord, puis les
+ * libellés ; les onglets défilent au besoin et « Nouveau » ne passe jamais
+ * par-dessus.
+ */
+.list-controls { container-type: inline-size; container-name: list-controls; }
+.list-controls > div:first-child { flex: 1 1 auto; }
+.list-controls #btn-add-item { flex-shrink: 0; }
+#task-view-toggle {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+#task-view-toggle::-webkit-scrollbar { display: none; }
+.view-toggle-btn { flex-shrink: 0; }
+.view-toggle-btn:hover:not(.active) { color: var(--text-primary); background-color: var(--bg-hover); }
+.view-toggle-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.view-toggle-btn:active { transform: scale(0.96); }
 /* Assez large : chaque mode dit son nom */
-@media (min-width: 1100px) {
+@container list-controls (min-width: 560px) {
   .view-toggle-btn { padding-inline: 10px; }
   .view-toggle-btn .view-toggle-label { display: inline; }
+}
+/* Très étroit : « Nouveau » devient un simple « + » */
+@container list-controls (max-width: 340px) {
+  #btn-add-item > span { display: none; }
+  #btn-add-item { padding-inline: 10px; }
 }
 /* Au doigt : la cible passe à 40 px, sans libellé pour garder la barre courte */
 @media (max-width: 900px) {
@@ -4720,3 +4749,114 @@ label.check,
   .sidebar-collapsed .sidebar-footer .sync-status,
   .sidebar-collapsed .sidebar-footer .btn-lang-toggle { min-height: 36px; min-width: 36px; }
 }
+
+/* ── Sélecteur de tags (barre latérale réduite) ─────────────────────────── */
+#tag-list > .tag-picker-entry { display: none; }
+
+.tag-picker-popover {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2500;
+  width: 240px;
+  max-width: calc(100vw - 32px);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg-elevated, var(--bg-secondary));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+  animation: date-pop 0.12s ease-out;
+}
+.tag-picker-search { width: 100%; }
+.tag-picker-options { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow-y: auto; }
+.tag-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--radius-md, 8px);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease, transform 0.08s ease;
+}
+.tag-picker-option:hover { background: var(--bg-hover); }
+.tag-picker-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tag-picker-option:active { transform: scale(0.98); }
+.tag-picker-option.active { color: var(--accent); font-weight: 600; }
+.tag-picker-create { color: var(--accent); }
+
+/* ── Case « terminer » sur chaque tâche ────────────────────────────────────
+   On valide une tâche depuis la liste ou le tableau sans l'ouvrir. Un cercle
+   au repos, une coche qui se dessine au clic, rien de plus. */
+.kanban-card-head { display: flex; align-items: flex-start; gap: 8px; }
+.kanban-card-head .kanban-card-title { flex: 1 1 auto; min-width: 0; }
+
+.task-check {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1.5px solid var(--text-muted);
+  border-radius: 50%;
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+  position: relative;
+  transition: border-color 0.12s ease, background-color 0.15s ease, color 0.12s ease, transform 0.1s ease;
+}
+/* La cible tactile dépasse le cercle visible */
+.task-check::before { content: ''; position: absolute; inset: -8px; }
+.task-check-lg { width: 22px; height: 22px; margin-right: 2px; }
+.task-check svg { width: 70%; height: 70%; stroke-dasharray: 24; stroke-dashoffset: 24; transition: stroke-dashoffset 0.22s ease; }
+.task-check:hover { border-color: var(--accent-green); color: var(--accent-green); }
+.task-check:hover svg { stroke-dashoffset: 0; opacity: 0.55; }
+.task-check:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.task-check:active { transform: scale(0.88); }
+.task-check.is-done { border-color: var(--accent-green); background-color: var(--accent-green); color: #fff; }
+.task-check.is-done svg { stroke-dashoffset: 0; opacity: 1; }
+.task-check.is-completing { animation: task-check-pop 0.26s ease-out; }
+@keyframes task-check-pop {
+  0% { transform: scale(0.85); }
+  55% { transform: scale(1.18); box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent-green) 25%, transparent); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 transparent; }
+}
+.task-completing { transition: opacity 0.26s ease; opacity: 0.6; }
+@media (prefers-reduced-motion: reduce) {
+  .task-check, .task-check svg { transition: none; }
+  .task-check.is-completing { animation: none; }
+}
+
+/* Le logo de la barre latérale est un lien vers l'accueil (version web) */
+a.workspace-home-link {
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--radius-md);
+  transition: opacity 0.12s ease;
+}
+a.workspace-home-link:hover { opacity: 0.8; }
+a.workspace-home-link:active { opacity: 0.65; }
+a.workspace-home-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Pied de la fenêtre des raccourcis : rétablir, état, enregistrer */
+.shortcut-footer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.shortcut-footer [data-shortcut-reset-all] { margin-right: auto; }
+.shortcut-status { font-size: 12px; color: var(--text-muted); min-height: 1em; }
+.shortcut-status[data-tone="pending"] { color: var(--accent-orange); }
+.shortcut-status[data-tone="success"] { color: var(--accent-green); animation: date-pop 0.18s ease-out; }
+.shortcut-btn { transition: background-color 0.12s ease, color 0.12s ease, filter 0.12s ease, transform 0.08s ease; }
+.shortcut-btn:not(:disabled):hover { filter: brightness(1.08); }
+.shortcut-btn:not(:disabled):active { transform: scale(0.97); filter: brightness(0.92); }
+.shortcut-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.shortcut-btn:disabled { opacity: 0.5; cursor: not-allowed; }

@@ -648,6 +648,20 @@ export class AppController {
       this.openAuditModal();
     });
 
+    // Le logo ramène à la page d'accueil, sur le web seulement : l'application
+    // de bureau et l'extension n'en ont pas
+    const badge = document.querySelector<HTMLElement>('.sidebar .workspace-badge');
+    if (badge && !isTauri() && !extensionSurface() && window.location.protocol.startsWith('http')) {
+      const home = document.createElement('a');
+      const homeLabel = this.tr('Accueil BetterVault', 'BetterVault home');
+      home.href = '/';
+      home.className = 'workspace-badge workspace-home-link';
+      home.title = homeLabel;
+      home.setAttribute('aria-label', homeLabel);
+      home.append(...badge.childNodes);
+      badge.replaceWith(home);
+    }
+
     // Barre latérale réduite : le choix est retenu, et chaque entrée garde son nom en infobulle
     const collapseBtn = document.getElementById('btn-collapse-sidebar');
     const appRoot = document.getElementById('app');
@@ -2109,6 +2123,7 @@ export class AppController {
 
     if (tags.length === 0) {
       list.innerHTML = `<li class="nav-empty">${this.tr('Aucun tag', 'No tags')}</li>`;
+      list.appendChild(this.tagPickerEntry());
       return;
     }
 
@@ -2145,6 +2160,133 @@ export class AppController {
       });
       list.appendChild(li);
     });
+    list.appendChild(this.tagPickerEntry());
+  }
+
+  /**
+   * Barre réduite : une seule entrée remplace la liste des tags. Elle ouvre un
+   * petit sélecteur où l'on choisit un tag, ou en crée un nouveau.
+   */
+  private tagPickerEntry(): HTMLLIElement {
+    const li = document.createElement('li');
+    const label = this.activeTag
+      ? this.tr(`Tag : ${this.activeTag}`, `Tag: ${this.activeTag}`)
+      : this.tr('Choisir un tag', 'Pick a tag');
+    const active = this.activeTag ? vaultStore.getTagByName(this.activeTag) : undefined;
+    li.className = `nav-item tag-picker-entry ${this.activeTag ? 'active' : ''}`;
+    li.tabIndex = 0;
+    li.title = label;
+    li.setAttribute('role', 'button');
+    li.setAttribute('aria-haspopup', 'dialog');
+    li.innerHTML = `
+      <span class="nav-item-left">
+        <span class="nav-item-icon"${active ? ` style="color:${tagColor(active.color)};"` : ''}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
+        </span>
+        <span>${this.escapeHtml(label)}</span>
+      </span>`;
+    const open = () => this.openTagPicker(li);
+    li.addEventListener('click', open);
+    li.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        open();
+      }
+    });
+    return li;
+  }
+
+  /** Sélecteur de tags : recherche, choix, ou création d'un tag à la volée */
+  private openTagPicker(anchor: HTMLElement): void {
+    document.querySelector('.tag-picker-popover')?.remove();
+    const pop = document.createElement('div');
+    const placeholder = this.escapeHtml(this.tr('Chercher ou créer un tag', 'Search or create a tag'));
+    pop.className = 'tag-picker-popover';
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-label', 'Tags');
+    pop.innerHTML = `
+      <input type="text" class="form-input tag-picker-search" placeholder="${placeholder}" aria-label="${placeholder}">
+      <div class="tag-picker-options" role="listbox"></div>`;
+    document.body.appendChild(pop);
+
+    const input = pop.querySelector<HTMLInputElement>('.tag-picker-search')!;
+    const options = pop.querySelector<HTMLElement>('.tag-picker-options')!;
+    const place = () => {
+      const rect = anchor.getBoundingClientRect();
+      pop.style.left = `${Math.round(rect.right + 8)}px`;
+      pop.style.top = `${Math.round(Math.max(8, Math.min(rect.top, window.innerHeight - pop.offsetHeight - 16)))}px`;
+    };
+    const outside = (e: MouseEvent) => {
+      if (!pop.contains(e.target as Node) && !anchor.contains(e.target as Node)) close();
+    };
+    const close = () => {
+      pop.remove();
+      document.removeEventListener('mousedown', outside, true);
+    };
+    const pick = (name: string | null) => {
+      close();
+      this.activeTag = name;
+      this.selectedItemId = null;
+      this.renderSidebar();
+      this.renderList();
+      this.renderDetail(null);
+      document.querySelector<HTMLElement>('.tag-picker-entry')?.focus();
+    };
+    const render = () => {
+      const query = input.value.trim();
+      const key = query.toLowerCase();
+      const tags = vaultStore.getTags().filter(t => !key || t.name.toLowerCase().includes(key));
+      const rows = tags.map(tag => `
+        <button type="button" class="tag-picker-option ${this.activeTag === tag.name ? 'active' : ''}" role="option" aria-selected="${this.activeTag === tag.name}" data-tag="${this.escapeHtml(tag.name)}">
+          <span class="tag-dot" style="background-color:${tagColor(tag.color)};"></span>
+          <span>${this.escapeHtml(tag.name)}</span>
+        </button>`);
+      if (this.activeTag && !key) {
+        rows.unshift(`<button type="button" class="tag-picker-option" data-clear="1">${this.tr('Tous les éléments', 'All items')}</button>`);
+      }
+      if (query && !vaultStore.getTagByName(query)) {
+        rows.push(`<button type="button" class="tag-picker-option tag-picker-create" data-create="1">+ ${this.escapeHtml(this.tr(`Créer « ${query} »`, `Create "${query}"`))}</button>`);
+      }
+      options.innerHTML = rows.join('') || `<div class="nav-empty">${this.tr('Aucun tag', 'No tags')}</div>`;
+      place();
+    };
+    options.addEventListener('click', e => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.tag-picker-option');
+      if (!btn) return;
+      if (btn.dataset.clear) return pick(null);
+      if (btn.dataset.create) {
+        try {
+          const tag = vaultStore.createTag(input.value);
+          this.showToast(this.tr(`Tag « ${tag.name} » créé`, `Tag "${tag.name}" created`), 'success');
+          pick(tag.name);
+        } catch (err) {
+          this.showToast(accountErrorMessage(err), 'error');
+        }
+        return;
+      }
+      pick(this.activeTag === btn.dataset.tag ? null : btn.dataset.tag ?? null);
+    });
+    input.addEventListener('input', render);
+    pop.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+        anchor.focus();
+      } else if (e.key === 'Enter' && e.target === input) {
+        e.preventDefault();
+        options.querySelector<HTMLButtonElement>('.tag-picker-option:not([data-clear])')?.click();
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        const all = [...options.querySelectorAll<HTMLButtonElement>('.tag-picker-option')];
+        if (!all.length) return;
+        e.preventDefault();
+        const index = all.indexOf(document.activeElement as HTMLButtonElement);
+        const next = e.key === 'ArrowDown' ? Math.min(index + 1, all.length - 1) : index - 1;
+        if (next < 0) input.focus(); else all[next].focus();
+      }
+    });
+    render();
+    document.addEventListener('mousedown', outside, true);
+    input.focus();
   }
 
   /** Pastille rappelant le type de l'élément */
