@@ -4021,23 +4021,16 @@ button.shortcut-key:hover { border-color: var(--accent); }
   .sidebar-collapsed .nav-item.active { box-shadow: inset 2px 0 0 var(--accent); }
 
   /*
-   * Tags : la pastille de couleur de chacun (les huit premiers), puis une
-   * entrée qui ouvre le sélecteur pour tous les autres et pour en créer.
+   * Tags : une seule entrée, qui ouvre la fenêtre des tags (liste complète,
+   * recherche, création, gestion). Elle prend la couleur du tag actif.
    */
-  .sidebar-collapsed #tag-list { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-  .sidebar-collapsed #tag-list > .nav-item:not(.tag-picker-entry) { display: flex; width: 40px; min-height: 30px; justify-content: center; }
-  .sidebar-collapsed #tag-list > .nav-item:not(.tag-picker-entry):nth-child(n + 9) { display: none; }
-  .sidebar-collapsed #tag-list .nav-item-left > span:not(.tag-dot):not(.tag-icon),
-  .sidebar-collapsed #tag-list .nav-count { display: none; }
-  .sidebar-collapsed #tag-list .tag-dot { display: block; width: 11px; height: 11px; transition: transform 0.15s ease, box-shadow 0.15s ease; }
-  .sidebar-collapsed #tag-list .nav-item:hover .tag-dot { transform: scale(1.25); }
-  .sidebar-collapsed #tag-list .nav-item.active:not(.tag-picker-entry) { box-shadow: none; background: var(--bg-hover); }
-  .sidebar-collapsed #tag-list .nav-item.active .tag-dot { box-shadow: 0 0 0 3px var(--bg-secondary), 0 0 0 5px currentColor; color: var(--text-muted); }
-  .sidebar-collapsed #tag-list > .tag-picker-entry { display: flex; width: 40px; justify-content: center; }
-  .sidebar-collapsed #tag-list > .tag-picker-entry .nav-item-icon { display: inline-flex; color: var(--text-secondary); }
+  .sidebar-collapsed #tag-list > .nav-item:not(.tag-picker-entry),
   .sidebar-collapsed #tag-list > .nav-empty { display: none; }
+  .sidebar-collapsed #tag-list > .tag-picker-entry { display: flex; justify-content: center; }
+  .sidebar-collapsed #tag-list > .tag-picker-entry .nav-item-icon { display: inline-flex; color: var(--text-secondary); }
   /* La règle générale de la barre réduite écrase le contenu à zéro : ici, la pastille garde sa place */
   .sidebar-collapsed #tag-list .nav-item-left { width: auto; min-width: 0; overflow: visible; flex: 0 0 auto; justify-content: center; }
+  .sidebar-collapsed #tag-list > .tag-picker-entry.active .nav-item-icon { filter: drop-shadow(0 0 6px currentColor); }
 
   .sidebar-collapsed .sidebar-footer { padding: 8px; }
   .sidebar-collapsed .sidebar-footer > div,
@@ -4878,3 +4871,12 @@ a.workspace-home-link:focus-visible { outline: 2px solid var(--accent); outline-
 
 /* Lien « En savoir plus » seul sous un titre de section */
 .doc-hint { margin: -4px 0 10px; }
+
+/* Fenêtre des tags (barre réduite) : en-tête avec la gestion, liste qui défile */
+.tag-picker-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.tag-picker-head strong { font-size: 13px; }
+.tag-picker-manage { font-size: 12px; padding: 4px 8px; border-radius: 6px; color: var(--accent); }
+.tag-picker-manage:hover { background: var(--bg-hover); }
+.tag-picker-option { display: flex; align-items: center; gap: 8px; }
+.tag-picker-name { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag-picker-options { max-height: min(360px, 60vh); }

@@ -2207,12 +2207,20 @@ export class AppController {
     pop.setAttribute('role', 'dialog');
     pop.setAttribute('aria-label', 'Tags');
     pop.innerHTML = `
+      <div class="tag-picker-head">
+        <strong>Tags</strong>
+        <button type="button" class="btn-ghost tag-picker-manage">${this.tr('Gérer les tags', 'Manage tags')}</button>
+      </div>
       <input type="text" class="form-input tag-picker-search" placeholder="${placeholder}" aria-label="${placeholder}">
       <div class="tag-picker-options" role="listbox"></div>`;
     document.body.appendChild(pop);
 
     const input = pop.querySelector<HTMLInputElement>('.tag-picker-search')!;
     const options = pop.querySelector<HTMLElement>('.tag-picker-options')!;
+    // Nombre d'éléments par tag, dans le coffre ouvert
+    const data = vaultStore.getData();
+    const inVault = [...data.credentials, ...data.tasks].filter(item => item.vaultId === data.activeVaultId);
+    const countOf = (name: string) => inVault.filter(item => item.tags.some(t => t.toLowerCase() === name.toLowerCase())).length;
     const place = () => {
       const rect = anchor.getBoundingClientRect();
       pop.style.left = `${Math.round(rect.right + 8)}px`;
@@ -2241,7 +2249,8 @@ export class AppController {
       const rows = tags.map(tag => `
         <button type="button" class="tag-picker-option ${this.activeTag === tag.name ? 'active' : ''}" role="option" aria-selected="${this.activeTag === tag.name}" data-tag="${this.escapeHtml(tag.name)}">
           <span class="tag-dot" style="background-color:${tagColor(tag.color)};"></span>
-          <span>${this.escapeHtml(tag.name)}</span>
+          <span class="tag-picker-name">${this.escapeHtml(tag.name)}</span>
+          <span class="nav-count">${countOf(tag.name)}</span>
         </button>`);
       if (this.activeTag && !key) {
         rows.unshift(`<button type="button" class="tag-picker-option" data-clear="1">${this.tr('Tous les éléments', 'All items')}</button>`);
@@ -2269,6 +2278,11 @@ export class AppController {
       pick(this.activeTag === btn.dataset.tag ? null : btn.dataset.tag ?? null);
     });
     input.addEventListener('input', render);
+    // Renommer, recolorer, supprimer : la fenêtre de gestion des tags
+    pop.querySelector('.tag-picker-manage')!.addEventListener('click', () => {
+      close();
+      this.openTagManagerModal();
+    });
     pop.addEventListener('keydown', e => {
       if (e.key === 'Escape') {
         e.preventDefault();
