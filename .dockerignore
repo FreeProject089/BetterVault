@@ -6,11 +6,18 @@ site
 .claude
 .vscode
 .idea
-src-tauri/target
 server/data
 server/.env
 .env
 *.log
-docs
 Assets
 Prompt
+
+# L'image n'a besoin que de l'application web et du serveur :
+# les projets natifs et leurs sorties de construction pesaient des centaines de Mo
+# et faisaient expirer l'envoi du contexte.
+src-tauri
+tests
+**/.gradle
+*.apk
+*.aab
