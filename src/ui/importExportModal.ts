@@ -151,49 +151,72 @@ export function openImportExportModal(app: ModalHost, { accountService, sharedVa
           </div>
         </div>
 
-        <div data-panel="export" hidden style="display:flex;flex-direction:column;gap:10px;">
-          <p class="modal-text">${tr(`Coffre « ${app.escapeHtml(activeVaultName)} » : ${creds.length} identifiant${creds.length > 1 ? 's' : ''} et ${tasks.length} tâche${tasks.length > 1 ? 's' : ''}.`, `Vault "${app.escapeHtml(activeVaultName)}": ${creds.length} credential${creds.length === 1 ? '' : 's'} and ${tasks.length} task${tasks.length === 1 ? '' : 's'}.`)}</p>
-          <div class="ie-group-title">${tr('Chiffré', 'Encrypted')}</div>
-          <div class="ie-export-list">
-            ${exportItem('encrypted', bvLogo, tr('BetterVault chiffré', 'Encrypted BetterVault'), tr('Protégé par un mot de passe dédié · Argon2id et AES-256-GCM', 'Protected by a dedicated password · Argon2id and AES-256-GCM'), { label: tr('Recommandé', 'Recommended'), safe: true })}
-            ${exportItem('full', bvLogo, tr('Tout le compte, fichiers compris', 'The whole account, files included'), tr('Tous les coffres et pièces jointes, chiffrés · pour changer de compte ou de serveur', 'Every vault and attachment, encrypted · to move to another account or server'))}
-            ${exportItem('kdbx', brand('keepassxc'), tr('Base KeePass (.kdbx)', 'KeePass database (.kdbx)'), 'KeePass, KeePassXC, Strongbox')}
-          </div>
-          <div id="export-password-panel" class="form-section" hidden>
-            <div class="form-section-title" id="export-password-title"></div>
-            <div class="form-row">
-              <input class="form-input" id="export-password" type="password" autocomplete="new-password" placeholder="${tr(`Mot de passe (${MIN_EXPORT_PASSWORD_LENGTH} caractères minimum)`, `Password (at least ${MIN_EXPORT_PASSWORD_LENGTH} characters)`)}">
-              <input class="form-input" id="export-password-confirm" type="password" autocomplete="new-password" placeholder="${tr('Confirmer', 'Confirm')}">
-            </div>
-            <div class="field-hint" id="export-password-status"></div>
-            <div class="account-actions account-actions-end">
-              <button type="button" class="btn-primary btn-accent" id="btn-export-password-confirm">${tr('Chiffrer et enregistrer', 'Encrypt and save')}</button>
+        <div data-panel="export" hidden class="ie-export-panel">
+          <div class="ie-export-summary">
+            <span class="ie-logo">${bvLogo}</span>
+            <div class="ie-export-summary-text">
+              <div class="ie-export-summary-title">${app.escapeHtml(activeVaultName)}</div>
+              <div class="ie-export-counts">
+                <span><b>${creds.length}</b> ${tr(`identifiant${creds.length > 1 ? 's' : ''}`, `credential${creds.length === 1 ? '' : 's'}`)}</span>
+                <span><b>${tasks.length}</b> ${tr(`tâche${tasks.length > 1 ? 's' : ''}`, `task${tasks.length === 1 ? '' : 's'}`)}</span>
+                <span><b>${totpCount}</b> ${tr(`code${totpCount > 1 ? 's' : ''} 2FA`, `2FA code${totpCount === 1 ? '' : 's'}`)}</span>
+              </div>
             </div>
           </div>
 
-          <div class="ie-group-title">${tr('Non chiffré', 'Not encrypted')}</div>
-          <div class="notice notice-warning">${tr('Ces fichiers contiennent vos mots de passe en clair. Supprimez-les dès qu’ils ne servent plus.', 'These files contain your passwords in plain text. Delete them once you no longer need them.')}</div>
-          <div class="ie-export-list">
-            ${exportItem('cxf', brand('fidoalliance'), 'FIDO CXF', tr('Format d’échange standard, passkeys comprises', 'Standard exchange format, passkeys included'))}
-            ${exportItem('json', bvLogo, 'JSON BetterVault', tr('Tout le contenu du coffre, tâches comprises', 'Everything in the vault, tasks included'))}
-            ${exportItem('csv', brand('bitwarden'), 'CSV', tr('Compatible Bitwarden, Chrome, Firefox et tableurs', 'Works with Bitwarden, Chrome, Firefox and spreadsheets'))}
+          <div class="ie-export-kinds" role="tablist" aria-label="${tr('Type d’export', 'Export type')}">
+            <button type="button" role="tab" class="ie-kind active" data-kind="safe" aria-selected="true"><span class="ie-kind-dot ie-kind-safe"></span>${tr('Chiffré', 'Encrypted')}</button>
+            <button type="button" role="tab" class="ie-kind" data-kind="plain" aria-selected="false"><span class="ie-kind-dot ie-kind-plain"></span>${tr('En clair', 'Plain text')}</button>
+            <button type="button" role="tab" class="ie-kind" data-kind="totp" aria-selected="false">${tr('Codes 2FA', '2FA codes')}</button>
+            <button type="button" role="tab" class="ie-kind" data-kind="apps" aria-selected="false">${tr('Autres apps', 'Other apps')}</button>
           </div>
 
-          <div class="ie-group-title">${tr('Codes 2FA seuls', '2FA codes only')}</div>
-          <p class="field-hint">${tr(`${totpCount} code${totpCount > 1 ? 's' : ''} dans ce coffre. Format otpauth://, lu par Aegis, 2FAS, Bitwarden, KeePassXC…`, `${totpCount} code${totpCount === 1 ? '' : 's'} in this vault. otpauth:// format, read by Aegis, 2FAS, Bitwarden, KeePassXC…`)}</p>
-          <div class="ie-export-list">
-            ${exportItem('totp-qr', GEN_ICONS.qr, tr('Planche de QR codes', 'Sheet of QR codes'), tr('À imprimer ou à rescanner depuis un téléphone', 'To print, or to rescan from a phone'))}
-            ${exportItem('totp-uri', GENERIC_FILE_ICON, tr('Liste otpauth:// (.txt)', 'otpauth:// list (.txt)'), tr('Une URI par ligne', 'One URI per line'))}
-            ${exportItem('totp-json', bvLogo, tr('JSON des codes 2FA', '2FA codes as JSON'), tr('Avec le nom et l’émetteur de chaque code', 'With each code’s name and issuer'))}
-          </div>
+          <section class="ie-export-group" data-group="safe">
+            <p class="ie-group-lead">${tr('Le fichier reste illisible sans le mot de passe que vous choisissez. À privilégier pour une sauvegarde.', 'The file stays unreadable without the password you choose. The right choice for a backup.')}</p>
+            <div class="ie-export-list">
+              ${exportItem('encrypted', bvLogo, tr('BetterVault chiffré', 'Encrypted BetterVault'), tr('Ce coffre, protégé par un mot de passe dédié · Argon2id et AES-256-GCM', 'This vault, protected by a dedicated password · Argon2id and AES-256-GCM'), { label: tr('Recommandé', 'Recommended'), safe: true })}
+              ${exportItem('full', bvLogo, tr('Tout le compte, fichiers compris', 'The whole account, files included'), tr('Tous les coffres et pièces jointes, chiffrés · pour changer de compte ou de serveur', 'Every vault and attachment, encrypted · to move to another account or server'))}
+              ${exportItem('kdbx', brand('keepassxc'), tr('Base KeePass (.kdbx)', 'KeePass database (.kdbx)'), tr('Chiffrée · KeePass, KeePassXC, Strongbox', 'Encrypted · KeePass, KeePassXC, Strongbox'))}
+            </div>
+            <div id="export-password-panel" class="form-section ie-export-password" hidden>
+              <div class="form-section-title" id="export-password-title"></div>
+              <div class="form-row">
+                <input class="form-input" id="export-password" type="password" autocomplete="new-password" placeholder="${tr(`Mot de passe (${MIN_EXPORT_PASSWORD_LENGTH} caractères minimum)`, `Password (at least ${MIN_EXPORT_PASSWORD_LENGTH} characters)`)}">
+                <input class="form-input" id="export-password-confirm" type="password" autocomplete="new-password" placeholder="${tr('Confirmer', 'Confirm')}">
+              </div>
+              <div class="field-hint" id="export-password-status"></div>
+              <div class="account-actions account-actions-end">
+                <button type="button" class="btn-primary btn-accent" id="btn-export-password-confirm">${tr('Chiffrer et enregistrer', 'Encrypt and save')}</button>
+              </div>
+            </div>
+          </section>
 
-          <div class="ie-group-title">${tr('Vers un autre gestionnaire', 'To another password manager')}</div>
-          <p class="field-hint">${tr('Fichier au format attendu par l’import de chaque application. Non chiffré.', 'File in the format each app expects on import. Not encrypted.')}</p>
-          <div class="ie-export-list ie-export-grid">
-            ${MANAGER_EXPORTS.map(format => exportItem(`manager:${format.id}`, format.logo ? brand(format.logo) : GENERIC_FILE_ICON,
-              format.id === 'apple' ? tr('Mots de passe Apple (CSV)', 'Apple Passwords (CSV)') : format.name,
-              format.extension.toUpperCase())).join('')}
-          </div>
+          <section class="ie-export-group" data-group="plain" hidden>
+            <div class="notice notice-warning">${tr('Ces fichiers contiennent vos mots de passe en clair. Supprimez-les dès qu’ils ne servent plus.', 'These files contain your passwords in plain text. Delete them once you no longer need them.')}</div>
+            <div class="ie-export-list">
+              ${exportItem('cxf', brand('fidoalliance'), 'FIDO CXF', tr('Format d’échange standard, passkeys comprises', 'Standard exchange format, passkeys included'))}
+              ${exportItem('json', bvLogo, 'JSON BetterVault', tr('Tout le contenu du coffre, tâches comprises', 'Everything in the vault, tasks included'))}
+              ${exportItem('csv', brand('bitwarden'), 'CSV', tr('Compatible Bitwarden, Chrome, Firefox et tableurs', 'Works with Bitwarden, Chrome, Firefox and spreadsheets'))}
+            </div>
+          </section>
+
+          <section class="ie-export-group" data-group="totp" hidden>
+            <p class="ie-group-lead">${tr('Format otpauth://, lu par Aegis, 2FAS, Bitwarden, KeePassXC… Non chiffré.', 'otpauth:// format, read by Aegis, 2FAS, Bitwarden, KeePassXC… Not encrypted.')}</p>
+            <div class="ie-export-list">
+              ${exportItem('totp-qr', GEN_ICONS.qr, tr('Planche de QR codes', 'Sheet of QR codes'), tr('À imprimer ou à rescanner depuis un téléphone', 'To print, or to rescan from a phone'))}
+              ${exportItem('totp-uri', GENERIC_FILE_ICON, tr('Liste otpauth:// (.txt)', 'otpauth:// list (.txt)'), tr('Une URI par ligne', 'One URI per line'))}
+              ${exportItem('totp-json', bvLogo, tr('JSON des codes 2FA', '2FA codes as JSON'), tr('Avec le nom et l’émetteur de chaque code', 'With each code’s name and issuer'))}
+            </div>
+          </section>
+
+          <section class="ie-export-group" data-group="apps" hidden>
+            <p class="ie-group-lead">${tr('Fichier au format attendu par l’import de chaque application. Non chiffré.', 'File in the format each app expects on import. Not encrypted.')}</p>
+            <div class="ie-export-list ie-export-grid">
+              ${MANAGER_EXPORTS.map(format => exportItem(`manager:${format.id}`, format.logo ? brand(format.logo) : GENERIC_FILE_ICON,
+                format.id === 'apple' ? tr('Mots de passe Apple (CSV)', 'Apple Passwords (CSV)') : format.name,
+                format.extension.toUpperCase())).join('')}
+            </div>
+          </section>
         </div>
       </div>
       <div class="modal-footer">
@@ -204,6 +227,17 @@ export function openImportExportModal(app: ModalHost, { accountService, sharedVa
 
     const $ = <T extends HTMLElement>(selector: string) => box.querySelector(selector) as T;
     const confirmBtn = $<HTMLButtonElement>('#modal-import-confirm');
+
+    // Export : une famille de formats à la fois
+    box.querySelectorAll<HTMLButtonElement>('[data-kind]').forEach(kind => {
+      kind.addEventListener('click', () => {
+        box.querySelectorAll<HTMLButtonElement>('[data-kind]').forEach(k => {
+          k.classList.toggle('active', k === kind);
+          k.setAttribute('aria-selected', String(k === kind));
+        });
+        box.querySelectorAll<HTMLElement>('[data-group]').forEach(group => { group.hidden = group.dataset.group !== kind.dataset.kind; });
+      });
+    });
 
     // Onglets
     box.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(tab => {
