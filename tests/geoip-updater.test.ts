@@ -47,7 +47,7 @@ describe('Mise à jour de la base de localisation', () => {
       updates.stop();
       expect(existsSync(join(dir, 'geoip.mmdb'))).toBe(true);
       expect(geo.available()).toBe(true);
-      expect(geo.lookup('10.0.0.1')).toEqual({ country: 'FR', city: 'Lyon' });
+      expect(geo.lookup('10.0.0.1')).toEqual({ country: 'FR', city: 'Lyon', lat: null, lon: null });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

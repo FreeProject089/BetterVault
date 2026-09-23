@@ -321,7 +321,7 @@ describe('Localisation locale des sessions', () => {
     const metadata = map([['node_count', uint32(1)], ['record_size', uint16(24)], ['ip_version', uint16(4)]]);
     const db = Buffer.concat([tree, Buffer.alloc(16), data, Buffer.from([0xab, 0xcd, 0xef]), Buffer.from('MaxMind.com'), metadata]);
     const geo = createGeoLookup(db);
-    expect(geo.lookup('10.1.2.3')).toEqual({ country: 'FR', city: 'Lyon' });
+    expect(geo.lookup('10.1.2.3')).toEqual({ country: 'FR', city: 'Lyon', lat: null, lon: null });
     expect(geo.lookup('200.1.2.3')).toBeNull();
     expect(geo.lookup('pas une ip')).toBeNull();
   });
