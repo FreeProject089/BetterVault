@@ -70,20 +70,69 @@ export function renderMarkdown(markdown: string): string {
   const blocks: string[] = [];
   let text = markdown.replace(/\r\n/g, '\n');
 
-  // Les blocs de code sortent d'abord : leur contenu ne doit pas être interprété
-  text = text.replace(/```[a-z]*\n([\s\S]*?)```/g, (_, code: string) => {
-    blocks.push(`<pre><code>${escapeHtml(code.replace(/\n$/, ''))}</code></pre>`);
-    return `\n@@BLOC${blocks.length - 1}@@\n`;
+  /** Met un morceau de HTML de côté ; `indent` garde la place dans un bloc indenté */
+  const bloc = (html: string, indent = '') => {
+    blocks.push(html);
+    return `\n${indent}@@BLOC${blocks.length - 1}@@\n`;
+  };
+  const retrait = (body: string) => body.replace(/^[ \t]{1,4}/gm, '');
+
+  /*
+   * Les blocs de code sortent d'abord : leur contenu ne doit pas être
+   * interprété. Un bloc de code peut être indenté (dans un encadré ou un
+   * onglet) : le repère garde la même indentation, sinon il coupait le bloc
+   * qui le contient et la suite s'affichait en vrac.
+   */
+  text = text.replace(/^([ \t]*)```[\w-]*\n([\s\S]*?)^[ \t]*```[ \t]*$/gm, (_, indent: string, code: string) => {
+    const sansRetrait = code.split('\n').map(line => (line.startsWith(indent) ? line.slice(indent.length) : line)).join('\n');
+    return bloc(`<pre><code>${escapeHtml(sansRetrait.replace(/\n$/, ''))}</code></pre>`, indent).replace(/^\n/, '').replace(/\n$/, '');
   });
+
+  /*
+   * Onglets MkDocs : « === "Android" » suivis de lignes indentées, à la suite.
+   * Rendus en onglets CSS (boutons radio) : la page n'exécute aucun script.
+   * Avant, ils s'affichaient en texte brut (« === "Android" »).
+   */
+  let groupe = 0;
+  text = text.replace(/(?:^===[ \t]+"[^"]*"[ \t]*\n(?:[ \t]+.*\n?|\n)*)+/gm, entier => {
+    const onglets = [...entier.matchAll(/^===[ \t]+"([^"]*)"[ \t]*\n((?:[ \t]+.*\n?|\n)*)/gm)];
+    const nom = `onglets-${groupe++}`;
+    const boutons = onglets.map((o, i) =>
+      `<input type="radio" name="${nom}" id="${nom}-${i}"${i === 0 ? ' checked' : ''}><label for="${nom}-${i}">${escapeHtml(o[1])}</label>`).join('');
+    const panneaux = onglets.map(o => `<div class="tab-panel">${renderInner(retrait(o[2]))}</div>`).join('');
+    return bloc(`<div class="tabs">${boutons}${panneaux}</div>`);
+  });
+
+  /*
+   * Cartes MkDocs : seule la forme exacte « <div class="grid cards" markdown> »
+   * est reconnue. Tout autre HTML écrit dans le Markdown reste échappé.
+   * Avant, ces deux lignes s'affichaient en texte sur l'accueil de la doc.
+   */
+  text = text.replace(/^<div class="grid cards" markdown>[ \t]*\n([\s\S]*?)^<\/div>[ \t]*$/gm, (_, inner: string) =>
+    bloc(`<div class="cards">${markdownToHtml(inner)}</div>`));
 
   // Encadrés : « !!! tip "Titre" » suivi de lignes indentées
-  text = text.replace(/^!!!\s+(\w+)(?:\s+"([^"]*)")?\n((?:[ \t]+.*\n?|\n)*)/gm, (_, kind: string, title: string | undefined, body: string) => {
-    const inner = markdownToHtml(body.replace(/^[ \t]{1,4}/gm, ''));
-    blocks.push(`<aside class="admo admo-${escapeHtml(kind)}">${title ? `<strong>${escapeHtml(title)}</strong>` : ''}${inner}</aside>`);
-    return `\n@@BLOC${blocks.length - 1}@@\n`;
-  });
+  text = text.replace(/^!!!\s+(\w+)(?:\s+"([^"]*)")?\n((?:[ \t]+.*\n?|\n)*)/gm, (_, kind: string, title: string | undefined, body: string) =>
+    bloc(`<aside class="admo admo-${escapeHtml(kind)}">${title ? `<strong>${escapeHtml(title)}</strong>` : ''}${renderInner(retrait(body))}</aside>`));
 
-  return markdownToHtml(text).replace(/<p>@@BLOC(\d+)@@<\/p>/g, (entier, i: string) => blocks[Number(i)] ?? entier);
+  /*
+   * Un bloc peut en contenir d'autres (du code dans un encadré, un encadré
+   * dans un onglet) : on remplace jusqu'à ce qu'il n'en reste aucun.
+   */
+  let html = markdownToHtml(text);
+  for (let tour = 0; tour < 8 && html.includes('@@BLOC'); tour++) {
+    html = html
+      .replace(/<p>@@BLOC(\d+)@@<\/p>/g, (entier, i: string) => blocks[Number(i)] ?? entier)
+      .replace(/@@BLOC(\d+)@@/g, (entier, i: string) => blocks[Number(i)] ?? entier);
+  }
+  return html;
+
+  /** Contenu d'un onglet ou d'un encadré : les encadrés imbriqués sont reconnus aussi */
+  function renderInner(body: string): string {
+    const withAdmo = body.replace(/^!!!\s+(\w+)(?:\s+"([^"]*)")?\n((?:[ \t]+.*\n?|\n)*)/gm, (_, kind: string, title: string | undefined, inner: string) =>
+      bloc(`<aside class="admo admo-${escapeHtml(kind)}">${title ? `<strong>${escapeHtml(title)}</strong>` : ''}${markdownToHtml(retrait(inner))}</aside>`));
+    return markdownToHtml(withAdmo);
+  }
 }
 
 export interface DocsContext {
@@ -122,6 +171,15 @@ export function renderDocPage(path: string, ctx: DocsContext): string | null {
 :root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#7773e8;color-scheme:dark}
 @media (prefers-color-scheme:light){:root{--bg:#f6f8fa;--card:#fff;--border:#d0d7de;--text:#1f2328;--muted:#656d76;--accent:#5754c7;color-scheme:light}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.tabs{margin:16px 0;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--card)}
+.tabs>input{position:absolute;opacity:0;pointer-events:none}
+.tabs>label{display:inline-flex;align-items:center;min-height:44px;padding:0 16px;cursor:pointer;color:var(--muted);font-size:14px;font-weight:600;border-bottom:2px solid transparent}
+.tabs>input:checked+label{color:var(--text);border-bottom-color:var(--accent)}
+.tabs>input:focus-visible+label{outline:2px solid var(--accent);outline-offset:-2px}
+.tab-panel{display:none;padding:4px 16px 12px;border-top:1px solid var(--border)}
+.tabs>input:nth-of-type(1):checked~.tab-panel:nth-of-type(1),.tabs>input:nth-of-type(2):checked~.tab-panel:nth-of-type(2),.tabs>input:nth-of-type(3):checked~.tab-panel:nth-of-type(3),.tabs>input:nth-of-type(4):checked~.tab-panel:nth-of-type(4),.tabs>input:nth-of-type(5):checked~.tab-panel:nth-of-type(5),.tabs>input:nth-of-type(6):checked~.tab-panel:nth-of-type(6){display:block}
+.cards>ul{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.cards>ul>li{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin:0}
 header{position:sticky;top:0;z-index:2;background:var(--card);border-bottom:1px solid var(--border)}
 header div{max-width:1160px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:12px}
 header img{width:26px;height:26px}header strong{margin-right:auto}

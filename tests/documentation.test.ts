@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { listDocs, renderDocPage, renderMarkdown } from '../server/src/docs.ts';
 
 /**
@@ -88,5 +88,41 @@ describe('Cohérence de la documentation livrée', () => {
       .map(m => m[1])
       .filter(rel => !existsSync(join('docs', rel)));
     expect(manquantes).toEqual([]);
+  });
+});
+
+describe('Rendu de chaque page de la documentation', () => {
+  const root = resolve(__dirname, '../docs');
+  const pages = listDocs(root);
+
+  it('n’affiche aucune syntaxe MkDocs ni balise en texte brut', () => {
+    const fautes: string[] = [];
+    for (const page of pages) {
+      const html = renderDocPage(page.path, { root, locale: 'fr', appAvailable: true })!;
+      const corps = html.slice(html.indexOf('<main'));
+      if (/=== &quot;|=== "/.test(corps)) fautes.push(`${page.path} : onglet MkDocs en texte`);
+      if (corps.includes('@@BLOC')) fautes.push(`${page.path} : repère interne visible`);
+      if (/&lt;\/?div/.test(corps)) fautes.push(`${page.path} : balise div en texte`);
+    }
+    expect(fautes).toEqual([]);
+  });
+
+  it('ferme chaque balise qu’elle ouvre', () => {
+    const fautes: string[] = [];
+    for (const page of pages) {
+      const html = renderDocPage(page.path, { root, locale: 'fr', appAvailable: true })!;
+      for (const tag of ['div', 'section', 'aside', 'details', 'ul', 'ol', 'table', 'pre', 'nav', 'main']) {
+        const ouvertes = (html.match(new RegExp(`<${tag}(?=[ \\t\\n>])`, 'g')) ?? []).length;
+        const fermees = (html.match(new RegExp(`</${tag}>`, 'g')) ?? []).length;
+        if (ouvertes !== fermees) fautes.push(`${page.path} : <${tag}> ${ouvertes} ouvertes, ${fermees} fermées`);
+      }
+    }
+    expect(fautes).toEqual([]);
+  });
+
+  it('rend les onglets sans script, le premier ouvert', () => {
+    const html = renderDocPage('applications/bureau-mobile', { root, locale: 'fr', appAvailable: true })!;
+    expect(html).toMatch(/<div class="tabs"><input type="radio" name="onglets-0" id="onglets-0-0" checked><label for="onglets-0-0">Android<\/label>/);
+    expect(html).not.toMatch(/<script/i);
   });
 });
