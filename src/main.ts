@@ -43,6 +43,7 @@ import { biometricStore, isAndroidApp, nativeCall, type DeviceSecretStore } from
 import { i18n } from './i18n';
 import { wireLanguageMenu } from './ui/languageMenu';
 import { initCustomSelects } from './ui/customSelect';
+import { memberAvatarHtml } from './ui/memberChip';
 
 type ActiveView = 'all-credentials' | '2fa-tokens' | 'tasks';
 type TaskViewMode = 'list' | 'kanban' | 'matrix' | 'calendar';
@@ -1854,9 +1855,16 @@ export class AppController {
       offline: 'var(--accent-orange)',
       error: 'var(--accent-red)'
     };
+    /*
+     * Toujours un visage : la photo du compte, sinon sa pastille colorée.
+     * Menu replié, il ne restait qu'un point de 8 px dans une case vide — on
+     * aurait dit un élément sélectionné sans contenu. L'état de la
+     * synchronisation devient un badge posé sur ce visage.
+     */
+    const email = account?.email ?? '';
     const avatar = this.avatarSrc
       ? `<img class="sync-avatar" src="${this.escapeHtml(this.avatarSrc)}" alt="" referrerpolicy="no-referrer">`
-      : '';
+      : email ? memberAvatarHtml(email, v => this.escapeHtml(v), { size: 22 }) : '';
     el.innerHTML = `${avatar}<span class="sync-dot" style="background-color:${colors[status]};"></span><span class="sync-label">${this.syncStatusLabel(status)}</span>`;
     const button = document.getElementById('btn-sync-status');
     if (button) button.title = [account?.email, state.message && translateError(state.message, i18n.getLocale())].filter(Boolean).join(' — ');

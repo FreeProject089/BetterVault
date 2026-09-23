@@ -4636,3 +4636,34 @@ label.check,
 .cselect-option.active { background: var(--bg-hover); }
 .cselect-option.selected { color: var(--accent); font-weight: 600; }
 .cselect-option.disabled { color: var(--text-muted); cursor: not-allowed; }
+
+/* ── Barre latérale repliée : chaque case montre quelque chose ─────────────
+   - Le bouton du compte porte un visage (photo ou pastille) et l'état de la
+     synchronisation en badge ; avant, un point de 8 px dans une case vide.
+   - Le coffre actif et la catégorie active ne se ressemblent plus : le coffre
+     est cerclé, la catégorie est remplie. Deux cases pleines l'une sur l'autre
+     laissaient croire à une sélection en double.
+   - Le raccourci « ? » disparaît : collé à l'icône, il débordait de la case. */
+.sync-status-inner { position: relative; display: inline-flex; align-items: center; gap: 8px; }
+.sync-status-inner .member-dot, .sync-status-inner .sync-avatar { flex: 0 0 auto; }
+@media (min-width: 901px) {
+  .sidebar-collapsed .sync-status-inner .sync-dot {
+    position: absolute;
+    right: -3px;
+    bottom: -3px;
+    width: 9px;
+    height: 9px;
+    border: 2px solid var(--bg-secondary);
+    box-sizing: content-box;
+  }
+  .sidebar-collapsed #vault-list .nav-item.active {
+    background: transparent;
+    box-shadow: inset 0 0 0 1.5px var(--accent);
+  }
+  .sidebar-collapsed #btn-open-shortcuts kbd { display: none; }
+  /* Pied compact : cinq boutons empilés prenaient la place du menu */
+  .sidebar-collapsed .sidebar-footer > div,
+  .sidebar-collapsed .sidebar-footer > div > div { gap: 4px !important; }
+  .sidebar-collapsed .sidebar-footer .sync-status,
+  .sidebar-collapsed .sidebar-footer .btn-lang-toggle { min-height: 36px; min-width: 36px; }
+}
