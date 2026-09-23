@@ -10,13 +10,14 @@
 <body>
   <main class="shell">
     <header class="top">
-      <div class="brand">
+      <a class="brand" href="/" title="Accueil">
         <img class="brand-logo on-dark" src="/admin/logo-on-dark.svg" alt="" width="30" height="30"><img class="brand-logo on-light" src="/admin/logo-on-light.svg" alt="" width="30" height="30">
         <span>BetterVault</span>
         <span class="brand-sub" data-i18n="admin">Administration</span>
-      </div>
+      </a>
       <div class="top-actions">
-        <a class="btn ghost" href="/docs" target="_blank" rel="noopener" data-i18n="docs">Documentation</a>
+        <a class="btn ghost top-link" href="/" data-i18n="siteLink">Site</a>
+        <a class="btn ghost top-link" href="/docs" target="_blank" rel="noopener" data-i18n="docs">Documentation</a>
         <button class="btn ghost theme-toggle" id="theme-toggle" type="button" aria-label="Thème"></button>
         <button class="btn ghost" id="logout" type="button" hidden data-i18n="logout">Se déconnecter</button>
       </div>
@@ -48,6 +49,17 @@
 
     <div id="dashboard" hidden>
       <div class="dash">
+      <div class="section-picker" id="section-picker">
+        <button type="button" class="section-picker-btn" id="section-picker-btn" aria-haspopup="listbox" aria-expanded="false">
+          <span class="section-picker-label"><small data-i18n="sectionLabel">Section</small><b id="section-picker-current">Tableau de bord</b></span>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="section-picker-panel" id="section-picker-panel" hidden>
+          <input type="search" id="section-picker-search" autocomplete="off" data-i18n-placeholder="sectionSearch" placeholder="Rechercher une section">
+          <div id="section-picker-list" role="listbox"></div>
+          <p class="hint" id="section-picker-empty" hidden data-i18n="sectionNone">Aucune section</p>
+        </div>
+      </div>
       <nav class="tabs" role="tablist" aria-label="Sections de l’administration">
         <div class="tab-group">
           <span class="tab-group-title" data-i18n="groupOverview">Aperçu</span>
@@ -306,6 +318,15 @@
       </div>
       </div>
     </div>
+    <footer class="admin-footer">
+      <span>BetterVault · <span data-i18n="admin">Administration</span></span>
+      <nav>
+        <a href="/" data-i18n="home">Accueil</a>
+        <a href="/app" data-i18n="openApp">Application</a>
+        <a href="/docs" data-i18n="docs">Documentation</a>
+        <a href="/docs/deploiement/administration" data-i18n="adminGuide">Guide de l’administration</a>
+      </nav>
+    </footer>
   </main>
   <script type="module" src="/admin/admin.js"></script>
 </body>

@@ -47,6 +47,13 @@ const TEXT = {
   adminThemeAuto: ['Celui du système', 'System'],
   adminThemeLight: ['Clair', 'Light'],
   adminThemeDark: ['Sombre', 'Dark'],
+  home: ['Accueil', 'Home'],
+  siteLink: ['Site', 'Site'],
+  openApp: ['Application', 'App'],
+  adminGuide: ['Guide de l’administration', 'Admin guide'],
+  sectionLabel: ['Section', 'Section'],
+  sectionSearch: ['Rechercher une section', 'Search a section'],
+  sectionNone: ['Aucune section', 'No section'],
   landingEnabled: ['Page d’accueil publique (à la racine « / »)', 'Public home page (at the root “/”)'],
   landingTitle: ['Titre', 'Title'],
   landingDescription: ['Présentation', 'Description'],
@@ -479,6 +486,66 @@ document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', (
   if (name === 'emails') void loadEmails();
   if (name === 'languages') void loadLanguages();
 }));
+
+/* ── Sélecteur de section (téléphone) ──────────────────────────────────
+   Sur un écran étroit, les onglets deviennent un menu déroulant avec une
+   recherche, construit à partir des onglets eux-mêmes : il reste à jour. */
+{
+  const button = $('section-picker-btn');
+  const panel = $('section-picker-panel');
+  const search = $('section-picker-search');
+  const list = $('section-picker-list');
+  const empty = $('section-picker-empty');
+  const current = $('section-picker-current');
+  const norm = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+  const close = () => {
+    panel.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+  };
+  const render = () => {
+    const q = norm(search.value.trim());
+    let shown = 0;
+    list.innerHTML = '';
+    for (const group of document.querySelectorAll('.tabs .tab-group')) {
+      const tabs = [...group.querySelectorAll('.tab')].filter(tab => !tab.hidden && norm(tab.textContent).includes(q));
+      if (!tabs.length) continue;
+      const title = document.createElement('div');
+      title.className = 'section-picker-group';
+      title.textContent = group.querySelector('.tab-group-title')?.textContent ?? '';
+      list.append(title);
+      for (const tab of tabs) {
+        const option = document.createElement('button');
+        option.type = 'button';
+        option.className = 'section-picker-option';
+        option.setAttribute('role', 'option');
+        option.setAttribute('aria-selected', String(tab.classList.contains('active')));
+        option.textContent = tab.textContent;
+        option.addEventListener('click', () => { tab.click(); close(); button.focus(); });
+        list.append(option);
+        shown++;
+      }
+    }
+    empty.hidden = shown > 0;
+  };
+  const open = () => {
+    panel.hidden = false;
+    button.setAttribute('aria-expanded', 'true');
+    search.value = '';
+    render();
+    search.focus();
+  };
+  button.addEventListener('click', () => (panel.hidden ? open() : close()));
+  search.addEventListener('input', render);
+  search.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { close(); button.focus(); }
+    if (event.key === 'Enter') { event.preventDefault(); list.querySelector('.section-picker-option')?.click(); }
+  });
+  document.addEventListener('click', event => { if (!panel.hidden && !$('section-picker').contains(event.target)) close(); });
+  const sync = () => { current.textContent = document.querySelector('.tab.active')?.textContent ?? ''; };
+  document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', sync));
+  sync();
+}
 
 /* ── Administrateurs ───────────────────────────────────────────────────── */
 const ROLE_LABEL = { viewer: 'roleViewer', operator: 'roleOperator', owner: 'roleOwner' };

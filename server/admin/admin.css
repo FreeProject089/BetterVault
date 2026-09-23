@@ -519,3 +519,50 @@ code.fp.big { font-size: 18px; }
 .perf { align-items: start; }
 .perf .kv { align-content: start; }
 [data-panel] > div[id$="-panel"] > p.status.fail { margin: 0; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--danger) 10%, var(--card)); }
+
+/* ── En-tête, pied, sélecteur de section ─────────────────────────────── */
+.top { position: sticky; top: 0; z-index: 20; margin: -24px -16px 24px; padding: 12px 16px; background: color-mix(in srgb, var(--bg) 80%, transparent);
+  backdrop-filter: saturate(1.4) blur(14px); -webkit-backdrop-filter: saturate(1.4) blur(14px); border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+a.brand { color: var(--text); text-decoration: none; border-radius: 10px; padding: 4px 6px; margin-left: -6px; }
+a.brand:hover { background: color-mix(in srgb, var(--muted) 12%, transparent); }
+.brand-sub { padding: 2px 8px; border-radius: 999px; font-size: 12px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); font-weight: 600; }
+.top-actions .btn.ghost { border-color: transparent; }
+.top-actions .btn.ghost:hover { background: color-mix(in srgb, var(--muted) 12%, transparent); }
+
+.admin-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 20px; margin-top: 40px; padding-top: 18px;
+  border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+.admin-footer nav { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.admin-footer a { color: var(--muted); text-decoration: none; min-height: 32px; display: inline-flex; align-items: center; }
+.admin-footer a:hover { color: var(--text); }
+
+.section-picker { display: none; position: relative; }
+.section-picker-btn { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 52px; padding: 8px 14px;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--text); font: inherit; cursor: pointer; text-align: left; }
+.section-picker-btn[aria-expanded="true"] { border-color: var(--accent); }
+.section-picker-btn[aria-expanded="true"] svg { transform: rotate(180deg); }
+.section-picker-btn svg { transition: transform .2s; color: var(--muted); flex: 0 0 auto; }
+.section-picker-label { display: flex; flex-direction: column; line-height: 1.25; }
+.section-picker-label small { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.section-picker-label b { font-size: 15px; }
+.section-picker-panel { position: absolute; z-index: 15; left: 0; right: 0; top: calc(100% + 6px); padding: 8px; border: 1px solid var(--border); border-radius: 14px;
+  background: var(--card); box-shadow: 0 24px 48px -20px rgba(0, 0, 0, .55); max-height: min(70vh, 520px); overflow-y: auto; }
+.section-picker-panel input { width: 100%; margin: 0 0 6px; }
+.section-picker-group { padding: 10px 10px 4px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.section-picker-option { display: flex; align-items: center; width: 100%; min-height: 44px; padding: 0 12px; border: 0; border-radius: 9px; background: none;
+  color: var(--text); font: inherit; font-weight: 500; text-align: left; cursor: pointer; }
+.section-picker-option:hover, .section-picker-option:focus-visible { background: var(--field); outline: none; }
+.section-picker-option[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-weight: 700; }
+
+@media (max-width: 999px) {
+  .section-picker { display: block; }
+  .dash > .tabs { display: none; }
+}
+@media (max-width: 560px) {
+  .top { margin: -16px -12px 16px; padding: 10px 12px; }
+  .top-link { display: none; }
+  .brand-sub { display: none; }
+}
+.dash-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+@media (max-width: 560px) { .stats > :last-child:nth-child(odd) { grid-column: 1 / -1; } }
+.top-actions a.btn { text-decoration: none; }
+@media (min-width: 1000px) { .tabs { top: 84px; } }
