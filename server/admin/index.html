@@ -127,6 +127,13 @@
 
           <section class="card wide">
             <h2 data-i18n="publicPage">Page publique et annuaire</h2>
+            <label for="adminTheme" data-i18n="adminThemeLabel">Thème de l’administration par défaut</label>
+            <select id="adminTheme">
+              <option value="app" data-i18n="adminThemeApp">Celui de l’application</option>
+              <option value="auto" data-i18n="adminThemeAuto">Celui du système</option>
+              <option value="light" data-i18n="adminThemeLight">Clair</option>
+              <option value="dark" data-i18n="adminThemeDark">Sombre</option>
+            </select>
             <label class="check"><input id="landingEnabled" type="checkbox"> <span data-i18n="landingEnabled">Page d’accueil publique (à la racine « / »)</span></label>
             <label for="landingTitle" data-i18n="landingTitle">Titre</label>
             <input id="landingTitle" maxlength="80" placeholder="BetterVault · Europe">

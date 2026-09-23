@@ -42,6 +42,11 @@ const TEXT = {
   registrationOpen: ['Inscriptions ouvertes', 'Registration open'],
   attachmentsEnabled: ['Accepter les fichiers joints', 'Accept file attachments'],
   publicPage: ['Page publique et annuaire', 'Public page and directory'],
+  adminThemeLabel: ['Thème de l’administration par défaut (chaque appareil peut en changer avec le bouton ◐)', 'Default admin theme (each device can change it with the ◐ button)'],
+  adminThemeApp: ['Celui de l’application', 'Same as the app'],
+  adminThemeAuto: ['Celui du système', 'System'],
+  adminThemeLight: ['Clair', 'Light'],
+  adminThemeDark: ['Sombre', 'Dark'],
   landingEnabled: ['Page d’accueil publique (à la racine « / »)', 'Public home page (at the root “/”)'],
   landingTitle: ['Titre', 'Title'],
   landingDescription: ['Présentation', 'Description'],
@@ -297,6 +302,8 @@ function fill({ settings }) {
   $('attachmentsEnabled').checked = settings.attachmentsEnabled !== false;
   const page = settings.publicPage ?? {};
   $('landingEnabled').checked = page.landingEnabled !== false;
+  $('adminTheme').value = page.adminTheme ?? 'app';
+  window.bvAdminThemeDefault?.(page.adminTheme ?? 'app');
   $('landingTitle').value = page.title ?? '';
   $('landingDescription').value = page.description ?? '';
   $('directoryEnabled').checked = !!page.directoryEnabled;
@@ -407,6 +414,7 @@ $('settings-form').addEventListener('submit', async event => {
     attachmentsEnabled: $('attachmentsEnabled').checked,
     publicPage: {
       landingEnabled: $('landingEnabled').checked,
+      adminTheme: $('adminTheme').value,
       title: $('landingTitle').value,
       description: $('landingDescription').value,
       directoryEnabled: $('directoryEnabled').checked,
@@ -1688,26 +1696,65 @@ function wireRestore() {
   });
 }
 
-/* ── Thème : automatique, clair ou sombre, retenu sur cet appareil ──── */
+/* ── Thème ─────────────────────────────────────────────────────────────
+   Par défaut, l'administration reprend le thème choisi dans l'application
+   (même origine, donc même stockage) : mode clair/sombre et couleurs d'un
+   thème personnalisé. Le serveur fixe le choix par défaut ; le bouton de
+   l'en-tête le remplace sur cet appareil. */
 {
   const THEME_KEY = 'bv-admin-theme';
-  const order = ['auto', 'light', 'dark'];
-  const icons = { auto: '◐', light: '☀', dark: '☾' };
-  const labels = { auto: ['Thème : automatique', 'Theme: automatic'], light: ['Thème : clair', 'Theme: light'], dark: ['Thème : sombre', 'Theme: dark'] };
-  const read = () => { try { return localStorage.getItem(THEME_KEY) ?? 'auto'; } catch { return 'auto'; } };
-  const apply = theme => {
-    if (theme === 'auto') delete document.documentElement.dataset.theme;
-    else document.documentElement.dataset.theme = theme;
+  const order = ['app', 'auto', 'light', 'dark'];
+  const icons = { app: '◈', auto: '◐', light: '☀', dark: '☾' };
+  const labels = {
+    app: ['Thème : celui de l’application', 'Theme: same as the app'],
+    auto: ['Thème : celui du système', 'Theme: system'],
+    light: ['Thème : clair', 'Theme: light'],
+    dark: ['Thème : sombre', 'Theme: dark']
+  };
+  // Variables de l'application → variables de l'administration
+  const MAP = { 'bg-primary': 'bg', 'bg-secondary': 'card', 'bg-tertiary': 'field', 'border-muted': 'border', 'text-primary': 'text', 'text-muted': 'muted', accent: 'accent', 'accent-red': 'danger', 'accent-green': 'ok' };
+  const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+  const store = key => { try { return localStorage.getItem(key); } catch { return null; } };
+  const local = () => { const v = store(THEME_KEY); return order.includes(v) ? v : null; };
+  let serverDefault = 'app';
+  let theme = local() ?? serverDefault;
+
+  const appTheme = () => {
+    const mode = store('bettervault.theme') === 'light' ? 'light' : 'dark';
+    let colors = {};
+    try {
+      const custom = JSON.parse(store('bettervault.theme.custom') ?? 'null');
+      const variants = custom?.variants ?? (custom?.colors ? { [custom.base === 'light' ? 'light' : 'dark']: custom.colors } : {});
+      colors = variants[mode] ?? variants.dark ?? variants.light ?? {};
+    } catch { /* thème illisible : couleurs par défaut */ }
+    return { mode, colors };
+  };
+
+  const apply = () => {
+    const root = document.documentElement;
+    for (const name of Object.values(MAP)) root.style.removeProperty(`--${name}`);
+    if (theme === 'app') {
+      const { mode, colors } = appTheme();
+      root.dataset.theme = mode;
+      for (const [from, to] of Object.entries(MAP)) if (HEX.test(colors[from] ?? '')) root.style.setProperty(`--${to}`, colors[from]);
+    } else if (theme === 'auto') delete root.dataset.theme;
+    else root.dataset.theme = theme;
     const button = $('theme-toggle');
     button.textContent = icons[theme];
     button.title = button.ariaLabel = labels[theme][fr ? 0 : 1];
   };
-  let theme = order.includes(read()) ? read() : 'auto';
-  apply(theme);
+  apply();
+  // L'application change de thème dans un autre onglet : on suit
+  window.addEventListener('storage', event => { if (theme === 'app' && event.key?.startsWith('bettervault.theme')) apply(); });
+  // Réglage du serveur, connu après le chargement des paramètres
+  window.bvAdminThemeDefault = value => {
+    serverDefault = order.includes(value) ? value : 'app';
+    if (!local()) { theme = serverDefault; apply(); }
+  };
   $('theme-toggle').addEventListener('click', () => {
     theme = order[(order.indexOf(theme) + 1) % order.length];
     try { localStorage.setItem(THEME_KEY, theme); } catch { /* navigation privée : le choix vaut pour la session */ }
-    apply(theme);
+    apply();
   });
 }
 /* ── Emails : aperçu et personnalisation ─────────────────────────────────

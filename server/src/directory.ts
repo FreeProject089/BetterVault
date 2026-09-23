@@ -22,14 +22,20 @@ export interface PublicPageSettings {
   description: string;
   directoryEnabled: boolean;
   servers: DirectoryEntry[];
+  /** Thème de l'administration quand l'appareil n'en a pas choisi */
+  adminTheme: AdminTheme;
 }
+
+export type AdminTheme = 'app' | 'auto' | 'light' | 'dark';
+const ADMIN_THEMES: AdminTheme[] = ['app', 'auto', 'light', 'dark'];
 
 export const DEFAULT_PUBLIC_PAGE: PublicPageSettings = {
   landingEnabled: true,
   title: '',
   description: '',
   directoryEnabled: false,
-  servers: []
+  servers: [],
+  adminTheme: 'app'
 };
 
 const MAX_SERVERS = 30;
@@ -66,7 +72,8 @@ export function parsePublicPage(input: unknown, current: PublicPageSettings = DE
     title: p.title === undefined ? current.title : clean(p.title, 80),
     description: p.description === undefined ? current.description : String(p.description ?? '').replace(/\r/g, '').trim().slice(0, 2000),
     directoryEnabled: typeof p.directoryEnabled === 'boolean' ? p.directoryEnabled : current.directoryEnabled,
-    servers
+    servers,
+    adminTheme: ADMIN_THEMES.includes(p.adminTheme as AdminTheme) ? p.adminTheme as AdminTheme : current.adminTheme ?? 'app'
   };
 }
 
