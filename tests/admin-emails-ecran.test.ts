@@ -115,6 +115,29 @@ describe('Administration : onglet Emails', () => {
     await until(() => !document.querySelector('.email-item.active .badge-mini'));
   });
 
+  it('liste les langues ajoutées avec leur couverture, et en retire une', async () => {
+    // Une langue posée par l'API, comme l'aurait fait l'envoi d'un fichier
+    await fetch(`${origin}/api/v1/admin/i18n/es`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Español', strings: { 'Annuler': 'Cancelar', 'Fermer': 'Cerrar' } })
+    });
+    document.getElementById('languages-panel')!.innerHTML = '';
+    (document.querySelector('[data-tab="languages"]') as unknown as { click(): void }).click();
+    await until(() => !!document.querySelector('.language-row'));
+    const ligne = document.querySelector('.language-row')!;
+    expect(ligne.querySelector('.language-code')!.textContent).toBe('ES');
+    expect(ligne.querySelector('strong')!.textContent).toBe('Español');
+    expect(ligne.textContent).toContain('2');
+
+    // Retrait : la page demande confirmation, puis la liste se vide
+    (window as unknown as { confirm: () => boolean }).confirm = () => true;
+    (ligne.querySelector('[data-remove-language]') as unknown as { click(): void }).click();
+    await until(() => !document.querySelector('.language-row'));
+    const liste = await (await fetch(`${origin}/api/v1/i18n`)).json() as { languages: unknown[] };
+    expect(liste.languages).toEqual([]);
+  });
+
   it('change la langue d’envoi par défaut', async () => {
     await ouvrir();
     (document.querySelector('[data-default-locale="fr"]') as unknown as { click(): void }).click();

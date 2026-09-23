@@ -40,6 +40,7 @@ import { parseS3, parseSettingsUpdate, publicSettings, settingsFromEnv, type Ser
 import { createSmtpMailer, type Mailer, type MailMessage, type SmtpConfig } from './mailer.ts';
 import { emails, pickLocale, type EmailContext, type Locale } from './emails.ts';
 import { createEmailTemplates, isEmailKind, isEmailLocale } from './emailTemplates.ts';
+import { createLanguages, LanguageError } from './languages.ts';
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.ts';
 import { createWebauthn, parseRpId, type AssertionInput } from './webauthn.ts';
 import { DEFAULT_PUBLIC_PAGE, publicDirectory, renderLanding } from './directory.ts';
@@ -334,6 +335,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
   };
 
   const emailTemplates = createEmailTemplates(db);
+  const languages = createLanguages(db, now);
 
   /*
    * Langue d'un email : celle du compte, sinon celle choisie par
@@ -937,6 +939,17 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     },
     // Annuaire de serveurs recommandés par cet hébergeur, lu par l'application avant la connexion
     'GET /api/v1/directory': async () => ({ status: 200, body: publicDirectory(settings.publicPage ?? DEFAULT_PUBLIC_PAGE) }),
+
+    /** Langues proposées en plus du français et de l'anglais */
+    'GET /api/v1/i18n': async () => ({
+      status: 200,
+      body: { languages: languages.list().map(({ code, name, updatedAt }) => ({ code, name, updatedAt })) }
+    }),
+
+    'GET /api/v1/admin/i18n': async (req: IncomingMessage): Promise<Reply> => {
+      requireAdmin(req);
+      return { status: 200, body: { languages: languages.list() } };
+    },
     'GET /api/v1/admin/dashboard': async (req: IncomingMessage): Promise<Reply> => {
       requireAdmin(req);
       return {
@@ -1337,6 +1350,33 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     ...clusterRoutes({ db, auth: trust, filesDir: options.filesDir ?? null }),
     ...clusterAdminRoutes(),
     ...backupAdminRoutes(),
+    /* ── Langues ajoutées ──────────────────────────────────────────────
+       Lecture publique : l'application en a besoin avant toute connexion.
+       Ce sont des textes d'interface, pas des données de compte. */
+    route('GET', '/api/v1/i18n/:code', async (_req, params) => {
+      const pack = languages.get(params.code);
+      if (!pack) throw new HttpError(404, 'not_found', 'Langue introuvable');
+      return { status: 200, body: { code: pack.code, name: pack.name, strings: pack.strings, updatedAt: pack.updatedAt } };
+    }),
+    route('PUT', '/api/v1/admin/i18n/:code', async (req, params) => {
+      requireAdmin(req, 'manage');
+      // Un dictionnaire de 900 textes tient largement dans 1 Mo
+      const body = await readJson(req, 1_048_576);
+      try {
+        const result = languages.save(params.code, body.name, body.strings);
+        audit('admin.language_saved', { code: result.pack.code, count: result.pack.count, rejected: result.rejected });
+        return { status: 200, body: result };
+      } catch (err) {
+        if (err instanceof LanguageError) throw new HttpError(400, 'bad_language', err.message);
+        throw err;
+      }
+    }),
+    route('DELETE', '/api/v1/admin/i18n/:code', async (req, params) => {
+      requireAdmin(req, 'manage');
+      if (!languages.remove(params.code)) throw new HttpError(404, 'not_found', 'Langue introuvable');
+      audit('admin.language_removed', { code: params.code });
+      return { status: 204 };
+    }),
     route('PATCH', '/api/v1/admin/accounts/:id', async (req, params) => adminAuth.updateAccount(req, params.id, 'PATCH')),
     route('DELETE', '/api/v1/admin/accounts/:id', async (req, params) => adminAuth.updateAccount(req, params.id, 'DELETE')),
     ...sharingRoutes(context),

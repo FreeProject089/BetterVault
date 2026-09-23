@@ -41,6 +41,7 @@ import { CREDENTIAL_FILTERS, countByFilter, type CredentialFilter, type Credenti
 import { activeTabHost, extensionSessionStore, extensionSurface, fillActiveTab, matchesSite, openFullTab, openSidePanel } from './extension/surface';
 import { biometricStore, isAndroidApp, nativeCall, type DeviceSecretStore } from './platform/biometric';
 import { i18n } from './i18n';
+import { wireLanguageMenu } from './ui/languageMenu';
 
 type ActiveView = 'all-credentials' | '2fa-tokens' | 'tasks';
 type TaskViewMode = 'list' | 'kanban' | 'matrix' | 'calendar';
@@ -201,8 +202,9 @@ export class AppController {
     this.initAccount();
   }
 
+  /** Texte dans la langue affichée ; une langue ajoutée par le serveur passe par son dictionnaire */
   tr(fr: string, en: string): string {
-    return i18n.getLocale() === 'fr' ? fr : en;
+    return i18n.pick(fr, en);
   }
 
   escapeHtml(value: string): string {
@@ -289,19 +291,22 @@ export class AppController {
   }
 
   /* ── Internationalisation (i18n & i10n) ─────────────────────────────────── */
+  /** Relance la liste des langues (après connexion d'un compte synchronisé, par exemple) */
+  refreshLanguages: () => void = () => undefined;
+
   private initI18n(): void {
     const toggleBtn = document.getElementById('btn-language-toggle');
-    toggleBtn?.addEventListener('click', () => {
-      const nextLang = i18n.toggleLocale();
-      const label = document.getElementById('current-lang-label');
-      if (label) label.textContent = nextLang.toUpperCase();
-      this.showToast(nextLang === 'fr' ? 'Langue : Français' : 'Language: English', 'info', 1500);
-    });
+    if (toggleBtn) {
+      this.refreshLanguages = wireLanguageMenu(toggleBtn, document.getElementById('current-lang-label'), {
+        onChange: message => this.showToast(message, 'info', 1500),
+        onError: message => this.showToast(message, 'error')
+      });
+    }
     this.applyI18n();
   }
 
   private applyI18n(): void {
-    const lang = i18n.getLocale();
+    const lang = i18n.getLocaleCode();
     document.documentElement.lang = lang;
     const label = document.getElementById('current-lang-label');
     if (label) label.textContent = lang.toUpperCase();
@@ -1686,6 +1691,8 @@ export class AppController {
     vaultStore.load(data);
     vaultStore.setPersistence(snapshot => void accountService.save(sharedVaults.split(snapshot)));
     void this.refreshSharedVaults();
+    // Un compte synchronisé désigne son serveur : ses langues ajoutées deviennent disponibles
+    this.refreshLanguages();
     this.purgeExpiredTrash();
     this.preloadWindows();
     this.selectedItemId = null;

@@ -74,6 +74,24 @@ const TEXT = {
   wrongToken: ['Jeton incorrect', 'Wrong token'],
   backups: ['Sauvegardes', 'Backups'],
   tabEmails: ['Emails', 'Emails'],
+  tabLanguages: ['Langues', 'Languages'],
+  languagesTitle: ['Langues de l’application', 'App languages'],
+  languagesHint: ['Le français et l’anglais sont intégrés. Ajoutez une langue en traduisant le modèle : chaque texte non traduit s’affiche en anglais.', 'French and English are built in. Add a language by translating the template: every untranslated text shows in English.'],
+  languagesTemplate: ['Télécharger le modèle à traduire', 'Download the template to translate'],
+  languagesTemplateHint: ['Un fichier JSON : chaque texte français, déjà rempli en anglais. Remplacez l’anglais par votre langue ; ce que vous laissez tel quel reste en anglais.', 'A JSON file: every French text, pre-filled in English. Replace the English with your language; whatever you leave as is stays in English.'],
+  languagesAdd: ['Ajouter ou remplacer une langue', 'Add or replace a language'],
+  languagesCode: ['Code', 'Code'],
+  languagesCodeHint: ['es, de, it, pt-BR…', 'es, de, it, pt-BR…'],
+  languagesName: ['Nom, dans cette langue', 'Name, in that language'],
+  languagesFile: ['Fichier traduit (.json)', 'Translated file (.json)'],
+  languagesUpload: ['Envoyer', 'Upload'],
+  languagesNone: ['Aucune langue ajoutée pour l’instant.', 'No added language yet.'],
+  languagesCoverage: ['textes traduits', 'texts translated'],
+  languagesRemove: ['Retirer', 'Remove'],
+  languagesRemoveConfirm: ['Retirer cette langue ? Les personnes qui l’utilisent repasseront en anglais.', 'Remove this language? People using it will go back to English.'],
+  languagesRejected: ['traductions écartées (elles contenaient <, > ou ")', 'translations dropped (they contained <, > or ")'],
+  languagesSaved: ['Langue enregistrée', 'Language saved'],
+  languagesCatalogMissing: ['Catalogue introuvable : construisez l’application web (npm run build) pour le publier.', 'Catalogue not found: build the web app (npm run build) to publish it.'],
   emailsTitle: ['Emails envoyés', 'Emails sent'],
   emailsHint: ['Voyez chaque message tel qu’il part, changez son sujet et ajoutez une introduction. Le code, la date, l’adresse IP et l’avertissement de sécurité restent produits par le serveur.', 'See each message as it is sent, change its subject and add an introduction. The code, date, IP address and security warning stay produced by the server.'],
   emailsDefaultLocale: ['Langue d’envoi par défaut', 'Default sending language'],
@@ -451,6 +469,7 @@ document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', (
   if (name === 'cluster') void loadCluster();
   if (name === 'backups') void loadBackups();
   if (name === 'emails') void loadEmails();
+  if (name === 'languages') void loadLanguages();
 }));
 
 /* ── Administrateurs ───────────────────────────────────────────────────── */
@@ -1765,4 +1784,128 @@ async function refreshEmailPreview(draft) {
   } catch (err) {
     $('email-preview-subject').textContent = err.message;
   }
+}
+
+/* ── Langues de l'application ────────────────────────────────────────────
+   Le modèle est rempli en anglais : un texte laissé tel quel s'affiche donc
+   exactement comme le repli, et une traduction partielle reste utilisable. */
+let catalogCount = 0;
+
+async function loadCatalog() {
+  const response = await fetch('/i18n/source.json', { headers: { Accept: 'application/json' } });
+  if (!response.ok) throw new Error(t('languagesCatalogMissing'));
+  return response.json();
+}
+
+async function loadLanguages() {
+  const host = $('languages-panel');
+  if (!host) return;
+  let languages = [];
+  try {
+    languages = (await api('GET', 'i18n')).languages;
+  } catch (err) {
+    host.innerHTML = `<p class="notice notice-danger">${escapeHtml(err.message)}</p>`;
+    return;
+  }
+  // Le total sert à dire « 640 / 892 » : sans catalogue, on affiche le compte seul
+  try { catalogCount = (await loadCatalog()).count ?? 0; } catch { catalogCount = 0; }
+  const canEdit = me?.breakGlass || me?.role === 'owner';
+
+  host.innerHTML = `
+    <section class="card">
+      <div class="panel-head"><h2>${t('languagesTitle')}</h2></div>
+      <p class="hint">${t('languagesHint')}</p>
+      <ul class="language-list">
+        ${languages.length ? languages.map(l => {
+          const part = catalogCount ? Math.min(100, Math.round((l.count / catalogCount) * 100)) : null;
+          return `
+          <li class="language-row">
+            <span class="language-code">${escapeHtml(l.code.toUpperCase())}</span>
+            <span class="language-main">
+              <strong>${escapeHtml(l.name)}</strong>
+              <span class="hint">${l.count}${catalogCount ? ` / ${catalogCount}` : ''} ${t('languagesCoverage')}</span>
+              ${part !== null ? `<span class="coverage" aria-hidden="true"><span style="width:${part}%"></span></span>` : ''}
+            </span>
+            ${canEdit ? `<button type="button" class="btn danger" data-remove-language="${escapeHtml(l.code)}">${t('languagesRemove')}</button>` : ''}
+          </li>`;
+        }).join('') : `<li class="hint">${t('languagesNone')}</li>`}
+      </ul>
+    </section>
+
+    ${canEdit ? `
+    <section class="card">
+      <div class="panel-head"><h2>${t('languagesAdd')}</h2></div>
+      <div class="row test"><button type="button" class="btn" id="language-template">${t('languagesTemplate')}</button></div>
+      <p class="hint">${t('languagesTemplateHint')}</p>
+      <div class="language-form">
+        <label>${t('languagesCode')}<input id="language-code" maxlength="8" placeholder="${t('languagesCodeHint')}" autocomplete="off" spellcheck="false"></label>
+        <label>${t('languagesName')}<input id="language-name" maxlength="40" placeholder="Español" autocomplete="off"></label>
+        <label>${t('languagesFile')}<input id="language-file" type="file" accept="application/json,.json"></label>
+      </div>
+      <div class="actions">
+        <span class="status" id="language-status" role="status"></span>
+        <button type="button" class="btn primary" id="language-upload">${t('languagesUpload')}</button>
+      </div>
+    </section>` : ''}`;
+
+  host.querySelectorAll('[data-remove-language]').forEach(button => button.addEventListener('click', async () => {
+    if (!confirm(t('languagesRemoveConfirm'))) return;
+    await api('DELETE', `i18n/${encodeURIComponent(button.dataset.removeLanguage)}`);
+    void loadLanguages();
+  }));
+
+  $('language-template')?.addEventListener('click', async () => {
+    try {
+      const catalog = await loadCatalog();
+      const modele = {
+        format: 'bettervault.i18n-pack',
+        code: '',
+        name: '',
+        // Chaque texte français, pré-rempli en anglais : à remplacer par la traduction
+        strings: Object.fromEntries(catalog.strings.map(s => [s.fr, s.en]))
+      };
+      const blob = new Blob([JSON.stringify(modele, null, 2)], { type: 'application/json' });
+      const lien = document.createElement('a');
+      lien.href = URL.createObjectURL(blob);
+      lien.download = 'bettervault-langue-modele.json';
+      lien.click();
+      setTimeout(() => URL.revokeObjectURL(lien.href), 1000);
+    } catch (err) {
+      setStatus($('language-status'), err.message, 'fail');
+    }
+  });
+
+  // Le fichier peut porter son code et son nom : on les reprend s'ils sont remplis
+  $('language-file')?.addEventListener('change', async () => {
+    const file = $('language-file').files?.[0];
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      if (parsed?.code && !$('language-code').value) $('language-code').value = String(parsed.code).slice(0, 8);
+      if (parsed?.name && !$('language-name').value) $('language-name').value = String(parsed.name).slice(0, 40);
+    } catch { /* lu à l'envoi, avec un message clair */ }
+  });
+
+  $('language-upload')?.addEventListener('click', async () => {
+    const status = $('language-status');
+    const file = $('language-file').files?.[0];
+    const code = $('language-code').value.trim();
+    if (!file || !code) { setStatus(status, t('languagesFile'), 'fail'); return; }
+    let parsed;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch {
+      setStatus(status, fr ? 'Fichier JSON illisible' : 'Unreadable JSON file', 'fail');
+      return;
+    }
+    // Accepte le modèle (avec « strings ») comme un dictionnaire à plat
+    const strings = parsed && typeof parsed.strings === 'object' ? parsed.strings : parsed;
+    try {
+      const result = await api('PUT', `i18n/${encodeURIComponent(code)}`, { name: $('language-name').value, strings });
+      await loadLanguages();
+      setStatus($('language-status'), `${t('languagesSaved')}${result.rejected ? ` · ${result.rejected} ${t('languagesRejected')}` : ''}`, result.rejected ? 'warn' : 'ok');
+    } catch (err) {
+      setStatus(status, err.message, 'fail');
+    }
+  });
 }

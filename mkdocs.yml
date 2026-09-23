@@ -71,6 +71,7 @@ nav:
       - Supervision: deploiement/supervision.md
       - Page publique et annuaire: deploiement/page-publique.md
       - Documents légaux: deploiement/documents-legaux.md
+      - Emails et langues: deploiement/emails-langues.md
       - Espace payant (Stripe): deploiement/offres-stripe.md
   - Applications:
       - Bureau et mobile: applications/bureau-mobile.md

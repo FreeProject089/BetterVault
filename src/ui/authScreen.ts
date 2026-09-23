@@ -25,7 +25,7 @@ export const DEFAULT_SERVER_URL = import.meta.env.VITE_BETTERVAULT_SERVER
 
 type Screen = 'unlock' | 'create' | 'signin' | 'confirm-signout' | 'recover' | 'recovery-key' | 'totp-offer';
 
-const tr = (fr: string, en: string) => (i18n.getLocale() === 'fr' ? fr : en);
+const tr = (fr: string, en: string) => i18n.pick(fr, en);
 
 const escapeHtml = (value: string) =>
   value.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch] ?? ch);

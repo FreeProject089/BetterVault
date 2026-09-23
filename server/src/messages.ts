@@ -17,6 +17,12 @@ export function requestLocale(req: IncomingMessage): ApiLocale {
 const EXACT: Record<string, string> = {
   'Cette personne fait déjà partie du coffre': 'This person is already a member of the vault',
   'Message inconnu': 'Unknown message',
+  'Langue introuvable': 'Language not found',
+  'Le fichier doit associer chaque texte français à sa traduction': 'The file must map each French text to its translation',
+  'Code de langue invalide (ex. : es, pt-BR)': 'Invalid language code (e.g. es, pt-BR)',
+  'Le français et l’anglais sont déjà intégrés à l’application': 'French and English are already built into the app',
+  'Donnez un nom à la langue, écrit dans cette langue (ex. : Español)': 'Give the language a name, written in that language (e.g. Español)',
+  'Aucune traduction utilisable dans ce fichier': 'No usable translation in this file',
   'Langue inconnue': 'Unknown language',
   'Le fichier n’est plus disponible sur le serveur': 'The file is no longer available on the server',
   'Pièce jointe introuvable': 'Attachment not found',
