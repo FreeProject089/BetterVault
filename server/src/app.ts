@@ -834,7 +834,12 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       const refuse = (message = 'Informations de récupération incorrectes') => new HttpError(401, 'recovery_invalid', message);
       // Travail constant : la clé de secours est toujours vérifiée, même pour un compte inconnu
       const keyValid = recoveryAuthHash ? await verifyRecoveryHash(user, recoveryAuthHash) : false;
-      if (!user) throw refuse();
+      /*
+       * Email inconnu : même réponse qu'un compte réel dont le code email n'a
+       * pas été demandé (ou est expiré). Sinon le message trahissait qui a un
+       * compte ici, alors que /recovery/start répond pareil dans les deux cas.
+       */
+      if (!user) throw refuse(settings.smtp ? 'Code email expiré. Demandez-en un nouveau.' : undefined);
 
       let emailVerified = false;
       if (settings.smtp) {
