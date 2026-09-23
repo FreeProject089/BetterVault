@@ -168,16 +168,20 @@ jobs:
           "$BT/zipalign" -f -p 4 "$APK" aligned.apk
           "$BT/apksigner" sign --ks release.keystore --ks-pass env:ANDROID_KEYSTORE_PASSWORD --ks-key-alias "$ANDROID_KEY_ALIAS" --out bettervault-android.apk aligned.apk
           rm release.keystore
+      # Android refuse d'installer un APK non signé : il reste un artefact de la
+      # CI (pour vérifier la construction), jamais un fichier de la version.
       - name: APK non signé
         if: env.HAS_KEYSTORE != 'true'
-        run: cp "$(find src-tauri/gen/android -name '*release-unsigned.apk' | head -1)" bettervault-android-unsigned.apk
+        run: |
+          cp "$(find src-tauri/gen/android -name '*release-unsigned.apk' | head -1)" bettervault-android-unsigned.apk
+          echo "::warning title=APK non signé::Secret ANDROID_KEYSTORE absent : aucun APK n'est joint à la version (voir docs/developpement/build.md)."
       - uses: softprops/action-gh-release@v2
-        if: ${{ github.event_name == 'push' || inputs.publier }}
+        if: ${{ env.HAS_KEYSTORE == 'true' && (github.event_name == 'push' || inputs.publier) }}
         with:
           draft: true
-          files: bettervault-android*.apk
-      - name: APK (essai)
-        if: ${{ github.event_name != 'push' && !inputs.publier }}
+          files: bettervault-android.apk
+      - name: APK (essai, ou non signé)
+        if: ${{ (github.event_name != 'push' && !inputs.publier) || env.HAS_KEYSTORE != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: android-apk

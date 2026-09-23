@@ -39,7 +39,7 @@ describe('Lecture de la dernière version', () => {
     expect(r.others.linux?.map(f => f.name.split('.').pop())).toEqual(['deb', 'rpm']);
     expect(r.files.macos).toMatchObject({ name: 'BetterVault_1.2.0_aarch64.dmg', note: 'Apple Silicon' });
     expect(r.others.macos?.[0]).toMatchObject({ note: 'Intel' });
-    expect(r.files.android?.name).toBe('bettervault-android-unsigned.apk');
+    expect(r.files.android).toBeUndefined();
     expect(r.files.extension?.name).toBe('bettervault-extension-v1.2.0.zip');
     expect(r.files.ios).toBeUndefined();
   });
@@ -49,9 +49,13 @@ describe('Lecture de la dernière version', () => {
     expect(names).not.toMatch(/tar\.gz|\.sig|piege/);
   });
 
-  it('préfère un APK signé à un APK non signé', () => {
+  it('ne propose jamais un APK non signé, qu’Android refuserait d’installer', () => {
     const r = parseRelease({ ...release, assets: [asset('bettervault-android-unsigned.apk'), asset('bettervault-android.apk')] })!;
     expect(r.files.android?.name).toBe('bettervault-android.apk');
+    expect(r.others.android).toBeUndefined();
+    const html = renderDownloadsPage({ page: DEFAULT_PUBLIC_PAGE, operatorName: 'X', registrationOpen: true, legalEnabled: true, appAvailable: true, version: '1', locale: 'fr', release: parseRelease(release) });
+    expect(html).toMatch(/class="dl-card soon" data-platform="android"/);
+    expect(html).not.toContain('unsigned');
   });
 
   it('refuse les brouillons et les préversions', () => {

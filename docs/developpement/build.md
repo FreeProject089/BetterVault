@@ -136,6 +136,23 @@ Il faut aussi que `ANDROID_HOME` et `NDK_HOME` pointent vers le SDK et le NDK.
 
 L'APK non signé sort dans `src-tauri/gen/android/`. Pour le signer, le workflow de release utilise `zipalign` puis `apksigner` avec les secrets `ANDROID_KEYSTORE`, `ANDROID_KEYSTORE_PASSWORD` et `ANDROID_KEY_ALIAS`.
 
+Android refuse d'installer un APK non signé. Sans ces secrets, le workflow ne joint donc **aucun APK** à la version : il le garde comme artefact de la CI, affiche un avertissement, et la page Télécharger marque Android « Bientôt ». Pour créer la clé, une seule fois :
+
+```bash
+keytool -genkeypair -v -keystore release.keystore -alias bettervault -keyalg RSA -keysize 4096 -validity 10000
+```
+
+Puis, dans **GitHub → Settings → Secrets and variables → Actions** :
+
+| Secret | Valeur |
+| --- | --- |
+| `ANDROID_KEYSTORE` | Le fichier en base64 : `base64 -w0 release.keystore` (sous Windows : `[Convert]::ToBase64String([IO.File]::ReadAllBytes("release.keystore"))`) |
+| `ANDROID_KEYSTORE_PASSWORD` | Le mot de passe choisi à la création |
+| `ANDROID_KEY_ALIAS` | `bettervault` |
+
+!!! warning "Gardez la clé en lieu sûr"
+    Toutes les mises à jour doivent être signées avec la même clé : Android refuse une mise à jour signée autrement, et il faudrait désinstaller l'application (et perdre ses réglages locaux). Sauvegardez `release.keystore` et son mot de passe hors du dépôt, et ne les commitez jamais.
+
 Le déverrouillage biométrique passe par le Keystore Android (`BetterVaultPlugin.kt`) et non par le trousseau, que la bibliothèque `keyring` ne prend pas en charge sur Android.
 
 ## Application iOS

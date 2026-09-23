@@ -76,14 +76,14 @@ export function parseRelease(raw: unknown): ReleaseInfo | null {
     const name = typeof a.name === 'string' ? a.name.slice(0, 160) : '';
     const url = githubUrl(a.browser_download_url);
     if (!name || !url) continue;
+    // Android refuse d'installer un APK non signé : ce n'est pas un téléchargement
+    if (/unsigned/i.test(name)) continue;
     const rank = RULES.findIndex(rule => rule.test.test(name));
     if (rank < 0) continue;
     const { platform, note } = RULES[rank];
-    // Un APK signé passe avant un APK non signé
-    const penalty = /unsigned/i.test(name) ? 0.5 : 0;
     const list = found.get(platform) ?? [];
     if (list.some(f => f.name === name)) continue;
-    list.push({ url, name, size: typeof a.size === 'number' ? a.size : 0, ...(note ? { note } : {}), rank: rank + penalty });
+    list.push({ url, name, size: typeof a.size === 'number' ? a.size : 0, ...(note ? { note } : {}), rank });
     found.set(platform, list);
   }
 
