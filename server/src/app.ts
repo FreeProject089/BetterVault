@@ -27,7 +27,7 @@ import { accountKeyRoutes, sharingRoutes } from './sharing.ts';
 import { attachmentRoutes, deleteUserAttachments } from './attachments.ts';
 import { databaseSnapshot, effectiveDestinations, encryptBackup, type BackupDestination, type BackupService, type BackupSettings } from './backup.ts';
 import { sessionRoutes } from './sessions.ts';
-import { billingRoutes, createLimitsResolver } from './billing.ts';
+import { billingRoutes, createLimitsResolver, createMissingStripePrices, stripeClient, STRIPE_WEBHOOK_EVENTS } from './billing.ts';
 import { LEGAL_DOCUMENTS, legalConfigured, legalTitle, renderLegalPage } from './legal.ts';
 import { renderNotMePage, renderNotMeDone, renderNotMeExpired } from './securityAlert.ts';
 import { clusterRoutes, createClusterSync, installClusterSchema, type ClusterSync } from './cluster.ts';
@@ -44,8 +44,10 @@ import { createEmailTemplates, isEmailKind, isEmailLocale } from './emailTemplat
 import { createLanguages, LanguageError } from './languages.ts';
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.ts';
 import { createWebauthn, parseRpId, type AssertionInput } from './webauthn.ts';
-import { DEFAULT_PUBLIC_PAGE, publicDirectory, renderLanding, renderServersPage } from './directory.ts';
+import { DEFAULT_PUBLIC_PAGE, publicDirectory, renderLanding, renderPlansPage, renderServersPage, type PublicPlan } from './directory.ts';
 import { renderDocPage } from './docs.ts';
+import { SITE_JS } from './siteScript.ts';
+import { createSiteLinks } from './siteLinks.ts';
 import type { ChromeContext } from './siteChrome.ts';
 
 /**
@@ -868,6 +870,26 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       return { status: 200, body: { settings: publicSettings(settings) } };
     },
 
+    /*
+     * Offres créées de zéro dans /admin : produit et prix créés dans Stripe
+     * avec la seule clé secrète. Les identifiants obtenus sont enregistrés.
+     */
+    'POST /api/v1/admin/billing/stripe-sync': async req => {
+      requireAdmin(req, 'manage', true);
+      const result = await createMissingStripePrices(settings.billing.plans, stripeClient(context, fetchImpl));
+      settings = { ...settings, billing: { ...settings.billing, plans: result.plans } };
+      writeSetting.run('settings', JSON.stringify(settings));
+      audit('admin.billing_stripe_sync', { created: result.created });
+      return { status: 200, body: { created: result.created, settings: publicSettings(settings) } };
+    },
+
+    /** Ce que le webhook Stripe doit connaître : son adresse et les événements à envoyer */
+    'GET /api/v1/admin/billing/webhook-info': async req => {
+      requireAdmin(req, 'view');
+      const base = settings.publicUrl;
+      return { status: 200, body: { url: base ? `${base}/api/v1/billing/webhook` : null, events: STRIPE_WEBHOOK_EVENTS } };
+    },
+
     'POST /api/v1/admin/smtp-test': async req => {
       requireAdmin(req, 'operate');
       const body = await readJson(req, 4096);
@@ -1038,24 +1060,84 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       return { status: 200, raw: payload, contentType: 'application/octet-stream' };
     },
   });
-  /** En-tête et pied communs des pages publiques */
-  const siteChrome = (req: IncomingMessage): ChromeContext => {
-    const page = settings.publicPage ?? DEFAULT_PUBLIC_PAGE;
+  /** Liens communautaires, relus au plus une fois par heure depuis l'adresse réglée dans /admin */
+  const siteLinks = createSiteLinks({ url: () => (settings.publicPage ?? DEFAULT_PUBLIC_PAGE).linksUrl ?? '' });
+
+  /*
+   * Langue des pages publiques : ?lang= l'impose et la retient un an (cookie
+   * sans valeur sensible), sinon le cookie, sinon la langue du navigateur.
+   */
+  const pageLocale = (req: IncomingMessage): { locale: 'fr' | 'en'; cookie?: string } => {
+    const asked = new URL(req.url ?? '/', 'http://localhost').searchParams.get('lang');
+    if (asked === 'fr' || asked === 'en') return { locale: asked, cookie: `bv_lang=${asked}; Path=/; Max-Age=31536000; SameSite=Lax` };
+    const saved = /(?:^|;\s*)bv_lang=(fr|en)\b/.exec(String(req.headers.cookie ?? ''))?.[1] as 'fr' | 'en' | undefined;
+    return { locale: saved ?? (requestLocale(req) === 'en' ? 'en' : 'fr') };
+  };
+  const withCookie = (reply: Reply, cookie?: string): Reply => (cookie ? { ...reply, headers: { ...(reply.headers ?? {}), 'Set-Cookie': cookie } } : reply);
+
+  /** Offres affichées sur la page des tarifs : sans identifiants Stripe */
+  const publicPlans = (): PublicPlan[] => settings.billing.enabled
+    ? settings.billing.plans
+        .map(plan => ({ ...plan, prices: plan.prices.filter(price => price.stripePriceId) }))
+        .filter(plan => plan.prices.length)
+        .map(plan => ({
+          id: plan.id, name: plan.name, description: plan.description, boosts: plan.boosts,
+          prices: plan.prices.map(price => ({ label: price.label, amount: price.amount, currency: price.currency, interval: price.interval }))
+        }))
+    : [];
+
+  /** Serveurs actifs de la grappe, montrés sur l'accueil quand il y en a plusieurs */
+  const officialServers = () => {
+    const view = clusterView(false);
+    return (view.cluster?.nodes ?? [])
+      .filter(node => node.status === 'active')
+      .map(node => ({ name: node.name, region: node.region ?? '', zone: node.zone ?? '', online: node.health === 'self' || node.health === 'ok' }));
+  };
+
+  /** Contexte commun des pages publiques (accueil, tarifs, serveurs) */
+  const landingContext = async (req: IncomingMessage) => {
+    const { locale, cookie } = pageLocale(req);
+    const url = new URL(req.url ?? '/', 'http://localhost');
     return {
-      locale: requestLocale(req) === 'en' ? 'en' : 'fr',
+      cookie,
+      ctx: {
+        page: settings.publicPage ?? DEFAULT_PUBLIC_PAGE,
+        operatorName: settings.legal.operatorName ?? '',
+        registrationOpen: settings.registrationOpen,
+        legalEnabled: settings.legal.enabled,
+        appAvailable: !!options.appAvailable,
+        version: SERVER_VERSION,
+        locale,
+        links: await siteLinks(),
+        path: url.pathname,
+        officialServers: officialServers(),
+        plans: publicPlans(),
+        freeLimits: { maxVaults: settings.limits.maxVaults, maxCredentialsPerVault: settings.limits.maxCredentialsPerVault, attachmentQuotaBytes: settings.limits.attachmentQuotaBytes }
+      }
+    };
+  };
+
+  /** En-tête et pied communs des pages publiques */
+  const siteChrome = async (req: IncomingMessage): Promise<ChromeContext> => {
+    const page = settings.publicPage ?? DEFAULT_PUBLIC_PAGE;
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    return {
+      locale: pageLocale(req).locale,
       appAvailable: !!options.appAvailable,
       serversOn: page.directoryEnabled && page.servers.length > 0,
       legalEnabled: settings.legal.enabled,
       version: SERVER_VERSION,
-      operatorName: settings.legal.operatorName ?? ''
+      operatorName: settings.legal.operatorName ?? '',
+      plansOn: publicPlans().length > 0,
+      links: await siteLinks(),
+      path: url.pathname
     };
   };
-  const legalPage = (slug: string, req: IncomingMessage): Reply => {
-    const lang = new URL(req.url ?? '/', 'http://localhost').searchParams.get('lang');
-    const locale = lang === 'en' || lang === 'fr' ? lang : requestLocale(req);
-    const html = renderLegalPage(legalDir, slug, legalContext(), locale, { ...siteChrome(req), locale });
+  const legalPage = async (slug: string, req: IncomingMessage): Promise<Reply> => {
+    const { locale, cookie } = pageLocale(req);
+    const html = renderLegalPage(legalDir, slug, legalContext(), locale, { ...(await siteChrome(req)), locale });
     if (!html) throw new HttpError(404, 'not_found', 'Document inconnu');
-    return { status: 200, raw: Buffer.from(html), contentType: 'text/html; charset=utf-8' };
+    return withCookie({ status: 200, raw: Buffer.from(html), contentType: 'text/html; charset=utf-8' }, cookie);
   };
 
   /*
@@ -1083,7 +1165,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
    * aucun script, rien d'externe. La politique le dit, de sorte qu'une éventuelle
    * faille d'échappement ne suffirait ni à exécuter du code ni à sortir une donnée.
    */
-  const PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+  const PAGE_CSP = "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
   const htmlReply = (html: string, status = 200): Reply => ({
     status,
     raw: Buffer.from(html),
@@ -1497,13 +1579,14 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       keys: ['page'],
       handler: async (req: IncomingMessage, params: Record<string, string>): Promise<Reply> => {
         const page = (params.page ?? '').replace(/\/$/, '');
+        const { locale, cookie } = pageLocale(req);
         const html = renderDocPage(page, {
           root: docsDir,
-          locale: requestLocale(req) === 'en' ? 'en' : 'fr',
+          locale,
           appAvailable: !!options.appAvailable,
-          chrome: siteChrome(req)
+          chrome: await siteChrome(req)
         });
-        return html ? htmlReply(html) : htmlReply('<!DOCTYPE html><title>404</title><p>Not found</p>', 404);
+        return withCookie(html ? htmlReply(html) : htmlReply('<!DOCTYPE html><title>404</title><p>Not found</p>', 404), cookie);
       }
     },
 
@@ -1514,30 +1597,27 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     route('GET', '/', async req => {
       const page = settings.publicPage ?? DEFAULT_PUBLIC_PAGE;
       if (!page.landingEnabled) return { status: 302, headers: { Location: '/app' } };
-      return htmlReply(renderLanding({
-        page,
-        operatorName: settings.legal.operatorName ?? '',
-        registrationOpen: settings.registrationOpen,
-        legalEnabled: settings.legal.enabled,
-        appAvailable: !!options.appAvailable,
-        version: SERVER_VERSION,
-        locale: requestLocale(req) === 'en' ? 'en' : 'fr'
-      }));
+      const { ctx, cookie } = await landingContext(req);
+      return withCookie(htmlReply(renderLanding(ctx)), cookie);
     }),
     route('GET', '/about', async () => ({ status: 301, headers: { Location: '/' } })),
     // Serveurs recommandés par l'hébergeur (annuaire) ; absente si l'annuaire est coupé
     route('GET', '/serveurs', async req => {
-      const html = renderServersPage({
-        page: settings.publicPage ?? DEFAULT_PUBLIC_PAGE,
-        operatorName: settings.legal.operatorName ?? '',
-        registrationOpen: settings.registrationOpen,
-        legalEnabled: settings.legal.enabled,
-        appAvailable: !!options.appAvailable,
-        version: SERVER_VERSION,
-        locale: requestLocale(req) === 'en' ? 'en' : 'fr'
-      });
-      return html ? htmlReply(html) : htmlReply('<!DOCTYPE html><title>404</title><p>Not found</p>', 404);
+      const { ctx, cookie } = await landingContext(req);
+      const html = renderServersPage(ctx);
+      return withCookie(html ? htmlReply(html) : htmlReply('<!DOCTYPE html><title>404</title><p>Not found</p>', 404), cookie);
     }),
+    // Offres payantes ; absente tant qu'aucune n'est publiée
+    route('GET', '/tarifs', async req => {
+      const { ctx, cookie } = await landingContext(req);
+      const html = renderPlansPage(ctx);
+      return withCookie(html ? htmlReply(html) : htmlReply('<!DOCTYPE html><title>404</title><p>Not found</p>', 404), cookie);
+    }),
+    // Script des pages publiques : du confort (apparitions, démonstrations), jamais indispensable
+    route('GET', '/site.js', async () => ({
+      status: 200, raw: Buffer.from(SITE_JS), contentType: 'text/javascript; charset=utf-8',
+      headers: { 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff' }
+    })),
     route('GET', '/legal/:slug', async (req, params) => legalPage(params.slug, req))
   ];
   backup?.start();

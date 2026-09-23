@@ -31,7 +31,14 @@ const ICONS = {
   key: 'key',
   globe: 'globe-hemisphere-west',
   mapPin: 'map-pin',
-  cloud: 'cloud-check'
+  cloud: 'cloud-check',
+  face: 'scan-smiley',
+  usb: 'usb',
+  monitor: 'monitor',
+  phone: 'device-mobile',
+  check: 'check-circle',
+  lightning: 'lightning',
+  crown: 'crown-simple'
 };
 
 const entries = Object.entries(ICONS).map(([name, file]) => {

@@ -480,6 +480,7 @@ a.doc-card:hover .doc-card-go{transform:translateX(3px)}
 }
 @media (max-width:560px){.doc{font-size:15.5px}pre{padding:12px 14px;font-size:12.5px}.pager{grid-template-columns:1fr}}
 </style>
+<script src="/site.js" defer></script>
 </head>
 <body>
 ${header}

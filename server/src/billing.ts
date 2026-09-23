@@ -28,8 +28,13 @@ export interface BillingPrice {
   id: string;
   /** Texte affiché, ex. « 2 € / mois » */
   label: string;
+  /** Vide tant que le tarif n'a pas été créé dans Stripe depuis /admin */
   stripePriceId: string;
   mode: 'subscription' | 'payment';
+  /** Montant en centimes, devise et période : de quoi créer le prix dans Stripe et l'afficher */
+  amount?: number;
+  currency?: string;
+  interval?: 'month' | 'year' | 'once';
 }
 
 export interface BillingPlan {
@@ -38,6 +43,8 @@ export interface BillingPlan {
   description: string;
   prices: BillingPrice[];
   boosts: Partial<Record<BoostKey, number>>;
+  /** Produit Stripe de l'offre, créé avec son premier prix */
+  stripeProductId?: string;
 }
 
 export interface BillingSettings {
@@ -133,13 +140,26 @@ export function normalizePlan(raw: unknown, index = 0): BillingPlan {
     priceIds.add(priceId);
 
     const stripePriceId = String(price.stripePriceId ?? '').trim();
-    if (!/^price_[A-Za-z0-9]+$/.test(stripePriceId)) throw new Error(`Offre ${id} : identifiant de prix Stripe invalide (price_…)`);
+    if (stripePriceId && !/^price_[A-Za-z0-9]+$/.test(stripePriceId)) throw new Error(`Offre ${id} : identifiant de prix Stripe invalide (price_…)`);
+
+    // Montant, devise et période : facultatifs avec un prix Stripe existant, requis pour en créer un
+    const amount = price.amount === undefined || price.amount === null || (price.amount as unknown) === '' ? undefined : Number(price.amount);
+    if (amount !== undefined && (!Number.isInteger(amount) || amount < 50 || amount > 100_000_000)) throw new Error(`Offre ${id} : montant invalide (en centimes, 50 minimum)`);
+    const currency = price.currency ? String(price.currency).trim().toLowerCase() : undefined;
+    if (currency !== undefined && !/^[a-z]{3}$/.test(currency)) throw new Error(`Offre ${id} : devise invalide (eur, chf, usd…)`);
+    const interval = price.interval === 'month' || price.interval === 'year' || price.interval === 'once' ? price.interval : undefined;
+    if (!stripePriceId && (amount === undefined || !currency || !interval)) {
+      throw new Error(`Offre ${id} : indiquez un prix Stripe existant (price_…) ou un montant, une devise et une période pour le créer`);
+    }
 
     return {
       id: priceId,
       label: String(price.label ?? '').trim().slice(0, 40),
       stripePriceId,
-      mode: price.mode === 'payment' ? 'payment' : 'subscription'
+      mode: interval === 'once' || price.mode === 'payment' ? 'payment' : 'subscription',
+      ...(amount !== undefined ? { amount } : {}),
+      ...(currency ? { currency } : {}),
+      ...(interval ? { interval } : {})
     };
   });
 
@@ -151,8 +171,64 @@ export function normalizePlan(raw: unknown, index = 0): BillingPlan {
     boosts[key] = value as number;
   }
 
-  return { id, name, description: String(plan.description ?? '').trim().slice(0, 300), prices, boosts };
+  const stripeProductId = String(plan.stripeProductId ?? '').trim();
+  return {
+    id, name, description: String(plan.description ?? '').trim().slice(0, 300), prices, boosts,
+    ...(/^prod_[A-Za-z0-9]+$/.test(stripeProductId) ? { stripeProductId } : {})
+  };
 }
+
+/** Appel à l'API Stripe (formulaire encodé), tel que le fournit le serveur */
+export type StripeCall = <T>(method: 'GET' | 'POST', path: string, form?: Record<string, string>) => Promise<T>;
+
+/**
+ * Crée dans Stripe ce qui n'y est pas encore : un produit par offre, un prix
+ * par tarif sans identifiant. Rien n'est modifié ni supprimé côté Stripe ;
+ * un prix Stripe ne change jamais de montant, on en crée un autre.
+ *
+ * Renvoie les offres complétées des identifiants créés, et leur nombre.
+ */
+export async function createMissingStripePrices(plans: BillingPlan[], stripe: StripeCall): Promise<{ plans: BillingPlan[]; created: number }> {
+  let created = 0;
+  const out: BillingPlan[] = [];
+  for (const plan of plans) {
+    let productId = plan.stripeProductId;
+    const prices: BillingPrice[] = [];
+    for (const price of plan.prices) {
+      if (price.stripePriceId) { prices.push(price); continue; }
+      if (price.amount === undefined || !price.currency || !price.interval) throw new HttpError(400, 'invalid_price', `Offre ${plan.id} : montant, devise ou période manquant`);
+      if (!productId) {
+        const product = await stripe<{ id: string }>('POST', 'products', {
+          name: plan.name,
+          ...(plan.description ? { description: plan.description } : {}),
+          'metadata[bettervault_plan]': plan.id
+        });
+        productId = product.id;
+      }
+      const made = await stripe<{ id: string }>('POST', 'prices', {
+        product: productId,
+        unit_amount: String(price.amount),
+        currency: price.currency,
+        ...(price.interval !== 'once' ? { 'recurring[interval]': price.interval } : {}),
+        'metadata[bettervault_plan]': plan.id,
+        'metadata[bettervault_price]': price.id
+      });
+      prices.push({ ...price, stripePriceId: made.id, mode: price.interval === 'once' ? 'payment' : 'subscription' });
+      created++;
+    }
+    out.push({ ...plan, prices, ...(productId ? { stripeProductId: productId } : {}) });
+  }
+  return { plans: out, created };
+}
+
+/** Événements que le webhook Stripe doit envoyer à ce serveur */
+export const STRIPE_WEBHOOK_EVENTS = [
+  'checkout.session.completed',
+  'checkout.session.async_payment_succeeded',
+  'customer.subscription.updated',
+  'customer.subscription.deleted',
+  'invoice.payment_failed'
+];
 
 export function publicBilling(billing: BillingSettings): unknown {
   return { ...billing, stripeSecretKey: '', stripeWebhookSecret: '', hasSecretKey: !!billing.stripeSecretKey, hasWebhookSecret: !!billing.stripeWebhookSecret };
@@ -218,10 +294,9 @@ export function verifyStripeSignature(payload: Buffer, header: string, secret: s
   });
 }
 
-export function billingRoutes(ctx: RouteContext, fetchImpl: typeof fetch): Record<string, (req: IncomingMessage) => Promise<Reply>> {
+export function stripeClient(ctx: Pick<RouteContext, 'settings'>, fetchImpl: typeof fetch): StripeCall {
   const billing = () => ctx.settings().billing;
-
-  const stripe = async <T>(method: 'GET' | 'POST', path: string, form?: Record<string, string>): Promise<T> => {
+  return async <T>(method: 'GET' | 'POST', path: string, form?: Record<string, string>): Promise<T> => {
     const key = billing().stripeSecretKey;
     if (!key) throw new HttpError(503, 'billing_unavailable', 'Paiement non configuré sur ce serveur');
     let response: Response;
@@ -238,6 +313,11 @@ export function billingRoutes(ctx: RouteContext, fetchImpl: typeof fetch): Recor
     if (!response.ok || !json) throw new HttpError(502, 'stripe_error', `Stripe : ${json?.error?.message ?? `HTTP ${response.status}`}`);
     return json;
   };
+}
+
+export function billingRoutes(ctx: RouteContext, fetchImpl: typeof fetch): Record<string, (req: IncomingMessage) => Promise<Reply>> {
+  const billing = () => ctx.settings().billing;
+  const stripe = stripeClient(ctx, fetchImpl);
 
   const returnUrl = (path: string) => {
     const base = ctx.settings().publicUrl;
@@ -301,6 +381,7 @@ export function billingRoutes(ctx: RouteContext, fetchImpl: typeof fetch): Recor
       const priceId = String(body.priceId ?? '').trim();
       const price = priceId ? plan.prices.find(p => p.id === priceId) : plan.prices[0];
       if (!price) throw new HttpError(400, 'invalid_price', 'Durée inconnue pour cette offre');
+      if (!price.stripePriceId) throw new HttpError(409, 'price_not_ready', 'Ce tarif n’est pas encore créé dans Stripe');
 
       const metadata = { 'metadata[user_id]': userId, 'metadata[plan_id]': plan.id, 'metadata[price_id]': price.id };
       const session = await stripe<{ url: string }>('POST', 'checkout/sessions', {
@@ -314,8 +395,8 @@ export function billingRoutes(ctx: RouteContext, fetchImpl: typeof fetch): Recor
           'subscription_data[metadata][plan_id]': plan.id,
           'subscription_data[metadata][price_id]': price.id
         } : {}),
-        success_url: returnUrl('/?billing=success'),
-        cancel_url: returnUrl('/?billing=cancel')
+        success_url: returnUrl('/app?billing=success'),
+        cancel_url: returnUrl('/app?billing=cancel')
       });
       return { status: 200, body: { url: session.url } };
     },

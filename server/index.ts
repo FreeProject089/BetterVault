@@ -152,11 +152,12 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
      *   /            page d'accueil (ou l'application si l'accueil est coupé)
      *   /app         l'application — /auth y mène
      *   /serveurs    la liste des serveurs recommandés et leur carte
+     *   /tarifs      les offres payantes, quand il y en a ; /site.js le script des pages publiques
      *   /docs, /legal, /admin
      * Les pages d'accueil, de serveurs, de doc et de documents légaux sont
      * rendues par le serveur ; l'application est un fichier statique.
      */
-    if (pathname === '/' || pathname === '/about' || pathname === '/serveurs' || pathname === '/docs' || pathname.startsWith('/docs/')
+    if (pathname === '/' || pathname === '/about' || pathname === '/serveurs' || pathname === '/tarifs' || pathname === '/site.js' || pathname === '/docs' || pathname.startsWith('/docs/')
       || pathname === '/legal' || pathname.startsWith('/legal/')) {
       void api(req, res);
       return;

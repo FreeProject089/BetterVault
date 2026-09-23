@@ -17,6 +17,7 @@ export function requestLocale(req: IncomingMessage): ApiLocale {
 const EXACT: Record<string, string> = {
   'Cette personne fait déjà partie du coffre': 'This person is already a member of the vault',
   'Message inconnu': 'Unknown message',
+  'Ce tarif n’est pas encore créé dans Stripe': 'This price has not been created in Stripe yet',
   'Langue introuvable': 'Language not found',
   'Le fichier doit associer chaque texte français à sa traduction': 'The file must map each French text to its translation',
   'Code de langue invalide (ex. : es, pt-BR)': 'Invalid language code (e.g. es, pt-BR)',
