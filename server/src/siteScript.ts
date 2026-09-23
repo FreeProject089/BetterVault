@@ -63,7 +63,15 @@ export const SITE_JS = `(() => {
        * en douceur, sans segment droit suivi d'un coin, et sans dépasser.
        * Au milieu de certaines traversées, le ruban fait une boucle.
        */
-      const BOUCLES = new Set([0, 2]);
+      /*
+       * Deux boucles, différentes : place, taille et forme. La première est sur
+       * une traversée qui va vers la droite, la seconde vers la gauche : elles
+       * tournent donc en sens opposés à l'écran, sans forcer le tracé.
+       */
+      const BOUCLES = new Map([
+        [0, { dx: -20, r: 44, ovale: 1 }],
+        [1, { dx: -8, r: 29, ovale: 1.25 }]
+      ]);
       const pts = [];
       cartes.forEach((k, i) => {
         const haut = k.t - M, bas = k.b + M - 14, h = bas - haut;
@@ -81,16 +89,16 @@ export const SITE_JS = `(() => {
            * réguliers, pour qu'il reste rond) et repart dans le même sens.
            */
           const haut2 = suite.t - M;
-          const r = 42;
-          // Le bas de la boucle reste entre la sortie d'une maquette et l'entrée de la suivante,
-          // et la boucle penche du côté des maquettes, loin du texte de l'étape
-          const fond = Math.max(bas, Math.min(haut2 - 16, (bas + haut2) / 2 + r));
-          const bx = cx - s * 30;
-          const centre = [bx, fond - r];
+          const { dx, r, ovale } = BOUCLES.get(i);
+          // Le bas de la boucle reste entre la sortie d'une maquette et l'entrée de la suivante
+          const fond = Math.max(bas, Math.min(haut2 - 16, (bas + haut2) / 2 + r * ovale));
+          const bx = cx + dx;
+          const centre = [bx, fond - r * ovale];
           pts.push([bx - s * r * 2.6, fond]);
-          for (let n = 0; n <= 8; n++) {
-            const a = Math.PI / 2 - n * Math.PI / 4;
-            pts.push([centre[0] + s * r * Math.cos(a), centre[1] + r * Math.sin(a)]);
+          // Le tour complet, douze points réguliers pour un cercle net
+          for (let n = 0; n <= 12; n++) {
+            const a = Math.PI / 2 - n * Math.PI / 6;
+            pts.push([centre[0] + s * r * Math.cos(a), centre[1] + r * ovale * Math.sin(a)]);
           }
           pts.push([bx + s * r * 2.6, fond]);
         }
