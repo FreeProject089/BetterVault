@@ -147,6 +147,12 @@ const FEATURES: Array<[IconName, string, string, string, string]> = [
    'Full encrypted export, files included, import onto another server, permanent deletion whenever you want.']
 ];
 
+/** Page de documentation de chaque fonction, dans le même ordre */
+const FEATURE_DOCS = [
+  '/docs/guide/identifiants', '/docs/securite', '/docs/applications/bureau-mobile', '/docs/guide/synchronisation',
+  '/docs/guide/pieces-jointes', '/docs/guide/partage', '/docs/guide/securite-compte', '/docs/guide/import-export'
+];
+
 /** Styles communs aux pages publiques : couleurs, typographie, boutons */
 function baseCss(): string {
   return `
@@ -328,7 +334,7 @@ export function renderLanding(ctx: LandingContext): string {
       <h2>${t(`Tout tient dans un seul ${circled('coffre')}`, `It all fits in one ${circled('vault')}`)}</h2>
       <p class="section-lede">${t('Vos accès, vos codes et vos documents, rangés au même endroit et lisibles par vous seul.', 'Your logins, codes and documents, kept in one place and readable by you alone.')}</p>
     </div>
-    ${vaultFeatures(FEATURES.map(([ic, tf, te, df, de]) => ({ icon: ic, title: t(tf, te), text: t(df, de) })), 'AES-256')}
+    ${vaultFeatures(FEATURES.map(([ic, tf, te, df, de], i) => ({ icon: ic, title: t(tf, te), text: t(df, de), href: FEATURE_DOCS[i] })), t('Lire la doc', 'Read the docs'))}
   </section>
 
   <section id="comment">

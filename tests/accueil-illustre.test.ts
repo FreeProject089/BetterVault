@@ -22,7 +22,8 @@ const annuaire = {
 describe('Page d’accueil', () => {
   it('montre une icône par fonction, dans sa tuile', () => {
     const html = renderLanding(base);
-    expect(html.match(/<li class="locker"[^>]*><span class="tile tile-md">/g)?.length).toBe(8);
+    // Chaque casier du coffre est un lien vers la page de documentation de la fonction
+    expect(html.match(/<a class="locker" href="\/docs\/[a-z/-]+"><span class="tile tile-md">/g)?.length).toBe(8);
     expect(html).toContain('data-vault');
     expect(html).toContain('class="hero-art"');
     expect(html).toContain('class="snake"');

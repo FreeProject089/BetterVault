@@ -75,24 +75,30 @@ export function heroArt(labels: { code: string; synced: string; unlock: [string,
 }
 
 /* ── Fonctionnalités : le coffre ouvert ─────────────────────────────────
-   Un coffre-fort dont la porte s'ouvre quand il arrive à l'écran ; chaque
-   fonction est rangée dans un casier. */
-export function vaultFeatures(items: Array<{ icon: IconName; title: string; text: string }>, label: string): string {
+   Un coffre-fort à deux battants : fermé, on voit la molette et le volant ;
+   à son arrivée à l'écran, les battants pivotent sur leurs gonds et
+   découvrent les casiers, un par fonction. Chaque casier mène à sa page de
+   documentation. */
+export function vaultFeatures(items: Array<{ icon: IconName; title: string; text: string; href: string }>, more: string): string {
   return `<div class="vault" data-vault>
-    <div class="vault-body">
-      <div class="vault-rim"></div>
-      <ul class="vault-inner">${items.map((f, i) => `
-        <li class="locker" style="--i:${i}">${tile(f.icon, 'md')}<h3>${f.title}</h3><p>${f.text}</p></li>`).join('')}
-      </ul>
-    </div>
-    <div class="vault-door" aria-hidden="true">
-      <div class="door-face">
-        <span class="bolt b1"></span><span class="bolt b2"></span><span class="bolt b3"></span><span class="bolt b4"></span>
-        <div class="dial"><span class="dial-ticks"></span><span class="dial-knob">${icon('safe', 40)}</span></div>
-        <div class="handle"><i></i><i></i><i></i></div>
-        <span class="door-label">${label}</span>
+    <div class="vault-frame">
+      <span class="rivet r1"></span><span class="rivet r2"></span><span class="rivet r3"></span><span class="rivet r4"></span>
+      <div class="vault-opening">
+        <div class="vault-light" aria-hidden="true"></div>
+        <ul class="vault-inner">${items.map((f, i) => `
+          <li style="--i:${i}"><a class="locker" href="${f.href}">${tile(f.icon, 'md')}<h3>${f.title}</h3><p>${f.text}</p><span class="locker-more">${more}<span aria-hidden="true">→</span></span></a></li>`).join('')}
+        </ul>
+        <div class="door door-l" aria-hidden="true">
+          <div class="door-face"><span class="door-bolts"></span><div class="dial"><span class="dial-ticks"></span><span class="dial-knob">${icon('safe', 34)}</span></div></div>
+          <div class="door-edge"></div>
+          <div class="door-back"><i></i><i></i><i></i><i></i></div>
+        </div>
+        <div class="door door-r" aria-hidden="true">
+          <div class="door-face"><span class="door-bolts"></span><div class="wheel"><i></i><i></i><i></i><span></span></div></div>
+          <div class="door-edge"></div>
+          <div class="door-back"><i></i><i></i><i></i><i></i></div>
+        </div>
       </div>
-      <div class="door-back"><span></span><span></span><span></span></div>
     </div>
     <div class="vault-feet"><i></i><i></i></div>
   </div>`;
@@ -276,40 +282,61 @@ export const ART_CSS = `
 .trust .ph{color:var(--accent)}
 
 /* Le coffre des fonctionnalités */
-.vault{position:relative;margin:48px auto 0;max-width:1000px;perspective:2200px;padding-left:90px}
-.vault-body{position:relative;padding:22px;border-radius:9px;background:linear-gradient(160deg,color-mix(in srgb,var(--muted) 30%,var(--card)),color-mix(in srgb,var(--muted) 12%,var(--card)));
-  border:1px solid color-mix(in srgb,var(--muted) 35%,var(--border));box-shadow:0 40px 80px -40px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.08)}
-.vault-rim{position:absolute;inset:10px;border-radius:7px;border:2px dashed color-mix(in srgb,var(--muted) 30%,transparent);pointer-events:none}
-.vault-inner{position:relative;list-style:none;margin:0;padding:14px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;border-radius:7px;
-  background:radial-gradient(900px 300px at 50% -20%,color-mix(in srgb,var(--accent) 18%,transparent),transparent),var(--bg);box-shadow:inset 0 10px 30px rgba(0,0,0,.45)}
-.locker{display:flex;flex-direction:column;gap:10px;padding:16px;border-radius:8px;background:var(--card);border:1px solid var(--border);
-  transition:border-color .2s,transform .2s,box-shadow .2s}
-.locker:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border));transform:translateY(-3px);box-shadow:0 16px 34px -22px var(--accent)}
+.vault{position:relative;margin:52px auto 0;max-width:940px}
+.vault-frame{position:relative;padding:18px;border-radius:9px;
+  background:linear-gradient(160deg,color-mix(in srgb,var(--muted) 34%,var(--card)),color-mix(in srgb,var(--muted) 14%,var(--card)) 55%,color-mix(in srgb,var(--muted) 26%,var(--card)));
+  border:1px solid color-mix(in srgb,var(--muted) 38%,var(--border));box-shadow:0 50px 90px -50px rgba(0,0,0,.75),inset 0 1px 0 rgba(255,255,255,.08),inset 0 -2px 0 rgba(0,0,0,.25)}
+.rivet{position:absolute;width:9px;height:9px;border-radius:50%;background:color-mix(in srgb,var(--muted) 55%,var(--card));box-shadow:inset 0 -2px 0 rgba(0,0,0,.3)}
+.r1{top:6px;left:6px}.r2{top:6px;right:6px}.r3{bottom:6px;left:6px}.r4{bottom:6px;right:6px}
+.vault-opening{position:relative;border-radius:7px;perspective:2400px;perspective-origin:50% 40%;background:var(--bg);box-shadow:inset 0 14px 34px rgba(0,0,0,.55)}
+.vault-light{position:absolute;inset:0;border-radius:7px;background:radial-gradient(70% 60% at 50% 0%,color-mix(in srgb,var(--accent) 26%,transparent),transparent 70%);opacity:0;transition:opacity 1.2s ease .5s;pointer-events:none}
+.vault-inner{position:relative;list-style:none;margin:0;padding:14px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.vault-inner>li{display:flex}
+.locker{position:relative;display:flex;flex-direction:column;gap:10px;width:100%;padding:16px 16px 40px;border-radius:8px;background:var(--card);border:1px solid var(--border);
+  color:var(--text);text-decoration:none;transition:border-color .2s,transform .2s,box-shadow .2s,background-color .2s}
+.locker:hover,.locker:focus-visible{border-color:color-mix(in srgb,var(--accent) 60%,var(--border));transform:translateY(-3px);box-shadow:0 18px 36px -22px var(--accent);outline:none}
 .locker h3{margin:0;font-size:15px}
 .locker p{margin:0;color:var(--muted);font-size:13.5px;line-height:1.5}
-.vault-door{position:absolute;left:90px;top:0;bottom:0;width:calc(100% - 90px);transform-origin:left center;transform:rotateY(-104deg);transform-style:preserve-3d;transition:transform 1.4s cubic-bezier(.5,0,.15,1)}
-.door-face,.door-back{position:absolute;inset:0;border-radius:9px;backface-visibility:hidden}
-.door-face{display:grid;place-items:center;background:linear-gradient(145deg,color-mix(in srgb,var(--muted) 34%,var(--card)),color-mix(in srgb,var(--muted) 14%,var(--card)));
-  border:1px solid color-mix(in srgb,var(--muted) 40%,var(--border));box-shadow:inset 0 0 0 10px color-mix(in srgb,var(--muted) 10%,transparent)}
-.door-back{transform:rotateY(180deg);background:linear-gradient(145deg,color-mix(in srgb,var(--muted) 22%,var(--card)),color-mix(in srgb,var(--muted) 36%,var(--card)));border:1px solid color-mix(in srgb,var(--muted) 40%,var(--border));
-  display:flex;flex-direction:column;justify-content:space-around;align-items:flex-end;padding:0 10px}
-.door-back span{width:26px;height:10px;border-radius:3px;background:color-mix(in srgb,var(--muted) 55%,var(--card))}
-.bolt{position:absolute;width:12px;height:12px;border-radius:50%;background:color-mix(in srgb,var(--muted) 50%,var(--card));box-shadow:inset 0 -2px 0 rgba(0,0,0,.25)}
-.b1{top:18px;left:18px}.b2{top:18px;right:18px}.b3{bottom:18px;left:18px}.b4{bottom:18px;right:18px}
-.dial{position:relative;display:grid;place-items:center;width:170px;height:170px;border-radius:50%;background:var(--card);border:6px solid color-mix(in srgb,var(--muted) 40%,var(--border));box-shadow:0 18px 36px -20px rgba(0,0,0,.6)}
+.locker-more{position:absolute;left:16px;bottom:12px;display:inline-flex;gap:6px;font-size:12.5px;font-weight:650;color:var(--accent);opacity:.75;transition:opacity .2s}
+.locker-more span{transition:transform .2s}
+.locker:hover .locker-more,.locker:focus-visible .locker-more{opacity:1}
+.locker:hover .locker-more span{transform:translateX(3px)}
+/* Battants : ouverts par défaut (sans script, tout est visible) */
+.door{position:absolute;top:0;bottom:0;width:50%;transform-style:preserve-3d;transition:transform 1.5s cubic-bezier(.55,0,.15,1) .15s;pointer-events:none}
+.door-l{left:0;transform-origin:left center;transform:rotateY(-100deg)}
+.door-r{right:0;transform-origin:right center;transform:rotateY(100deg)}
+.door-face{position:absolute;inset:0;display:grid;place-items:center;border-radius:6px;backface-visibility:hidden;
+  background:linear-gradient(135deg,color-mix(in srgb,var(--muted) 40%,var(--card)),color-mix(in srgb,var(--muted) 20%,var(--card)));
+  border:1px solid color-mix(in srgb,var(--muted) 45%,var(--border));box-shadow:inset 0 0 0 8px color-mix(in srgb,var(--muted) 10%,transparent),inset 0 0 40px rgba(0,0,0,.25)}
+.door-l .door-face{border-radius:6px 2px 2px 6px}.door-r .door-face{border-radius:2px 6px 6px 2px}
+.door-edge{position:absolute;top:0;bottom:0;width:18px;background:linear-gradient(90deg,color-mix(in srgb,var(--muted) 30%,var(--card)),color-mix(in srgb,var(--muted) 50%,var(--card)));}
+.door-l .door-edge{right:0;transform-origin:right center;transform:rotateY(90deg)}
+.door-r .door-edge{left:0;transform-origin:left center;transform:rotateY(-90deg)}
+.door-back{position:absolute;inset:0;border-radius:6px;transform:rotateY(180deg);backface-visibility:hidden;display:flex;flex-direction:column;justify-content:space-evenly;padding:0 12px;
+  background:linear-gradient(90deg,color-mix(in srgb,var(--muted) 18%,var(--card)),color-mix(in srgb,var(--muted) 34%,var(--card)));border:1px solid color-mix(in srgb,var(--muted) 40%,var(--border))}
+.door-l .door-back{align-items:flex-start}.door-r .door-back{align-items:flex-end}
+.door-back i{width:34px;height:12px;border-radius:3px;background:color-mix(in srgb,var(--muted) 60%,var(--card));box-shadow:inset 0 -2px 0 rgba(0,0,0,.25)}
+.door-bolts{position:absolute;inset:18px;border-radius:4px;border:2px dashed color-mix(in srgb,var(--muted) 30%,transparent)}
+.dial{position:relative;display:grid;place-items:center;width:150px;height:150px;border-radius:50%;background:var(--card);border:6px solid color-mix(in srgb,var(--muted) 45%,var(--border));box-shadow:0 18px 36px -18px rgba(0,0,0,.7)}
 .dial-ticks{position:absolute;inset:8px;border-radius:50%;background:repeating-conic-gradient(color-mix(in srgb,var(--muted) 70%,transparent) 0 1.5deg,transparent 1.5deg 12deg);
   -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 10px),#000 calc(100% - 9px));mask:radial-gradient(farthest-side,transparent calc(100% - 10px),#000 calc(100% - 9px))}
-.dial-knob{display:grid;place-items:center;width:92px;height:92px;border-radius:50%;color:var(--accent);background:radial-gradient(circle at 35% 30%,color-mix(in srgb,var(--accent) 22%,var(--card)),var(--card));border:1px solid var(--border)}
-.handle{position:absolute;right:48px;top:50%;display:flex;flex-direction:column;gap:14px;transform:translateY(-50%)}
-.handle i{width:54px;height:10px;border-radius:5px;background:color-mix(in srgb,var(--muted) 55%,var(--card))}
-.door-label{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);font:700 12px/1 ui-monospace,Menlo,monospace;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
-.vault-feet{display:flex;justify-content:space-between;padding:0 40px}
-.vault-feet i{width:60px;height:12px;border-radius:0 0 6px 6px;background:color-mix(in srgb,var(--muted) 30%,var(--card))}
-/* Avec le script : la porte est fermée, puis s'ouvre à l'arrivée, et les casiers apparaissent un à un */
-.js .vault-door{transform:rotateY(0)}
-.js .vault.open .vault-door{transform:rotateY(-104deg)}
-.js .locker{opacity:0;transform:translateY(10px);transition:opacity .4s ease,transform .4s ease,border-color .2s,box-shadow .2s}
-.js .vault.open .locker{opacity:1;transform:none;transition-delay:calc(.7s + var(--i) * 70ms),calc(.7s + var(--i) * 70ms),0s,0s}
+.dial-knob{display:grid;place-items:center;width:78px;height:78px;border-radius:50%;color:var(--accent);background:radial-gradient(circle at 35% 30%,color-mix(in srgb,var(--accent) 24%,var(--card)),var(--card));border:1px solid var(--border);transition:transform 1.3s ease}
+.wheel{position:relative;width:140px;height:140px;border-radius:50%;border:8px solid color-mix(in srgb,var(--muted) 55%,var(--card));transition:transform 1.3s ease}
+.wheel i{position:absolute;left:50%;top:50%;width:132px;height:10px;margin:-5px 0 0 -66px;border-radius:5px;background:color-mix(in srgb,var(--muted) 55%,var(--card))}
+.wheel i:nth-child(2){transform:rotate(60deg)}.wheel i:nth-child(3){transform:rotate(120deg)}
+.wheel span{position:absolute;left:50%;top:50%;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;background:var(--card);border:4px solid color-mix(in srgb,var(--muted) 55%,var(--card))}
+.vault-feet{display:flex;justify-content:space-between;padding:0 48px}
+.vault-feet i{width:70px;height:12px;border-radius:0 0 6px 6px;background:color-mix(in srgb,var(--muted) 30%,var(--card))}
+/* Avec le script : fermé, puis la molette tourne, le volant aussi, et les battants s'ouvrent */
+.js .door-l,.js .door-r{transform:rotateY(0)}
+.js .vault.open .door-l{transform:rotateY(-100deg)}
+.js .vault.open .door-r{transform:rotateY(100deg)}
+.js .vault.open .dial-knob{transform:rotate(-200deg)}
+.js .vault.open .wheel{transform:rotate(180deg)}
+.js .vault.open .vault-light{opacity:1}
+.vault-light{opacity:1}.js .vault-light{opacity:0}
+.js .vault-inner>li{opacity:0;transform:translateY(10px) scale(.98);transition:opacity .45s ease,transform .45s ease}
+.js .vault.open .vault-inner>li{opacity:1;transform:none;transition-delay:calc(1.1s + var(--i) * 70ms)}
 
 /* Serpent des étapes : un seul ruban */
 .snake{position:relative;margin:36px 0 0}
@@ -318,7 +345,9 @@ export const ART_CSS = `
 .snake-wide path{stroke-width:26px}
 .snake-narrow{display:none}
 .snake-narrow path{stroke-width:12px}
-.js .snake-path{clip-path:inset(0 -20% calc(100% - var(--draw,0%)) -20%)}
+.snake.measured .snake-wide{height:auto}
+.snake.measured .snake-wide path{stroke-width:26px}
+.snake-wide path{transition:stroke-dashoffset .15s linear}
 .snake-steps{position:relative;list-style:none;margin:0;padding:0;display:grid;grid-template-rows:repeat(var(--rows),minmax(340px,auto))}
 .snake-step{display:grid;grid-template-columns:1fr 1fr;align-items:center;gap:56px}
 .snake-step.art-right .snake-art{order:2}
@@ -433,9 +462,9 @@ export const ART_CSS = `
 .js [data-reveal].in{opacity:1;transform:none}
 
 @media (max-width:960px){
-  .vault{padding-left:0}
-  .vault-door{display:none}
-  .js .locker{opacity:1;transform:none}
+  .door{display:none}
+  .js .vault-inner>li{opacity:1;transform:none}
+  .js .vault-light{opacity:1}
   .vault-inner{grid-template-columns:repeat(2,minmax(0,1fr))}
   .faq-head{grid-template-columns:1fr;gap:18px}
 }
@@ -455,7 +484,7 @@ export const ART_CSS = `
   .band .safe{width:96px;height:96px}
 }
 @media (max-width:560px){
-  .vault-body{padding:12px}
+  .vault-frame{padding:10px}
   .vault-inner{grid-template-columns:1fr;padding:10px}
   .mock-chip{right:-6px}
   .ring{right:-6px}
@@ -465,9 +494,8 @@ export const ART_CSS = `
 @media (prefers-reduced-motion:reduce){
   .window,.float,.cycle-item,.sync-badge .ph,.otp.flip,.site-menu nav{animation:none!important}
   .cycle-item{opacity:0}.cycle-item:first-child{opacity:1}
-  .js [data-reveal],.js .locker{opacity:1!important;transform:none!important;transition:none!important}
-  .js .vault-door{transition:none}
-  .js .snake-path{clip-path:none}
+  .js [data-reveal],.js .vault-inner>li{opacity:1!important;transform:none!important;transition:none!important}
+  .door,.dial-knob,.wheel{transition:none!important}
   .js .hl-brush,.js .ul-line{clip-path:none;transition:none}
   .js .ci-loop path{stroke-dashoffset:0;transition:none}
   .locker:hover,.dev:hover{transform:none}
