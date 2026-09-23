@@ -6,6 +6,7 @@ import { avatarInfo, avatarRoutes, DEFAULT_AVATARS } from './avatars.ts';
 import { localizeMessage, requestLocale } from './messages.ts';
 import {
   HttpError,
+  RateLimitError,
   invalid,
   parseBase64,
   parseBlob,
@@ -125,7 +126,6 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
   const now = options.now ?? Date.now;
   const sessionTtl = options.sessionTtlMs ?? 30 * 24 * 60 * 60 * 1000;
   const minKdfMemory = options.minKdfMemoryKib ?? 19456;
-  const rateLimit = options.authRateLimit ?? { windowMs: 60_000, max: 20 };
   const corsOrigins = options.corsOrigins ?? '*';
   const mailerFactory = options.mailerFactory ?? createSmtpMailer;
   const dummySalt = randomBytes(16);
@@ -232,7 +232,46 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     return forwarded || req.socket.remoteAddress || 'unknown';
   };
 
+  /*
+   * Limites de tentatives, par action et par adresse.
+   *
+   * Une seule règle pour tout (20 par minute) était à la fois trop large pour
+   * deviner un mot de passe et trop étroite pour l'usage normal : chaque page
+   * de l'administration passait par elle, et on se faisait bloquer en
+   * naviguant. Chaque action a maintenant sa fenêtre et son plafond, et la
+   * réponse dit combien de temps attendre.
+   */
+  const BUCKETS: Record<string, { windowMs: number; max: number }> = {
+    // Lu à chaque connexion, ne révèle rien : large
+    prelogin: { windowMs: 60_000, max: 60 },
+    login: { windowMs: 60_000, max: 10 },
+    register: { windowMs: 60 * 60_000, max: 10 },
+    password: { windowMs: 60_000, max: 10 },
+    recovery: { windowMs: 15 * 60_000, max: 10 },
+    delete: { windowMs: 60 * 60_000, max: 5 },
+    // Administration : l'usage normal est large, seuls les échecs sont comptés serré
+    admin: { windowMs: 60_000, max: 600 },
+    'admin-fail': { windowMs: 15 * 60_000, max: 10 },
+    'admin-login': { windowMs: 15 * 60_000, max: 10 }
+  };
+  const bucketRule = (bucket: string) => options.authRateLimit ?? BUCKETS[bucket] ?? { windowMs: 60_000, max: 20 };
+
+  const waitMessage = (seconds: number) => seconds <= 90
+    ? `Trop de tentatives, réessayez dans ${seconds} s`
+    : `Trop de tentatives, réessayez dans ${Math.ceil(seconds / 60)} min`;
+
+  /** Refuse si le plafond est déjà atteint, sans compter cette requête */
+  const blocked = (req: IncomingMessage, bucket: string) => {
+    const entry = attempts.get(`${bucket}:${clientAddress(req)}`);
+    const current = now();
+    if (entry && entry.resetAt > current && entry.count >= bucketRule(bucket).max) {
+      const seconds = Math.max(1, Math.ceil((entry.resetAt - current) / 1000));
+      throw new RateLimitError(seconds, waitMessage(seconds));
+    }
+  };
+
   const limit = (req: IncomingMessage, bucket: string) => {
+    const rule = bucketRule(bucket);
     const key = `${bucket}:${clientAddress(req)}`;
     const current = now();
     const entry = attempts.get(key);
@@ -245,12 +284,13 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         }
         if (attempts.size > 20_000) attempts.clear();
       }
-      attempts.set(key, { count: 1, resetAt: current + rateLimit.windowMs });
+      attempts.set(key, { count: 1, resetAt: current + rule.windowMs });
       return;
     }
     entry.count++;
-    if (entry.count > rateLimit.max) {
-      throw new HttpError(429, 'rate_limited', 'Trop de tentatives, réessayez dans une minute');
+    if (entry.count > rule.max) {
+      const seconds = Math.max(1, Math.ceil((entry.resetAt - current) / 1000));
+      throw new RateLimitError(seconds, waitMessage(seconds));
     }
   };
 
@@ -395,6 +435,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     breakGlassHash: options.adminTokenHash ?? null,
     now,
     limit: (req, bucket) => limit(req, bucket),
+    blocked: (req, bucket) => blocked(req, bucket),
     audit: (type, detail) => audit(type, detail)
   });
   const requireAdmin = (req: IncomingMessage, permission: AdminPermission = 'view', sensitive = false) => adminAuth.require(req, permission, sensitive);
@@ -1563,6 +1604,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     } catch (err) {
       const locale = requestLocale(req);
       if (err instanceof HttpError) {
+        if (err instanceof RateLimitError) res.setHeader('Retry-After', String(err.retryAfterSeconds));
         send(res, err.status, { error: { code: err.code, message: localizeMessage(err.message, locale), ...(err.details === undefined ? {} : { details: err.details }) } });
       } else {
         console.error(err);

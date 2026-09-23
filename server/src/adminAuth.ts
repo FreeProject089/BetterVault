@@ -104,6 +104,8 @@ export function createAdminAuth(options: {
   breakGlassHash: string | null;
   now: () => number;
   limit: (req: IncomingMessage, bucket: string) => void;
+  /** Refuse si le plafond est déjà atteint, sans compter la requête */
+  blocked: (req: IncomingMessage, bucket: string) => void;
   audit: (type: string, detail?: Record<string, unknown>) => void;
 }) {
   const { db, now, audit } = options;
@@ -141,10 +143,20 @@ export function createAdminAuth(options: {
    * `reauth_required` indique à la page de redemander le mot de passe.
    */
   function require(req: IncomingMessage, permission: AdminPermission, sensitive = false): AdminIdentity {
+    /*
+     * Deux compteurs : un plafond large pour l'usage normal (chaque écran de
+     * l'administration fait plusieurs appels), et un plafond serré pour les
+     * échecs seulement. Avant, les deux étaient confondus : on se faisait
+     * bloquer rien qu'en naviguant, sans rendre un essai de jeton plus lent.
+     */
     options.limit(req, 'admin');
+    options.blocked(req, 'admin-fail');
     if (!enabled()) throw new HttpError(404, 'not_found', 'Route inconnue');
     const identity = identify(req);
-    if (!identity) throw new HttpError(401, 'unauthorized', 'Jeton d’administration incorrect');
+    if (!identity) {
+      options.limit(req, 'admin-fail');
+      throw new HttpError(401, 'unauthorized', 'Jeton d’administration incorrect');
+    }
     if (!ROLE_PERMISSIONS[identity.role].includes(permission)) {
       throw new HttpError(403, 'forbidden', 'Votre rôle ne permet pas cette action');
     }

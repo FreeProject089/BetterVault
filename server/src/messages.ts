@@ -188,6 +188,8 @@ const EXACT: Record<string, string> = {
 };
 
 const PATTERNS: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
+  [/^Trop de tentatives, réessayez dans (\d+) s$/, m => `Too many attempts, try again in ${m[1]} s`],
+  [/^Trop de tentatives, réessayez dans (\d+) min$/, m => `Too many attempts, try again in ${m[1]} min`],
   [/^Champ « (.+) » invalide$/, m => `Invalid field "${m[1]}"`],
   [/^(\d+) membres maximum par coffre partagé$/, m => `${m[1]} members maximum per shared vault`],
   [/^(\d+) rôles maximum par coffre$/, m => `${m[1]} roles maximum per vault`],

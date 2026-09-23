@@ -40,6 +40,16 @@ export class HttpError extends Error {
   }
 }
 
+/** Trop de tentatives : porte le délai exact, renvoyé dans l'en-tête Retry-After */
+export class RateLimitError extends HttpError {
+  readonly retryAfterSeconds: number;
+
+  constructor(retryAfterSeconds: number, message: string) {
+    super(429, 'rate_limited', message, { retryAfterSeconds });
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
 export const sha256 = (value: string) => createHash('sha256').update(value).digest('base64');
 
 export function scryptVerifier(authHash: string, salt: Buffer): Promise<Buffer> {
