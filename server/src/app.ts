@@ -1433,16 +1433,32 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
               return node.url;
             }
           })();
+          // Position approximative, pour la carte : la ville de l'adresse IP du nœud
+          const ip = hostIp(host.split(':')[0]);
+          const geo = ip ? options.geo?.lookup(ip) ?? null : null;
+          const place = geo && typeof geo.lat === 'number' && typeof geo.lon === 'number'
+            ? { lat: Math.round(geo.lat * 10) / 10, lon: Math.round(geo.lon * 10) / 10, country: geo.country, city: geo.city }
+            : null;
           return {
-            ...node, health, lag, host,
-            ip: detailed ? hostIp(host.split(':')[0]) : null,
+            ...node, health, lag, host, place,
+            ip: detailed ? ip : null,
             lastOkAt: peer?.lastOkAt ?? null,
             lastError: detailed ? peer?.lastError ?? null : peer?.lastError ? 'error' : null,
             lastErrorAt: peer?.lastErrorAt ?? null
           };
         })
       } : null,
-      pendingConflicts: clusterReady() ? (db.prepare('SELECT COUNT(*) AS n FROM vault_conflicts').get() as { n: number }).n : 0
+      pendingConflicts: clusterReady() ? (db.prepare('SELECT COUNT(*) AS n FROM vault_conflicts').get() as { n: number }).n : 0,
+      // Ce serveur, même seul : sa position vient de son adresse publique
+      selfPlace: (() => {
+        let host = '';
+        try { host = settings.publicUrl ? new URL(settings.publicUrl).hostname : ''; } catch { host = ''; }
+        const ip = host ? hostIp(host) : null;
+        const geo = ip ? options.geo?.lookup(ip) ?? null : null;
+        return geo && typeof geo.lat === 'number' && typeof geo.lon === 'number'
+          ? { lat: Math.round(geo.lat * 10) / 10, lon: Math.round(geo.lon * 10) / 10, country: geo.country, city: geo.city, host }
+          : null;
+      })()
     };
   };
 

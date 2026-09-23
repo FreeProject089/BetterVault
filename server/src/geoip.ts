@@ -10,6 +10,9 @@ import { isIPv4, isIPv6 } from 'node:net';
 export interface GeoResult {
   country: string | null;
   city: string | null;
+  /** Position approximative, quand la base la fournit (bases « city ») */
+  lat?: number | null;
+  lon?: number | null;
 }
 
 export interface GeoLookup {
@@ -181,11 +184,14 @@ export function createGeoLookup(buf: Buffer): GeoLookup {
       const record = decoder.decode(dataBase + (node - nodeCount - 16))[0] as {
         country?: { iso_code?: string };
         city?: { names?: Record<string, string> };
+        location?: { latitude?: number; longitude?: number };
       } | null;
       if (!record) return null;
       return {
         country: record.country?.iso_code ?? null,
-        city: record.city?.names?.fr ?? record.city?.names?.en ?? null
+        city: record.city?.names?.fr ?? record.city?.names?.en ?? null,
+        lat: typeof record.location?.latitude === 'number' ? record.location.latitude : null,
+        lon: typeof record.location?.longitude === 'number' ? record.location.longitude : null
       };
     }
   };

@@ -1,4 +1,5 @@
 // Page d'administration du serveur BetterVault (aucune dépendance)
+import { WORLD_LAND, WORLD_VIEW } from './world-land.js';
 
 const fr = navigator.language.toLowerCase().startsWith('fr');
 const TEXT = {
@@ -42,7 +43,7 @@ const TEXT = {
   registrationOpen: ['Inscriptions ouvertes', 'Registration open'],
   attachmentsEnabled: ['Accepter les fichiers joints', 'Accept file attachments'],
   publicPage: ['Page publique et annuaire', 'Public page and directory'],
-  adminThemeLabel: ['Thème de l’administration par défaut (chaque appareil peut en changer avec le bouton ◐)', 'Default admin theme (each device can change it with the ◐ button)'],
+  adminThemeLabel: ['Thème de l’administration par défaut (chaque appareil peut en changer depuis l’en-tête)', 'Default admin theme (each device can change it from the header)'],
   adminThemeApp: ['Celui de l’application', 'Same as the app'],
   adminThemeAuto: ['Celui du système', 'System'],
   adminThemeLight: ['Clair', 'Light'],
@@ -776,6 +777,8 @@ async function loadOverview() {
     $('stats').innerHTML = `<p class="status fail">${escapeHtml(err.message)}</p>`;
     return;
   }
+  // La carte des serveurs, en tête du tableau de bord
+  api('GET', 'cluster').then(view => { $('overview-map').innerHTML = clusterMap(view); }, () => { $('overview-map').innerHTML = ''; });
   const { analytics: a, system: s, security, version } = data;
   const pct = (n, d) => (d ? Math.round((n / d) * 100) : 0);
 
@@ -1150,75 +1153,89 @@ const MAP_TONE = {
   'other-zone': 'var(--muted)'
 };
 
-function clusterMap(view) {
-  const nodes = view.cluster.nodes;
-  const zones = [...new Set(nodes.map(n => n.zone))].sort();
-  const width = 640;
-  const rowHeight = 132;
-  const height = zones.length * rowHeight + 16;
+/*
+ * Carte des serveurs : les terres émergées (world-atlas, converti par
+ * scripts/build-world-map.mjs), chaque nœud à la position de son adresse IP,
+ * et les liaisons de réplication entre nœuds d'une même zone. Un nœud dont la
+ * position est inconnue (adresse locale, base de localisation absente) est
+ * listé sous la carte au lieu d'être placé au hasard.
+ */
+const placeXY = place => [place.lon + 180, WORLD_VIEW.top - place.lat];
 
-  const rows = zones.map((zone, index) => {
-    const inZone = nodes.filter(n => n.zone === zone);
-    const y = index * rowHeight + 70;
-    const step = inZone.length > 1 ? Math.min(200, (width - 140) / (inZone.length - 1)) : 0;
-    const startX = width / 2 - (step * (inZone.length - 1)) / 2;
-    const placed = inZone.map((node, i) => ({ node, x: startX + i * step, y }));
+function clusterMap(view, { title = fr ? 'Carte des serveurs' : 'Server map', compact = false } = {}) {
+  const nodes = view.cluster
+    ? view.cluster.nodes
+    : [{ id: 'self', self: true, name: fr ? 'Ce serveur' : 'This server', zone: view.self?.zone ?? '', region: '', status: 'active', health: 'self', place: view.selfPlace, host: view.selfPlace?.host }];
+  const placed = nodes.filter(n => n.place).map(n => ({ node: n, xy: placeXY(n.place) }));
+  const lost = nodes.filter(n => !n.place);
 
-    // Liens : chaque couple de nœuds actifs de la zone se réplique.
-    // Au-delà de 16 nœuds dans une zone, on ne dessine plus le maillage complet :
-    // il compterait des centaines de traits pour une lisibilité nulle.
-    const links = [];
-    const maille = placed.length <= 16;
-    for (let a = 0; maille && a < placed.length; a++) {
-      for (let b = a + 1; b < placed.length; b++) {
-        const live = placed[a].node.status === 'active' && placed[b].node.status === 'active';
-        const touche = placed[a].node.self || placed[b].node.self;
-        const casse = [placed[a].node, placed[b].node].some(n => n.health === 'offline' || n.health === 'error');
-        links.push(`<line x1="${placed[a].x}" y1="${placed[a].y}" x2="${placed[b].x}" y2="${placed[b].y}"
-          stroke="${casse ? 'var(--danger)' : live ? 'var(--ok)' : 'var(--border)'}"
-          stroke-width="${touche ? 2 : 1}" stroke-dasharray="${live ? '' : '4 4'}" opacity="${live ? 0.75 : 0.4}"></line>`);
-      }
+  // Cadrage : toute la carte, ou resserré autour des serveurs quand ils sont proches
+  let [x0, y0, w, h] = [0, 0, WORLD_VIEW.width, WORLD_VIEW.height];
+  if (placed.length) {
+    const xs = placed.map(p => p.xy[0]), ys = placed.map(p => p.xy[1]);
+    const spanX = Math.max(...xs) - Math.min(...xs), spanY = Math.max(...ys) - Math.min(...ys);
+    if (spanX < 120 && spanY < 60) {
+      w = Math.max(90, spanX * 2.2 + 40);
+      h = w * (WORLD_VIEW.height / WORLD_VIEW.width) * 1.25;
+      x0 = Math.min(Math.max((Math.min(...xs) + Math.max(...xs)) / 2 - w / 2, 0), WORLD_VIEW.width - w);
+      y0 = Math.min(Math.max((Math.min(...ys) + Math.max(...ys)) / 2 - h / 2, 0), WORLD_VIEW.height - h);
     }
+  }
+  const unit = w / 360;
 
-    const marks = placed.map(({ node, x, y: ny }) => {
-      const tone = MAP_TONE[node.self ? 'self' : node.health] ?? 'var(--muted)';
-      const retard = node.lag ? `${node.lag}` : '';
-      return `<g class="map-node" tabindex="0" role="img"
-        aria-label="${escapeHtml(`${node.name} · ${node.region} · ${node.host ?? ''} ${node.ip ? `(${node.ip})` : ''}`)}">
-        <title>${escapeHtml([node.name, node.region, node.host, node.ip, node.lastError].filter(Boolean).join(' · '))}</title>
-        <circle cx="${x}" cy="${ny}" r="21" fill="var(--card)" stroke="${tone}" stroke-width="${node.self ? 3 : 2}"></circle>
-        ${node.self ? `<circle cx="${x}" cy="${ny}" r="7" fill="${tone}"></circle>` : ''}
-        ${node.status === 'revoked' ? `<path d="M${x - 9} ${ny - 9} L${x + 9} ${ny + 9} M${x + 9} ${ny - 9} L${x - 9} ${ny + 9}" stroke="var(--danger)" stroke-width="2"></path>` : ''}
-        <text x="${x}" y="${ny + 40}" text-anchor="middle" class="map-name">${escapeHtml(node.name)}</text>
-        <text x="${x}" y="${ny + 55}" text-anchor="middle" class="map-meta">${escapeHtml(node.ip || node.host || node.region)}</text>
-        ${retard ? `<text x="${x + 24}" y="${ny - 18}" class="map-lag">+${escapeHtml(retard)}</text>` : ''}
-      </g>`;
-    }).join('');
+  // Liaisons : chaque couple de nœuds actifs d'une même zone, en arc
+  const links = [];
+  for (let a = 0; a < placed.length; a++) {
+    for (let b = a + 1; b < placed.length; b++) {
+      const [na, nb] = [placed[a].node, placed[b].node];
+      if (na.zone !== nb.zone) continue;
+      const live = na.status === 'active' && nb.status === 'active';
+      const broken = [na, nb].some(n => n.health === 'offline' || n.health === 'error');
+      const [[ax, ay], [bx, by]] = [placed[a].xy, placed[b].xy];
+      const mx = (ax + bx) / 2, my = (ay + by) / 2 - Math.hypot(bx - ax, by - ay) * 0.25;
+      links.push(`<path d="M${ax} ${ay} Q${mx} ${my} ${bx} ${by}" fill="none" class="map-link${broken ? ' broken' : live ? ' live' : ''}" stroke-width="${1.4 * unit}"></path>`);
+    }
+  }
 
-    return `
-      <text x="12" y="${y - 34}" class="map-zone">${escapeHtml(zone)}${zone === view.self.zone ? ` · ${fr ? 'ce nœud' : 'this node'}` : ''}</text>
-      <line x1="12" y1="${y - 26}" x2="${width - 12}" y2="${y - 26}" stroke="var(--border)" stroke-width="1" opacity="0.6"></line>
-      ${links.join('')}${marks}`;
+  const marks = placed.map(({ node, xy: [x, y] }) => {
+    const tone = MAP_TONE[node.self ? 'self' : node.health] ?? 'var(--muted)';
+    const where = [node.place.city, node.place.country].filter(Boolean).join(', ');
+    return `<g class="map-node" tabindex="0" role="img" aria-label="${escapeHtml(`${node.name} · ${where}`)}">
+      <title>${escapeHtml([node.name, where, node.region, node.host, node.lastError].filter(Boolean).join(' · '))}</title>
+      ${node.self || node.health === 'ok' ? `<circle cx="${x}" cy="${y}" r="${5 * unit}" fill="${tone}" class="map-pulse"></circle>` : ''}
+      <circle cx="${x}" cy="${y}" r="${3.2 * unit}" fill="var(--card)" stroke="${tone}" stroke-width="${1.6 * unit}"></circle>
+      <circle cx="${x}" cy="${y}" r="${1.4 * unit}" fill="${tone}"></circle>
+      ${compact ? '' : `<text x="${x}" y="${y - 6 * unit}" text-anchor="middle" class="map-label" style="font-size:${5.2 * unit}px">${escapeHtml(node.name)}</text>`}
+    </g>`;
   }).join('');
 
   const legende = [
-    ['self', fr ? 'ce nœud' : 'this node'],
+    ['self', fr ? 'ce serveur' : 'this server'],
     ['ok', fr ? 'synchronisé' : 'in sync'],
     ['offline', fr ? 'hors ligne ou en erreur' : 'offline or failing'],
-    ['disabled', fr ? 'désactivé' : 'disabled'],
-    ['revoked', fr ? 'révoqué' : 'revoked']
+    ['disabled', fr ? 'désactivé' : 'disabled']
   ].map(([key, label]) => `<span class="map-key"><span class="map-dot" style="border-color:${MAP_TONE[key]}"></span>${label}</span>`).join('');
 
+  const sansPosition = lost.length ? `<p class="hint map-lost">${fr ? 'Sans position connue' : 'No known position'} : ${lost.map(n => escapeHtml(n.name)).join(', ')} — ${fr
+    ? 'adresse locale, ou base de localisation absente (GeoIP).'
+    : 'local address, or no location database (GeoIP).'}</p>` : '';
+
   return `
-    <section class="card">
+    <section class="card map-card">
       <div class="panel-head">
-        <h2>${fr ? 'Vue d’ensemble' : 'Overview'}</h2>
-        <span class="hint">${fr ? 'La réplication reste à l’intérieur d’une zone' : 'Replication stays inside a zone'}</span>
+        <h2>${title}</h2>
+        <span class="hint">${view.cluster
+          ? `${nodes.length} ${fr ? (nodes.length > 1 ? 'serveurs' : 'serveur') : (nodes.length > 1 ? 'servers' : 'server')} · ${fr ? 'la réplication reste dans une zone' : 'replication stays inside a zone'}`
+          : (fr ? 'Ce serveur fonctionne seul' : 'This server runs alone')}</span>
       </div>
       <div class="map-wrap">
-        <svg viewBox="0 0 ${width} ${height}" class="cluster-map" role="group" aria-label="${fr ? 'Carte de la grappe' : 'Cluster map'}">${rows}</svg>
+        <svg viewBox="${x0} ${y0} ${w} ${h}" class="world-map" role="group" aria-label="${title}" preserveAspectRatio="xMidYMid meet">
+          <path d="${WORLD_LAND}" class="map-land" stroke-width="${0.3 * unit}"></path>
+          ${links.join('')}${marks}
+        </svg>
       </div>
       <div class="map-legend">${legende}</div>
+      ${sansPosition}
     </section>`;
 }
 
@@ -1771,13 +1788,29 @@ function wireRestore() {
 {
   const THEME_KEY = 'bv-admin-theme';
   const order = ['app', 'auto', 'light', 'dark'];
-  const icons = { app: '◈', auto: '◐', light: '☀', dark: '☾' };
-  const labels = {
-    app: ['Thème : celui de l’application', 'Theme: same as the app'],
-    auto: ['Thème : celui du système', 'Theme: system'],
-    light: ['Thème : clair', 'Theme: light'],
-    dark: ['Thème : sombre', 'Theme: dark']
+  // Même famille d'icônes que le reste de la page : trait de 1,8, coins arrondis
+  const svg = body => `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+  const icons = {
+    app: svg('<rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 8h18M8 21h8M12 18v3"/>'),
+    auto: svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17Z" fill="currentColor" stroke="none"/>'),
+    light: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/>'),
+    dark: svg('<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/>')
   };
+  const labels = {
+    app: ['Comme l’application', 'Same as the app'],
+    auto: ['Comme le système', 'Same as the system'],
+    light: ['Clair', 'Light'],
+    dark: ['Sombre', 'Dark']
+  };
+  // Menu déroulant sous le bouton : les quatre choix, nommés, le courant coché
+  const button = $('theme-toggle');
+  const menu = document.createElement('div');
+  menu.className = 'theme-menu';
+  menu.hidden = true;
+  menu.setAttribute('role', 'menu');
+  button.after(menu);
+  button.setAttribute('aria-haspopup', 'menu');
+  button.setAttribute('aria-expanded', 'false');
   // Variables de l'application → variables de l'administration
   const MAP = { 'bg-primary': 'bg', 'bg-secondary': 'card', 'bg-tertiary': 'field', 'border-muted': 'border', 'text-primary': 'text', 'text-muted': 'muted', accent: 'accent', 'accent-red': 'danger', 'accent-green': 'ok' };
   const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
@@ -1806,9 +1839,9 @@ function wireRestore() {
       for (const [from, to] of Object.entries(MAP)) if (HEX.test(colors[from] ?? '')) root.style.setProperty(`--${to}`, colors[from]);
     } else if (theme === 'auto') delete root.dataset.theme;
     else root.dataset.theme = theme;
-    const button = $('theme-toggle');
-    button.textContent = icons[theme];
-    button.title = button.ariaLabel = labels[theme][fr ? 0 : 1];
+    button.innerHTML = icons[theme];
+    button.title = button.ariaLabel = `${fr ? 'Thème' : 'Theme'} : ${labels[theme][fr ? 0 : 1]}`;
+    menu.innerHTML = order.map(key => `<button type="button" role="menuitemradio" aria-checked="${key === theme}" data-theme-choice="${key}">${icons[key]}<span>${labels[key][fr ? 0 : 1]}</span>${key === theme ? '<svg class="tick" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>' : ''}</button>`).join('');
   };
   apply();
   // L'application change de thème dans un autre onglet : on suit
@@ -1818,10 +1851,28 @@ function wireRestore() {
     serverDefault = order.includes(value) ? value : 'app';
     if (!local()) { theme = serverDefault; apply(); }
   };
-  $('theme-toggle').addEventListener('click', () => {
-    theme = order[(order.indexOf(theme) + 1) % order.length];
+  const close = () => { menu.hidden = true; button.setAttribute('aria-expanded', 'false'); };
+  button.addEventListener('click', () => {
+    menu.hidden = !menu.hidden;
+    button.setAttribute('aria-expanded', String(!menu.hidden));
+    if (!menu.hidden) menu.querySelector('[aria-checked="true"]')?.focus();
+  });
+  menu.addEventListener('click', event => {
+    const choice = event.target.closest('[data-theme-choice]')?.dataset.themeChoice;
+    if (!choice) return;
+    theme = choice;
     try { localStorage.setItem(THEME_KEY, theme); } catch { /* navigation privée : le choix vaut pour la session */ }
     apply();
+    close();
+    button.focus();
+  });
+  document.addEventListener('click', event => { if (!menu.hidden && event.target !== button && !button.contains(event.target) && !menu.contains(event.target)) close(); });
+  menu.addEventListener('keydown', event => {
+    const items = [...menu.querySelectorAll('button')];
+    const i = items.indexOf(document.activeElement);
+    if (event.key === 'Escape') { close(); button.focus(); }
+    if (event.key === 'ArrowDown') { event.preventDefault(); items[(i + 1) % items.length].focus(); }
+    if (event.key === 'ArrowUp') { event.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
   });
 }
 /* ── Emails : aperçu et personnalisation ─────────────────────────────────
