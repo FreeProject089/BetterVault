@@ -27,7 +27,7 @@ import { renderList } from './ui/listView';
 import { renderDetail } from './ui/detailView';
 import { openCreateTaskModal } from './ui/taskModal';
 import { openCreateCredentialModal } from './ui/credentialModal';
-import { loadSavedTheme, saveTheme, applyTheme } from './ui/themes';
+import { applyTheme, currentMode, hasBothModes, loadSavedTheme, saveMode, type ThemeMode } from './ui/themes';
 import { mountTemplateEditor } from './ui/itemTemplatesUi';
 import { renderTrash, type VersionsContext } from './ui/versionsPanel';
 import { expiredTrash } from './store/vaultStore';
@@ -246,28 +246,31 @@ export class AppController {
 
   /* ── Theme Toggle (Dark / Light) ──────────────────────────────────────── */
   private initTheme(): void {
-    const saved = localStorage.getItem('bettervault.theme');
-    if (saved === 'light') {
-      document.documentElement.setAttribute('data-theme', 'light');
-    }
-    // Un thème personnalisé l'emporte sur le simple clair / sombre
-    applyTheme(loadSavedTheme());
+    // Le thème choisi garde la main ; le mode dit seulement lequel de ses deux
+    // jeux de couleurs s'applique.
+    applyTheme(loadSavedTheme(), currentMode());
     this.updateThemeIcons();
 
     document.getElementById('btn-theme-toggle')?.addEventListener('click', () => {
-      // Basculer clair / sombre revient aux thèmes intégrés
-      if (loadSavedTheme()) saveTheme(null);
-      const current = document.documentElement.getAttribute('data-theme');
-      const next = current === 'light' ? 'dark' : 'light';
-      if (next === 'light') {
-        document.documentElement.setAttribute('data-theme', 'light');
-      } else {
-        document.documentElement.removeAttribute('data-theme');
-      }
-      localStorage.setItem('bettervault.theme', next);
-      // Update meta theme-color
+      /*
+       * Basculer clair / sombre ne quitte plus le thème : chaque thème porte
+       * ses deux jeux de couleurs. Avant, ce bouton effaçait le thème choisi,
+       * ce qui revenait à ne pouvoir garder un thème que dans un seul mode.
+       */
+      const next: ThemeMode = currentMode() === 'light' ? 'dark' : 'light';
+      saveMode(next);
+      const theme = loadSavedTheme();
+      applyTheme(theme, next);
+      // La couleur de la barre du système suit le fond réellement appliqué
       const meta = document.querySelector('meta[name="theme-color"]');
-      if (meta) meta.setAttribute('content', next === 'light' ? '#f6f8fa' : '#161b22');
+      const applique = document.documentElement.getAttribute('data-theme') === 'light';
+      if (meta) meta.setAttribute('content', applique ? '#f6f8fa' : '#161b22');
+      if (theme && !hasBothModes(theme)) {
+        this.showToast(this.tr(
+          `« ${theme.name} » n’a qu’un seul jeu de couleurs : ajoutez-en un second dans son fichier.`,
+          `“${theme.name}” has only one colour set: add a second one in its file.`
+        ), 'info');
+      }
       this.updateThemeIcons();
     });
   }

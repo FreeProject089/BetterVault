@@ -8,6 +8,8 @@ const EXACT: Record<string, string> = {
   'Fichier trop volumineux pour un thème': 'File too large for a theme',
   'Ce fichier n’est pas un thème BetterVault': 'This file is not a BetterVault theme',
   'Le thème n’a pas de nom': 'The theme has no name',
+  'Le thème n’a aucune couleur': 'The theme has no colours',
+  'Texte trop peu lisible sur le fond clair (contraste inférieur à 4,5:1)': 'Text too hard to read on the light background (contrast below 4.5:1)',
   'Texte trop peu lisible sur le fond (contraste inférieur à 4,5:1)': 'Text too hard to read on the background (contrast below 4.5:1)',
   'Ajoutez au moins un champ': 'Add at least one field',
   'Un type porte déjà ce nom': 'A type already has this name',

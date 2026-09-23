@@ -3902,9 +3902,14 @@ button.shortcut-key:hover { border-color: var(--accent); }
 .template-field-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 150px) auto 36px; gap: 8px; align-items: center; }
 .check-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
 .required-mark { color: var(--danger, #f85149); }
+/* Les réponses d'une liste de choix et l'aide du genre prennent toute la
+   largeur, sous la ligne : ce sont des compléments, pas des colonnes. */
+.template-field-row .template-field-options { grid-column: 1 / -1; }
+.template-field-row .template-field-hint { grid-column: 1 / -1; margin-top: -2px; }
 @media (max-width: 560px) {
   .template-field-row { grid-template-columns: minmax(0, 1fr) 36px; }
   .template-field-row select, .template-field-row .check-inline { grid-column: 1 / 2; }
+  .template-field-row .template-field-options, .template-field-row .template-field-hint { grid-column: 1 / -1; }
 }
 
 /* ── Barre latérale réduite (ordinateur) ──────────────────────────────────
@@ -4316,4 +4321,21 @@ label.check,
    icônes : le libellé passait sur deux lignes. Le texte prime, l'icône part. */
 @media (max-width: 420px) {
   .tab-btn-group.segmented .tab-icon { display: none; }
+}
+
+/* ── Choix du thème ────────────────────────────────────────────────────────
+   Une liste déroulante, précédée d'un aperçu des couleurs du thème appliqué :
+   les anciennes pastilles occupaient trois lignes pour trois thèmes. */
+.theme-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.theme-pick .form-input { flex: 1 1 auto; min-width: 0; }
+.theme-swatch-current {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-subtle);
+  background: linear-gradient(135deg, var(--p-accent) 50%, var(--p-bg) 50%);
 }

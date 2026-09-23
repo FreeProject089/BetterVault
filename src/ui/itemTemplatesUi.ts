@@ -1,5 +1,5 @@
 import type { CredentialField, ItemTemplate, TemplateField, TemplateFieldKind } from '../types/vault';
-import { MAX_TEMPLATE_FIELDS, TEMPLATE_FIELD_KINDS, templateValue } from '../store/itemTemplates';
+import { MAX_TEMPLATE_FIELDS, normalizeOptions, TEMPLATE_FIELD_KINDS, templateValue } from '../store/itemTemplates';
 
 /**
  * Interface des types d'éléments personnalisés : cartes de choix, champs à remplir
@@ -11,11 +11,45 @@ type Escape = (value: string) => string;
 
 const KIND_LABELS: Record<TemplateFieldKind, [string, string]> = {
   text: ['Texte', 'Text'],
-  secret: ['Secret (masqué)', 'Secret (hidden)'],
   multiline: ['Texte long', 'Long text'],
+  secret: ['Secret (masqué)', 'Secret (hidden)'],
+  pin: ['Code chiffré (masqué)', 'Numeric code (hidden)'],
+  email: ['Adresse email', 'Email address'],
+  phone: ['Téléphone', 'Phone'],
+  url: ['Adresse web', 'Web address'],
   date: ['Date', 'Date'],
+  month: ['Mois (expiration)', 'Month (expiry)'],
   number: ['Nombre', 'Number'],
-  url: ['Adresse web', 'Web address']
+  boolean: ['Oui / non', 'Yes / no'],
+  choice: ['Liste de choix', 'Choice list']
+};
+
+/** Ce que chaque genre apporte, dit en une ligne dans l'éditeur */
+const KIND_HINTS: Partial<Record<TemplateFieldKind, [string, string]>> = {
+  secret: ['Caché dans la fiche, copiable d’un bouton.', 'Hidden on the item, copied with a button.'],
+  pin: ['Chiffres seulement, caché comme un secret.', 'Digits only, hidden like a secret.'],
+  month: ['Mois et année, comme une date d’expiration de carte.', 'Month and year, like a card expiry date.'],
+  boolean: ['Une case à cocher : renouvellement, partagé…', 'A checkbox: auto-renewal, shared…'],
+  choice: ['Vos réponses possibles, séparées par des virgules.', 'Your possible answers, separated by commas.']
+};
+
+/** Clavier le plus commode sur téléphone, par genre de champ */
+const INPUT_MODES: Partial<Record<TemplateFieldKind, string>> = {
+  pin: 'numeric',
+  number: 'decimal',
+  email: 'email',
+  phone: 'tel',
+  url: 'url'
+};
+
+const INPUT_TYPES: Partial<Record<TemplateFieldKind, string>> = {
+  secret: 'password',
+  pin: 'password',
+  email: 'email',
+  phone: 'tel',
+  url: 'url',
+  date: 'date',
+  month: 'month'
 };
 
 const TEMPLATE_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 8h10M7 12h10M7 16h6"/></svg>';
@@ -47,19 +81,40 @@ export function templateFieldsHtml(template: ItemTemplate, fields: CredentialFie
     const value = escape(templateValue(f, fields));
     const required = f.required ? ' required aria-required="true"' : '';
     const label = `<label class="form-label" for="${id}">${escape(f.label)}${f.required ? ' <span class="required-mark" aria-hidden="true">*</span>' : ''}</label>`;
-    const input = f.kind === 'multiline'
-      ? `<textarea class="form-input" id="${id}" data-tpl-field="${escape(f.id)}" rows="3"${required}>${value}</textarea>`
-      : `<input class="form-input${f.kind === 'secret' ? ' mono' : ''}" id="${id}" data-tpl-field="${escape(f.id)}" value="${value}"${required}
-          type="${f.kind === 'secret' ? 'password' : f.kind === 'date' ? 'date' : f.kind === 'url' ? 'url' : 'text'}"
-          ${f.kind === 'number' ? 'inputmode="decimal"' : ''} autocomplete="off" spellcheck="false">`;
+    const brut = templateValue(f, fields);
+    const mode = INPUT_MODES[f.kind] ? ` inputmode="${INPUT_MODES[f.kind]}"` : '';
+
+    if (f.kind === 'multiline') {
+      const zone = `<textarea class="form-input" id="${id}" data-tpl-field="${escape(f.id)}" rows="3"${required}>${value}</textarea>`;
+      return `<div class="form-field">${label}${zone}</div>`;
+    }
+    if (f.kind === 'boolean') {
+      // Une case à cocher porte son propre libellé : pas de label au-dessus
+      const coche = brut === 'true' ? ' checked' : '';
+      return `<div class="form-field"><label class="check-row"><input type="checkbox" data-tpl-field="${escape(f.id)}" data-tpl-bool id="${id}"${coche}> ${escape(f.label)}</label></div>`;
+    }
+    if (f.kind === 'choice') {
+      const options = f.options ?? [];
+      const choisi = options.includes(brut) ? brut : '';
+      const liste = `<select class="form-input" id="${id}" data-tpl-field="${escape(f.id)}"${required}>
+          <option value=""${choisi ? '' : ' selected'}>${f.required ? tr('À choisir…', 'Choose…') : tr('Aucun', 'None')}</option>
+          ${options.map(o => `<option value="${escape(o)}"${o === choisi ? ' selected' : ''}>${escape(o)}</option>`).join('')}
+        </select>`;
+      return `<div class="form-field">${label}${liste}</div>`;
+    }
+    const input = `<input class="form-input${f.kind === 'secret' || f.kind === 'pin' ? ' mono' : ''}" id="${id}" data-tpl-field="${escape(f.id)}" value="${value}"${required}
+          type="${INPUT_TYPES[f.kind] ?? 'text'}"${mode} autocomplete="off" spellcheck="false">`;
     return `<div class="form-field">${label}${input}</div>`;
   }).join('') || `<p class="field-hint">${tr('Ce type n’a aucun champ.', 'This type has no field.')}</p>`;
 }
 
 export function readTemplateValues(root: HTMLElement): Record<string, string> {
   const values: Record<string, string> = {};
-  root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('[data-tpl-field]').forEach(el => {
-    values[el.dataset.tplField!] = el.value;
+  root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('[data-tpl-field]').forEach(el => {
+    // Une case à cocher n'a pas de valeur utile : c'est son état qu'on garde
+    values[el.dataset.tplField!] = el instanceof HTMLInputElement && el.type === 'checkbox'
+      ? String(el.checked)
+      : el.value;
   });
   return values;
 }
@@ -133,6 +188,9 @@ export function mountTemplateEditor(host: HTMLElement, a: TemplateEditorActions)
           <select class="form-input" data-f="kind" aria-label="${tr('Genre de champ', 'Field kind')}">${TEMPLATE_FIELD_KINDS.map(k => `<option value="${k}"${k === f.kind ? ' selected' : ''}>${tr(...KIND_LABELS[k])}</option>`).join('')}</select>
           <label class="check-inline"><input type="checkbox" data-f="required"${f.required ? ' checked' : ''}> ${tr('Requis', 'Required')}</label>
           <button type="button" class="icon-btn" data-drop aria-label="${tr('Retirer ce champ', 'Remove this field')}">✕</button>
+          ${f.kind === 'choice' ? `<input class="form-input template-field-options" data-f="options" maxlength="400" value="${escape((f.options ?? []).join(', '))}"
+            placeholder="${tr('Mensuel, Annuel, À vie', 'Monthly, Yearly, Lifetime')}" aria-label="${tr('Réponses possibles, séparées par des virgules', 'Possible answers, separated by commas')}">` : ''}
+          ${KIND_HINTS[f.kind] ? `<span class="field-hint template-field-hint">${tr(...KIND_HINTS[f.kind]!)}</span>` : ''}
         </li>`).join('')}</ol>
       <button type="button" class="btn-primary btn-ghost btn-sm" data-add-field${draft.fields.length >= MAX_TEMPLATE_FIELDS ? ' disabled' : ''}>${tr('+ Ajouter un champ', '+ Add a field')}</button>
       <div class="form-error" data-tpl-error hidden></div>
@@ -149,8 +207,18 @@ export function mountTemplateEditor(host: HTMLElement, a: TemplateEditorActions)
         f.label = row.querySelector<HTMLInputElement>('[data-f="label"]')!.value;
         f.kind = row.querySelector<HTMLSelectElement>('[data-f="kind"]')!.value as TemplateFieldKind;
         f.required = row.querySelector<HTMLInputElement>('[data-f="required"]')!.checked || undefined;
+        const options = row.querySelector<HTMLInputElement>('[data-f="options"]');
+        // Les réponses restent en mémoire même si le genre change puis revient
+        if (options) f.options = normalizeOptions(options.value.split(','));
       });
     };
+    host.querySelectorAll<HTMLSelectElement>('[data-f="kind"]').forEach(select => select.addEventListener('change', () => {
+      // Le genre commande ce que la ligne affiche : on redessine, saisie gardée
+      sync();
+      edit();
+      const index = Number(select.closest<HTMLElement>('.template-field-row')!.dataset.index);
+      host.querySelector<HTMLSelectElement>(`.template-field-row[data-index="${index}"] [data-f="kind"]`)?.focus();
+    }));
     host.querySelector('[data-add-field]')!.addEventListener('click', () => {
       sync();
       draft.fields.push({ label: '', kind: 'text' });

@@ -7,8 +7,8 @@ import { resizeAvatar } from '../ui/avatarImage';
 import { translateError } from '../i18n/errorMessages';
 import { tabIcon } from '../ui/tabIcons';
 import { securityKeysSectionHtml, wireSecurityKeys } from '../ui/securityKeysPanel';
-import { GEN_ICONS } from '../ui/icons';
-import { loadSavedTheme, parseTheme, PRESET_THEMES, saveTheme, ThemeError, themeTemplate } from '../ui/themes';
+import { GEN_ICONS, THEME_ICONS } from '../ui/icons';
+import { currentMode, loadSavedTheme, parseTheme, PRESET_THEMES, previewColors, saveTheme, ThemeError, themeTemplate } from '../ui/themes';
 import { renderSVG } from 'uqr';
 import { i18n } from '../i18n';
 import type { AppController } from '../main';
@@ -112,14 +112,22 @@ export function openAccountModal(app: AppController): void {
       </section>
       <section class="account-section">
         <h3 class="account-section-title">${tr('Apparence', 'Appearance')}</h3>
-        <p class="modal-text">${tr('Thème actuel', 'Current theme')} : <strong data-theme-name></strong></p>
-        <div class="theme-presets">
-          ${PRESET_THEMES.map((t, i) => `<button type="button" class="theme-preset" data-theme-preset="${i}" style="--p-bg:${t.colors['bg-primary']};--p-fg:${t.colors['text-primary']};--p-accent:${t.colors.accent}"><span class="theme-swatch"></span>${app.escapeHtml(t.name)}</button>`).join('')}
+        <div class="form-field">
+          <label class="form-label" for="account-theme">${tr('Thème', 'Theme')}</label>
+          <div class="theme-pick">
+            <span class="theme-swatch theme-swatch-current" data-theme-swatch aria-hidden="true"></span>
+            <select class="form-input" id="account-theme" data-theme-select>
+              <option value="">${tr('BetterVault (par défaut)', 'BetterVault (default)')}</option>
+              ${PRESET_THEMES.map((t, i) => `<option value="${i}">${app.escapeHtml(t.name)}</option>`).join('')}
+              <option value="custom" hidden data-theme-custom></option>
+            </select>
+          </div>
+          <span class="field-hint">${tr('Le bouton clair / sombre de l’en-tête change le jeu de couleurs du thème, sans le quitter.', 'The light / dark button in the header switches the theme’s colour set, without leaving it.')}</span>
         </div>
         <div class="account-actions">
-          <button type="button" class="btn-primary" data-action="theme-import">${tr('Importer un thème', 'Import a theme')}</button>
-          <button type="button" class="btn-primary btn-ghost" data-action="theme-template">${tr('Télécharger le modèle', 'Download the template')}</button>
-          <button type="button" class="btn-primary btn-ghost" data-action="theme-reset">${tr('Thème par défaut', 'Default theme')}</button>
+          <button type="button" class="btn-primary" data-action="theme-import">${THEME_ICONS.upload}<span>${tr('Importer un thème', 'Import a theme')}</span></button>
+          <button type="button" class="btn-primary btn-ghost" data-action="theme-template">${THEME_ICONS.download}<span>${tr('Télécharger le modèle', 'Download the template')}</span></button>
+          <button type="button" class="btn-primary btn-ghost" data-action="theme-reset">${THEME_ICONS.reset}<span>${tr('Thème par défaut', 'Default theme')}</span></button>
         </div>
         <input type="file" accept="application/json,.json" hidden data-theme-file>
         <div class="form-error" data-theme-error hidden></div>
@@ -335,21 +343,55 @@ export function openAccountModal(app: AppController): void {
   });
 
   // Apparence : thèmes intégrés, thème importé, modèle à modifier
-  const themeName = $('[data-theme-name]');
   const themeError = $('[data-theme-error]');
-  const paintThemeName = () => {
-    if (themeName) themeName.textContent = loadSavedTheme()?.name ?? tr('BetterVault (clair ou sombre)', 'BetterVault (light or dark)');
+  const themeSelect = $<HTMLSelectElement>('[data-theme-select]');
+  const themeCustom = $<HTMLOptionElement>('[data-theme-custom]');
+  const themeSwatch = $<HTMLElement>('[data-theme-swatch]');
+
+  /** Remet la liste et l'aperçu en accord avec le thème réellement appliqué */
+  const paintTheme = () => {
+    const theme = loadSavedTheme();
+    const mode = currentMode();
+    if (themeSwatch) {
+      const couleurs = theme ? previewColors(theme, mode) : {};
+      // Sans thème, l'aperçu prend les couleurs vives de l'interface elle-même
+      themeSwatch.style.setProperty('--p-bg', couleurs['bg-primary'] ?? 'var(--bg-primary)');
+      themeSwatch.style.setProperty('--p-fg', couleurs['text-primary'] ?? 'var(--text-primary)');
+      themeSwatch.style.setProperty('--p-accent', couleurs.accent ?? 'var(--accent)');
+    }
+    if (!themeSelect) return;
+    if (!theme) {
+      themeSelect.value = '';
+      if (themeCustom) themeCustom.hidden = true;
+      return;
+    }
+    const preset = PRESET_THEMES.findIndex(t => t.name === theme.name);
+    if (preset >= 0) {
+      themeSelect.value = String(preset);
+      if (themeCustom) themeCustom.hidden = true;
+      return;
+    }
+    // Thème importé : il prend sa place dans la liste, sous son propre nom
+    if (themeCustom) {
+      themeCustom.hidden = false;
+      themeCustom.textContent = theme.name;
+    }
+    themeSelect.value = 'custom';
   };
+
   const useTheme = (theme: ReturnType<typeof loadSavedTheme>) => {
     saveTheme(theme);
     app.updateThemeIcons();
-    paintThemeName();
+    paintTheme();
     if (themeError) themeError.hidden = true;
   };
-  paintThemeName();
-  box.querySelectorAll<HTMLButtonElement>('[data-theme-preset]').forEach(button => button.addEventListener('click', () => {
-    useTheme(PRESET_THEMES[Number(button.dataset.themePreset)]);
-  }));
+  paintTheme();
+  themeSelect?.addEventListener('change', () => {
+    const value = themeSelect.value;
+    // « custom » est déjà le thème appliqué : rien à refaire
+    if (value === 'custom') return;
+    useTheme(value === '' ? null : PRESET_THEMES[Number(value)]);
+  });
   action('theme-reset')?.addEventListener('click', () => useTheme(null));
   action('theme-template')?.addEventListener('click', () => {
     downloadExportFile(themeTemplate(), 'bettervault-theme.json', 'application/json');

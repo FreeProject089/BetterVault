@@ -135,13 +135,17 @@ export interface VaultTypeDef {
   updatedAt: number;
 }
 
-export type TemplateFieldKind = 'text' | 'secret' | 'multiline' | 'date' | 'number' | 'url';
+export type TemplateFieldKind =
+  | 'text' | 'secret' | 'multiline' | 'date' | 'number' | 'url'
+  | 'email' | 'phone' | 'month' | 'pin' | 'boolean' | 'choice';
 
 export interface TemplateField {
   id: string;
   label: string;
   kind: TemplateFieldKind;
   required?: boolean;
+  /** Réponses possibles d'un champ « choix » ; ignoré pour les autres genres */
+  options?: string[];
 }
 
 /** Type d'élément personnalisé : un nom et la liste des champs à remplir */

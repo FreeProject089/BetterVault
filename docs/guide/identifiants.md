@@ -30,8 +30,26 @@ Le numéro d'une carte est vérifié par le contrôle de Luhn : une faute de fra
 Vous pouvez décrire vos propres types d'éléments : *Mes types*, dans les outils de la barre latérale.
 
 - **Créer** : un nom (Abonnement, Licence, Véhicule…) et jusqu'à 20 champs.
-- **Genre d'un champ** : texte, secret (masqué), texte long, date, nombre, adresse web. Un champ peut être **requis**.
-- **À la saisie** : un champ requis vide empêche l'enregistrement, et un nombre, une date ou une adresse mal formés sont refusés.
+- **À la saisie** : un champ requis vide empêche l'enregistrement, et une valeur mal formée est refusée avec le curseur placé dessus.
+
+### Genres de champ
+
+| Genre | Ce qu'il apporte |
+| --- | --- |
+| Texte | Une ligne libre |
+| Texte long | Plusieurs lignes : adresse, notes |
+| Secret (masqué) | Caché dans la fiche, copiable d'un bouton |
+| Code chiffré (masqué) | Chiffres seulement (3 à 12), caché comme un secret |
+| Adresse email | Clavier email sur téléphone, forme vérifiée |
+| Téléphone | Clavier d'appel, chiffres et ponctuation acceptés |
+| Adresse web | Ouvre un lien, `https://` ajouté si besoin |
+| Date | Sélecteur de date du système |
+| Mois (expiration) | Mois et année, comme une carte bancaire |
+| Nombre | Clavier numérique, décimales acceptées |
+| Oui / non | Une case à cocher |
+| Liste de choix | Vos réponses possibles (jusqu'à 20), en liste déroulante |
+
+Un champ **Liste de choix** demande ses réponses, séparées par des virgules : les doublons et les vides sont retirés. Sans aucune réponse, il redevient un champ texte plutôt que d'offrir une liste vide.
 
 Les valeurs sont rangées dans les champs de l'élément lui-même : modifier ou supprimer un type ne fait rien perdre, et un élément partagé s'affiche correctement chez quelqu'un qui n'a pas le type.
 

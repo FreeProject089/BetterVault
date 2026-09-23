@@ -42,6 +42,75 @@ describe('Types d’éléments personnalisés', () => {
     expect(checkTemplateValues(licence, { 'tfield-cle00001': 'K', 'tfield-postes01': '3', 'tfield-site0001': 'exemple.fr', 'tfield-date0001': '2027-01-31' }, tr).error).toBeUndefined();
   });
 
+  it('contrôle les nouveaux genres de champ', () => {
+    const modele: ItemTemplate = {
+      id: 'tpl-abonnem01', name: 'Abonnement', createdAt: 1, updatedAt: 1,
+      fields: [
+        { id: 'tfield-mail0001', label: 'Email', kind: 'email' },
+        { id: 'tfield-tel00001', label: 'Téléphone', kind: 'phone' },
+        { id: 'tfield-mois0001', label: 'Expire', kind: 'month' },
+        { id: 'tfield-code0001', label: 'Code', kind: 'pin' },
+        { id: 'tfield-rythm001', label: 'Rythme', kind: 'choice', options: ['Mensuel', 'Annuel'] }
+      ]
+    };
+    const bon = {
+      'tfield-mail0001': 'a.b@exemple.fr',
+      'tfield-tel00001': '+33 6 12 34 56 78',
+      'tfield-mois0001': '2030-07',
+      'tfield-code0001': '4821',
+      'tfield-rythm001': 'Annuel'
+    };
+    expect(checkTemplateValues(modele, bon, tr).error).toBeUndefined();
+    // Un champ vide non requis reste accepté : on ne contrôle que ce qui est saisi
+    expect(checkTemplateValues(modele, {}, tr).error).toBeUndefined();
+
+    const mauvais: Array<[string, string, RegExp]> = [
+      ['tfield-mail0001', 'a.b@exemple', /email/],
+      ['tfield-mail0001', 'deux@adresses, a@b.fr', /email/],
+      ['tfield-tel00001', 'appelle-moi', /téléphone/],
+      ['tfield-mois0001', '2030-13', /mois/],
+      ['tfield-mois0001', '2030-07-15', /mois/],
+      ['tfield-code0001', '12', /chiffres/],
+      ['tfield-code0001', '48a1', /chiffres/],
+      // Une réponse hors liste pourrait venir d'un autre appareil ou d'un import
+      ['tfield-rythm001', 'Hebdomadaire', /réponses/]
+    ];
+    for (const [id, valeur, attendu] of mauvais) {
+      const res = checkTemplateValues(modele, { ...bon, [id]: valeur }, tr);
+      expect(res.error?.fieldId, `${id} = ${valeur}`).toBe(id);
+      expect(res.error?.message).toMatch(attendu);
+    }
+  });
+
+  it('un choix sans réponse possible redevient du texte, et les réponses sont bornées', () => {
+    const [modele] = normalizeTemplates([{
+      id: 'tpl-choix0001', name: 'Choix', createdAt: 1, updatedAt: 1,
+      fields: [
+        { id: 'tfield-vide0001', label: 'Sans réponses', kind: 'choice', options: [] },
+        { id: 'tfield-plein001', label: 'Avec réponses', kind: 'choice', options: ['  Un  ', 'un', 'Deux', '', ...Array.from({ length: 30 }, (_, i) => `R${i}`)] },
+        { id: 'tfield-texte001', label: 'Texte', kind: 'text', options: ['ignoré'] }
+      ]
+    }]);
+    expect(modele.fields[0].kind).toBe('text');
+    // « Un » et « un » sont la même réponse ; le vide disparaît ; 20 au maximum
+    expect(modele.fields[1].options!.slice(0, 3)).toEqual(['Un', 'Deux', 'R0']);
+    expect(modele.fields[1].options!.length).toBe(20);
+    expect(modele.fields[2].options).toBeUndefined();
+  });
+
+  it('un code chiffré est masqué comme un secret dans la fiche', () => {
+    const modele: ItemTemplate = {
+      id: 'tpl-carte0001', name: 'Carte', createdAt: 1, updatedAt: 1,
+      fields: [
+        { id: 'tfield-code0001', label: 'Code', kind: 'pin' },
+        { id: 'tfield-titul001', label: 'Titulaire', kind: 'text' }
+      ]
+    };
+    const champs = mergeTemplateFields(modele, { 'tfield-code0001': '4821', 'tfield-titul001': 'A. Martin' }, undefined);
+    expect(champs.find(f => f.id === 'tfield-code0001')!.isMasked).toBe(true);
+    expect(champs.find(f => f.id === 'tfield-titul001')!.isMasked).toBe(false);
+  });
+
   it('range les valeurs dans les champs de l’élément sans perdre les autres', () => {
     const fields = mergeTemplateFields(licence, { 'tfield-cle00001': 'ABC', 'tfield-postes01': '' }, [
       { id: 'field-perso001', label: 'Remarque', value: 'garder', isMasked: false },
