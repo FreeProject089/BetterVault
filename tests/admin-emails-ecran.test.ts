@@ -57,7 +57,9 @@ describe('Administration : onglet Emails', () => {
     (window as unknown as { fetch: typeof fetch }).fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
       nodeFetch(typeof input === 'string' && input.startsWith('/') ? origin + input : input, init)) as typeof fetch;
     window.sessionStorage.setItem('bettervault-admin-token', TOKEN);
-    const script = readFileSync(resolve(__dirname, '../server/admin/admin.js'), 'utf8');
+    // admin.js est un module qui importe le fond de carte : on le met à la suite, sans import ni export
+    const carte = readFileSync(resolve(__dirname, '../server/admin/world-land.js'), 'utf8').replace(/^export /gm, '');
+    const script = carte + readFileSync(resolve(__dirname, '../server/admin/admin.js'), 'utf8').replace(/^import .*$/m, '');
     (window as unknown as { eval: (code: string) => unknown }).eval(script);
     await until(() => !document.getElementById('dashboard')!.hidden);
   });
