@@ -1,6 +1,6 @@
 name: Release
 
-# Publier une version : git tag v1.2.0 && git push origin v1.2.0
+# Publier une version : node scripts/version.mjs 1.2.0, commit, puis git tag v1.2.0 && git push origin v1.2.0
 on:
   push:
     tags: ['v*']
@@ -18,8 +18,18 @@ permissions:
   packages: write
 
 jobs:
+  versions:
+    name: Versions alignées sur le tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Un installeur 1.1.0 dans une version v1.2.0 : on arrête avant de construire
+      - if: github.event_name == 'push'
+        run: node scripts/version.mjs --tag "${{ github.ref_name }}"
+
   docker:
     name: Image Docker (GHCR)
+    needs: versions
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,6 +60,7 @@ jobs:
 
   desktop:
     name: Bureau (${{ matrix.name }})
+    needs: versions
     strategy:
       fail-fast: false
       matrix:
@@ -116,6 +127,7 @@ jobs:
 
   android:
     name: Android (APK)
+    needs: versions
     runs-on: ubuntu-latest
     env:
       HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE != '' }}
@@ -175,6 +187,7 @@ jobs:
 
   extension:
     name: Extension navigateur
+    needs: versions
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

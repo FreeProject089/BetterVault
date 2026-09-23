@@ -167,9 +167,15 @@ L'intégration continue lance exactement ces contrôles, plus un démarrage rée
 
 ## Publier une version
 
+Le numéro de version figure dans huit endroits (serveur, `package.json` et son verrou, `Cargo.toml` et son verrou, `tauri.conf.json`, manifeste de l'extension). Un script les change tous d'un coup :
+
 ```bash
+node scripts/version.mjs 1.2.0
+git commit -am "version 1.2.0"
 git tag v1.2.0
-git push origin v1.2.0
+git push origin main v1.2.0
 ```
+
+`node scripts/version.mjs` sans argument affiche les versions et échoue si elles diffèrent. Le workflow **Release** fait la même vérification contre le tag avant de construire quoi que ce soit : une version `v1.2.0` ne peut pas contenir des installeurs numérotés 1.1.0.
 
 Le workflow **Release** construit et publie alors : l'image Docker multi-architecture sur GHCR, les paquets bureau pour les trois systèmes, l'APK Android et l'archive de l'extension. Les releases sont créées en **brouillon** : rien n'est visible tant que vous ne les publiez pas vous-même.
