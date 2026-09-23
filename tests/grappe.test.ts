@@ -11,6 +11,7 @@ import { settingsFromEnv } from '../server/src/config.ts';
 import { compareVv, pickWinner } from '../server/src/cluster.ts';
 import { AccountService, type KeyValueStorage } from '../src/account/accountService';
 import { createEmptyVaultData } from '../src/store/vaultStore';
+import { WrongPasswordError } from '../src/account/accountCrypto';
 
 /**
  * Grappe à confiance signée. Chaque nœud a sa clé ; la grappe a une clé racine qui
@@ -45,6 +46,7 @@ async function startNode(): Promise<Node> {
     db: openDatabase(':memory:'),
     serverSecret: `secret-serveur-${Math.random()}-suffisamment-long-0123456789`,
     minKdfMemoryKib: 8,
+    decoyKdf: FAST_KDF,
     authRateLimit: { windowMs: 60_000, max: 10_000 },
     settings: settingsFromEnv({}),
     adminTokenHash: createHash('sha256').update(TOKEN).digest('base64'),
@@ -125,7 +127,7 @@ describe('Grappe à confiance signée', () => {
     const ouvert = await newService().signIn(euE.url, email, PASSWORD);
     expect(ouvert.credentials.map(c => c.title)).toContain('Banque');
     // Le nœud américain fait partie de la grappe, mais pas de la zone EU : il n'a rien reçu
-    await expect(newService().signIn(usE.url, email, PASSWORD)).rejects.toThrow();
+    await expect(newService().signIn(usE.url, email, PASSWORD)).rejects.toBeInstanceOf(WrongPasswordError);
   });
 
   it('ne perd rien quand deux nœuds de la zone changent en même temps', async () => {
@@ -209,7 +211,7 @@ describe('Grappe à confiance signée', () => {
       const email = `apres-revocation-${Date.now()}@exemple.fr`;
       await newService().createAccount({ email, password: PASSWORD, mode: 'cloud', serverUrl: euW.url }, createEmptyVaultData());
       await syncAll([euW, extra]);
-      await expect(newService().signIn(extra.url, email, PASSWORD)).rejects.toThrow();
+      await expect(newService().signIn(extra.url, email, PASSWORD)).rejects.toBeInstanceOf(WrongPasswordError);
 
       // Un nœud révoqué peut ensuite être retiré du manifeste
       expect((await euW.admin('DELETE', `cluster/nodes/${id}`)).status).toBe(200);
@@ -223,7 +225,7 @@ describe('Grappe à confiance signée', () => {
     const email = `pendant-pause-${Date.now()}@exemple.fr`;
     await newService().createAccount({ email, password: PASSWORD, mode: 'cloud', serverUrl: euW.url }, createEmptyVaultData());
     await syncAll([euW, euE]);
-    await expect(newService().signIn(euE.url, email, PASSWORD)).rejects.toThrow();
+    await expect(newService().signIn(euE.url, email, PASSWORD)).rejects.toBeInstanceOf(WrongPasswordError);
 
     // Réactivé, il rattrape ce qui s'est passé pendant la pause
     expect((await euW.admin('PATCH', `cluster/nodes/${euEId}`, { status: 'active' })).status).toBe(200);

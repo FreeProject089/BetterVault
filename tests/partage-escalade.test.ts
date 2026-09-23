@@ -32,6 +32,7 @@ describe('Coffre partagé : élévation de privilèges', () => {
       db: openDatabase(':memory:'),
       serverSecret: 'secret-de-test-suffisamment-long-0123456789',
       minKdfMemoryKib: 8,
+      decoyKdf: FAST_KDF,
       authRateLimit: { windowMs: 60_000, max: 10_000 }
     }));
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));

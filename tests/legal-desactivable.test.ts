@@ -24,6 +24,7 @@ describe('Documents légaux désactivables', () => {
       db: openDatabase(':memory:'),
       serverSecret: 'secret-de-test-suffisamment-long-0123456789',
       minKdfMemoryKib: 8,
+      decoyKdf: { t: 1, m: 64, p: 1 },
       settings: settingsFromEnv({ LEGAL_ENABLED: 'false' }),
       adminTokenHash: createHash('sha256').update(ADMIN_TOKEN).digest('base64')
     }));

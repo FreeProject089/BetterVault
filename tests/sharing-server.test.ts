@@ -30,6 +30,7 @@ describe('Serveur : coffres partagés, rôles et pièces jointes', () => {
       db: openDatabase(':memory:'),
       serverSecret: SECRET,
       minKdfMemoryKib: 8,
+      decoyKdf: { t: 1, m: 64, p: 1 },
       authRateLimit: { windowMs: 60_000, max: 10_000 },
       settings,
       filesDir
