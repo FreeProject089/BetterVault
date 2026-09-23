@@ -42,6 +42,7 @@ import { activeTabHost, extensionSessionStore, extensionSurface, fillActiveTab, 
 import { biometricStore, isAndroidApp, nativeCall, type DeviceSecretStore } from './platform/biometric';
 import { i18n } from './i18n';
 import { wireLanguageMenu } from './ui/languageMenu';
+import { initCustomSelects } from './ui/customSelect';
 
 type ActiveView = 'all-credentials' | '2fa-tokens' | 'tasks';
 type TaskViewMode = 'list' | 'kanban' | 'matrix' | 'calendar';
@@ -180,6 +181,8 @@ export class AppController {
     this.initEventListeners();
     this.initMobileControls();
     this.initI18n();
+    // Listes déroulantes aux couleurs du thème (ordinateur seulement)
+    initCustomSelects();
     this.initAutoLock();
     this.renderSidebar();
     this.renderList();

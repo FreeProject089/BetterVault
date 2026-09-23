@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import { configDefaults } from 'vitest/config';
 import { iconDataPlugin } from './build/iconDataPlugin.ts';
 import { i18nCatalogPlugin } from './build/i18nCatalogPlugin.ts';
 
@@ -6,7 +7,9 @@ export default defineConfig({
   plugins: [iconDataPlugin(import.meta.dirname), i18nCatalogPlugin()],
   // Argon2id, scrypt et chiffrement des sauvegardes sont volontairement lents : délai large quand les tests tournent en parallèle
   test: {
-    testTimeout: 30_000
+    testTimeout: 30_000,
+    // Les copies de travail des autres sessions vivent sous .claude/ : elles ont leurs propres tests
+    exclude: [...configDefaults.exclude, '.claude/**']
   },
   server: {
     port: 3000,
