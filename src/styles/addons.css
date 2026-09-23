@@ -4264,3 +4264,34 @@ label.check,
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
+
+/* ── Bascule à deux choix (« Créer un compte » / « Se connecter ») ──────────
+   Les onglets normaux défilent au doigt et gardent leur largeur naturelle ;
+   une bascule, elle, remplit son cadre : sinon les deux boutons se serrent à
+   gauche et laissent un grand vide à droite. */
+.tab-btn-group.segmented { overflow-x: visible; }
+.tab-btn-group.segmented .tab-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  scroll-snap-align: none;
+}
+
+/* Les liens en texte (« Mot de passe oublié ? ») faisaient 14 px de haut :
+   impossible à viser au pouce. Le soulignement reste collé au texte, c'est la
+   zone touchable qui grandit. */
+.auth-link, .link-btn {
+  min-height: var(--tap);
+  padding-inline: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Deux boutons côte à côte se partagent la ligne : sur téléphone, deux boutons
+   naturels laissaient un tiers de la largeur vide à droite. */
+.recovery-actions .btn-primary { flex: 1 1 148px; }
+
+@media (max-width: 900px) {
+  /* Les petits boutons restent visables au pouce, y compris « Copier ». */
+  .btn-primary.btn-sm, .btn-sm { min-height: var(--tap); padding-inline: var(--space-3); }
+}

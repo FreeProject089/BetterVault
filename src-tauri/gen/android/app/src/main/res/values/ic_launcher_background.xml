@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Le logo est dessine pour un fond sombre : sa moitie haute est presque
+       blanche et disparaissait sur le fond blanc d'origine. -->
+  <color name="ic_launcher_background">#0D1117</color>
+</resources>

@@ -365,9 +365,18 @@ async fn keychain_get_secret_verified(account: String, reason: String) -> Result
     if !account.starts_with(keychain::PROTECTED_PREFIX) {
         return Err("Compte hors de l'espace protégé par la biométrie".into());
     }
+    #[cfg(any(windows, target_os = "macos"))]
     if !desktop_biometric_verify(reason).await? {
         return Err("Authentification annulée".into());
     }
+    /*
+     * Linux : aucune biométrie à appeler, c'est le trousseau de session qui
+     * protège le secret. On ne refuse pas la lecture pour autant, sinon
+     * l'ouverture rapide serait cassée au lieu d'être simplement plus faible —
+     * l'interface le dit clairement. L'espace protégé reste exigé.
+     */
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let _ = reason;
     keychain::read_protected(&account)
 }
 

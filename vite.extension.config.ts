@@ -20,6 +20,8 @@ function extensionFiles(): Plugin {
       copyFileSync(resolve(root, 'src-tauri/icons/32x32.png'), resolve(outDir, 'icons/32.png'));
       copyFileSync(resolve(root, 'src-tauri/icons/128x128.png'), resolve(outDir, 'icons/128.png'));
       cpSync(resolve(root, 'public/brand'), resolve(outDir, 'brand'), { recursive: true });
+      // Écran de lancement : sans lui, le popup s'ouvre sur un bloc sans mise en forme
+      copyFileSync(resolve(root, 'public/splash.css'), resolve(outDir, 'splash.css'));
     }
   };
 }

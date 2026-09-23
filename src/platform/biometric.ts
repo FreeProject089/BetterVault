@@ -7,10 +7,18 @@ import { isTauri, osKeychain, tauriInvoke } from './tauriBridge';
  * - iOS : invite Face ID / Touch ID puis trousseau.
  * - Windows : Windows Hello (visage, empreinte ou code PIN) puis Gestionnaire d'identification.
  * - macOS : Touch ID (LocalAuthentication) puis trousseau.
- * Ailleurs (navigateur, extension, Linux) : non disponible.
+ * - Linux : pas de biométrie reliée ; le trousseau de session (GNOME Keyring,
+ *   KWallet) garde le secret. Il est ouvert par la session, donc l'ouverture
+ *   rapide n'y demande rien : c'est écrit tel quel dans l'interface.
+ * Ailleurs (navigateur, extension) : non disponible.
  */
 
 export interface DeviceSecretStore {
+  /**
+   * `biometric` : une vérification (visage, empreinte, Hello) est exigée à chaque lecture.
+   * `keyring` : le secret est protégé par le trousseau de session, sans nouvelle vérification.
+   */
+  kind: 'biometric' | 'keyring';
   /** Libellé affiché : « Windows Hello », « empreinte ou visage »… */
   label: string;
   available(): Promise<boolean>;
@@ -31,6 +39,7 @@ export const isAndroidApp = () => isTauri() && /Android/i.test(userAgent());
 export const isIosApp = () => isTauri() && /iPhone|iPad|iPod/i.test(userAgent());
 export const isWindowsApp = () => isTauri() && /Windows/i.test(userAgent());
 export const isMacApp = () => isTauri() && /Macintosh|Mac OS X/i.test(userAgent()) && !/iPhone|iPad|iPod/i.test(userAgent());
+export const isLinuxApp = () => isTauri() && /Linux/i.test(userAgent()) && !/Android/i.test(userAgent());
 
 export function nativeCall<T>(method: string, payload: Record<string, unknown> = {}): Promise<T> {
   return tauriInvoke<T>('native_call', { method, payload });
@@ -49,6 +58,7 @@ const PROTECTED_PREFIX = 'bio.';
 export function biometricStore(): DeviceSecretStore | null {
   if (isAndroidApp()) {
     return {
+      kind: 'biometric',
       label: 'empreinte ou visage',
       available: async () => {
         try {
@@ -72,6 +82,7 @@ export function biometricStore(): DeviceSecretStore | null {
 
   if (isIosApp()) {
     return {
+      kind: 'biometric',
       label: 'Face ID ou Touch ID',
       available: async () => {
         try {
@@ -100,6 +111,7 @@ export function biometricStore(): DeviceSecretStore | null {
   if (isWindowsApp() || isMacApp()) {
     const mac = isMacApp();
     return {
+      kind: 'biometric',
       label: mac ? 'Touch ID' : 'Windows Hello',
       available: async () => {
         try {
@@ -122,6 +134,28 @@ export function biometricStore(): DeviceSecretStore | null {
       },
       // On nettoie aussi l'ancien emplacement non préfixé, hérité des versions
       // où la lecture ne passait pas par la vérification native.
+      remove: async name => { await osKeychain.remove(PROTECTED_PREFIX + name); await osKeychain.remove(name); }
+    };
+  }
+
+  /*
+   * Linux : ni Hello ni Touch ID à appeler. Le trousseau de session existe
+   * pourtant (Secret Service), et c'est lui qui protège le secret : l'ouverture
+   * rapide fonctionne donc, mais sans nouvelle vérification une fois la session
+   * ouverte. Le secret reste dans l'espace protégé du trousseau, et la lecture
+   * passe par la même commande native que sur les autres bureaux.
+   */
+  if (isLinuxApp()) {
+    return {
+      kind: 'keyring',
+      label: 'le trousseau du système',
+      available: () => osKeychain.isAvailable(),
+      save: (name, secret) => osKeychain.set(PROTECTED_PREFIX + name, secret),
+      read: async (name, reason) => {
+        const secret = await tauriInvoke<string | null>('keychain_get_secret_verified', { account: PROTECTED_PREFIX + name, reason });
+        if (!secret) throw new Error('Secret introuvable dans le trousseau du système');
+        return secret;
+      },
       remove: async name => { await osKeychain.remove(PROTECTED_PREFIX + name); await osKeychain.remove(name); }
     };
   }

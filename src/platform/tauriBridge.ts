@@ -27,8 +27,19 @@ export async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>
 export async function openExternal(url: string): Promise<void> {
   if (!/^https?:\/\//i.test(url)) throw new Error('Adresse non prise en charge');
   if (isTauri()) {
-    await tauriInvoke<void>('plugin:opener|open_url', { url });
-    return;
+    /*
+     * Si le greffon refuse l'adresse (portée trop étroite, système sans
+     * navigateur par défaut), on ne laisse pas le lien mort : la webview sait
+     * ouvrir un onglet. Sans ce repli, un appui sur « conditions d'utilisation »
+     * ne faisait rien du tout, avec un simple avertissement dans la console.
+     */
+    try {
+      await tauriInvoke<void>('plugin:opener|open_url', { url });
+      return;
+    } catch (err) {
+      if (!window.open(url, '_blank', 'noopener')) throw err;
+      return;
+    }
   }
   window.open(url, '_blank', 'noopener');
 }

@@ -117,7 +117,7 @@ export function mountAuthScreen(
     </div>`;
 
   const tabs = (active: 'create' | 'signin') => `
-    <div class="tab-btn-group" role="tablist">
+    <div class="tab-btn-group segmented" role="tablist">
       <button type="button" class="tab-btn ${active === 'create' ? 'active' : ''}" role="tab" aria-selected="${active === 'create'}" data-screen="create">${tabIcon('create')}<span>${tr('Créer un compte', 'Create account')}</span></button>
       <button type="button" class="tab-btn ${active === 'signin' ? 'active' : ''}" role="tab" aria-selected="${active === 'signin'}" data-screen="signin">${tabIcon('signin')}<span>${tr('Se connecter', 'Sign in')}</span></button>
     </div>`;

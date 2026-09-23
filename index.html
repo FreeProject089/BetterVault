@@ -8,6 +8,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <!-- Écran de lancement : chargé en premier, il doit peindre avant le reste -->
+  <link rel="stylesheet" href="/splash.css">
   <link rel="stylesheet" href="/src/styles/main.css">
   <link rel="stylesheet" href="/src/styles/addons.css">
   <link rel="manifest" href="/manifest.json">
@@ -22,6 +24,14 @@
   <link rel="apple-touch-icon" href="/brand/logo-on-dark.png">
 </head>
 <body>
+  <div id="splash" role="status" aria-live="polite">
+    <img class="splash-logo splash-logo-dark" src="/brand/logo-on-dark.svg" alt="" width="76" height="76">
+    <img class="splash-logo splash-logo-light" src="/brand/logo-on-light.svg" alt="" width="76" height="76">
+    <div class="splash-name">BetterVault</div>
+    <p class="splash-tagline">Vos mots de passe, chiffrés sur cet appareil.</p>
+    <div class="splash-bar" aria-hidden="true"><span></span></div>
+  </div>
+
   <div id="auth-screen" class="auth-screen" hidden></div>
 
   <div id="app" class="app-container" hidden>

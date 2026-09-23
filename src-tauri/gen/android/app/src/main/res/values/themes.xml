@@ -1,6 +1,8 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Theme.bettervault" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+        <!-- Le fond de la fenetre est peint avant meme que la page existe :
+             sans cette ligne, le lancement affiche un flash blanc. -->
+        <item name="android:windowBackground">@color/bv_launch</item>
     </style>
 </resources>

@@ -8,7 +8,7 @@ Les applications utilisent [Tauri 2](https://v2.tauri.app) : la même interface 
 | --- | --- | --- | --- |
 | Windows | Installeur `.msi` / `.exe` | Windows Hello | Extension de navigateur |
 | macOS | `.dmg` | Touch ID | Extension de navigateur |
-| Linux | `.deb`, `.AppImage` | Mot de passe principal | Extension de navigateur |
+| Linux | `.deb`, `.AppImage` | Trousseau de session (pas de biométrie) | Extension de navigateur |
 | Android | APK, ou installation depuis le navigateur | Empreinte ou visage | Service de remplissage Android |
 | iOS, iPadOS | Xcode, ou ajout à l'écran d'accueil | Face ID ou Touch ID | Extension de mots de passe iOS |
 | Navigateur | Aucune | Mot de passe principal | Extension de navigateur |
@@ -26,6 +26,9 @@ Chaque système se construit chez lui : Tauri ne fabrique pas un `.dmg` depuis W
 | macOS, iOS | macOS avec Xcode |
 | Linux | Linux (ou un conteneur Linux) |
 | Android | Windows, macOS ou Linux, avec SDK et NDK Android |
+
+Pour les fichiers Apple (`.dmg`, TestFlight) et la liste de ce qu'il faut sur
+un Mac, voir [macOS et iOS](apple.md).
 
 ## Bureau (Windows, macOS, Linux)
 
@@ -59,7 +62,7 @@ Les installeurs sont générés dans `src-tauri/target/release/bundle/` (`.msi` 
 - Les exports sont enregistrés dans le dossier **Téléchargements**.
 - Adresse de serveur par défaut : `http://127.0.0.1:8787`.
 - **Windows et macOS** : le déverrouillage rapide s'appuie sur Windows Hello ou Touch ID, et la clé du coffre est rangée dans le trousseau du système.
-- **Linux** : pas de biométrie reliée ; le mot de passe principal est demandé à chaque déverrouillage. Le reste est identique.
+- **Linux** : pas de biométrie reliée. L'ouverture rapide existe quand même, portée par le trousseau de session (GNOME Keyring, KWallet) : le coffre s'ouvre sans retaper le mot de passe, mais une fois votre session ouverte, rien de plus n'est demandé. L'interface le dit noir sur blanc au moment de l'activer ; si cela ne vous convient pas, laissez l'option désactivée et le mot de passe principal sera demandé à chaque fois.
 - **macOS** : une application distribuée hors App Store doit être signée et notariée, sinon Gatekeeper la bloque au premier lancement.
 
 ## Mobile (Android, iOS)
@@ -126,6 +129,12 @@ npm run tauri ios build
     ```
 
     L'APK est créé dans `src-tauri/gen/android/app/build/outputs/apk/universal/release/`. Il n'est pas signé : signez-le avec `apksigner` (ou configurez une clé dans Android Studio) avant de l'installer.
+
+### Au lancement
+
+- L'application ouvre un écran de lancement à sa marque (logo, nom, barre de progression) plutôt qu'une page blanche, puis s'efface dès que le coffre ou l'écran de connexion est prêt.
+- Le fond de la fenêtre Android est peint aux couleurs de l'application avant même la page : plus de flash blanc.
+- Ses styles vivent dans `public/splash.css` : la politique de sécurité de contenu refuse le style écrit en clair dans la page.
 
 ### Interface sur téléphone
 

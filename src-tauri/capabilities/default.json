@@ -3,5 +3,17 @@
   "identifier": "default",
   "description": "Fenêtre principale de BetterVault (bureau et mobile)",
   "windows": ["main"],
-  "permissions": ["core:default", "opener:allow-open-url"]
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://*" },
+        { "url": "https://*/*" },
+        { "url": "http://*" },
+        { "url": "http://*/*" },
+        { "url": "mailto:*" }
+      ]
+    }
+  ]
 }

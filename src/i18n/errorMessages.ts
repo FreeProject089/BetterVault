@@ -74,6 +74,7 @@ const EXACT: Record<string, string> = {
   'Secret introuvable dans le Gestionnaire d’identification': 'Secret not found in Credential Manager',
   'Un dossier ne peut pas être déplacé dans lui-même': 'A folder cannot be moved into itself',
   'Secret introuvable dans le trousseau': 'Secret not found in the keychain',
+  'Secret introuvable dans le trousseau du système': 'Secret not found in the system keychain',
   'Serveur BetterVault injoignable': 'BetterVault server unreachable',
   'Session expirée : saisissez un code de votre application d’authentification pour reprendre la synchronisation.': 'Session expired: enter a code from your authenticator app to resume syncing.',
   'Tous les caractères sont exclus': 'All characters are excluded',

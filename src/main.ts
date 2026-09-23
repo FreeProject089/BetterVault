@@ -69,6 +69,31 @@ const LIST_PREFS_KEY = 'bettervault.list-prefs';
 
 const AUTOFILL_KEY = 'bettervault.android-autofill';
 
+/**
+ * Retire l'écran de lancement de l'application installée (voir index.html).
+ * On attend la fin de la transition avant de l'enlever du document, sinon le
+ * fondu ne se voit pas.
+ */
+function hideSplash(): void {
+  const splash = document.getElementById('splash');
+  if (!splash) return;
+  // Déjà masqué par ailleurs : on enlève le nœud sans jouer de fondu invisible
+  if (splash.hidden) {
+    splash.remove();
+    return;
+  }
+  splash.classList.add('fade-out');
+  window.setTimeout(() => splash.remove(), 320);
+}
+
+/*
+ * Filet de sécurité : si le démarrage n'aboutit jamais (réseau bloqué, erreur
+ * inattendue), l'écran de lancement ne doit pas rester indéfiniment devant la
+ * page. Mieux vaut montrer l'écran de connexion, même vide, qu'un chargement
+ * sans fin.
+ */
+window.setTimeout(() => document.getElementById('splash')?.remove(), 8000);
+
 
 // Créé au démarrage, une fois le stockage de l'appareil chargé (voir la fin du fichier)
 let accountService: AccountService;
@@ -1290,10 +1315,15 @@ export class AppController {
 
     this.renderSyncStatus();
     // Extension : le coffre reste ouvert quelques minutes entre deux ouvertures du popup
-    void accountService.resumeSession().then(data => {
-      if (data) this.showApp(data);
-      else this.authScreen?.show();
-    });
+    void accountService
+      .resumeSession()
+      .then(data => {
+        if (data) this.showApp(data);
+        else this.authScreen?.show();
+      })
+      .catch(() => this.authScreen?.show())
+      // L'écran de lancement s'efface quand il y a vraiment quelque chose à voir
+      .finally(() => hideSplash());
   }
 
   /** Coffres partagés : liste, contenu et invitations */
@@ -1828,7 +1858,10 @@ export class AppController {
         <h3 class="account-section-title">${tr('Cet appareil', 'This device')}</h3>
         ${biometricOk ? `
           <div class="switch-row" style="cursor:default;">
-            <span>${tr('Déverrouillage biométrique', 'Biometric unlock')}<small>${tr(`Ouvrir le coffre avec ${store!.label}. Le mot de passe principal reste utilisable.`, `Open the vault with ${store!.label}. The master password still works.`)}</small></span>
+            <span>${store!.kind === 'keyring' ? tr('Ouverture rapide', 'Quick unlock') : tr('Déverrouillage biométrique', 'Biometric unlock')}<small>${store!.kind === 'keyring'
+              ? tr(`Ouvrir le coffre avec ${store!.label}, sans retaper le mot de passe. Aucune biométrie n’est reliée sur ce système : une fois votre session ouverte, rien de plus n’est demandé.`,
+                   `Open the vault with ${store!.label}, without retyping the password. No biometrics are wired on this system: once your session is open, nothing more is asked.`)
+              : tr(`Ouvrir le coffre avec ${store!.label}. Le mot de passe principal reste utilisable.`, `Open the vault with ${store!.label}. The master password still works.`)}</small></span>
             <span class="status-pill ${enabled ? 'on' : 'off'}">${enabled ? tr('Activé', 'On') : tr('Désactivé', 'Off')}</span>
           </div>
           ${enabled

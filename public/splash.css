@@ -1,0 +1,67 @@
+/*
+ * Écran de lancement (voir #splash dans index.html).
+ *
+ * Ces règles vivent dans leur propre fichier, chargé avant la feuille
+ * principale : la politique de sécurité de contenu de l'application de bureau
+ * et mobile refuse les styles écrits en clair dans la page, et le lanceur
+ * s'affichait alors sans aucune mise en forme.
+ */
+
+/* Avant même la feuille de style principale, la page a déjà sa couleur :
+   sinon la webview peint un grand rectangle blanc au lancement. */
+html { background: #0d1117; }
+@media (prefers-color-scheme: light) { html { background: #ffffff; } }
+#splash {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background: #0d1117;
+  color: #e6edf3;
+  font-family: 'Inter', system-ui, sans-serif;
+  padding: calc(env(safe-area-inset-top) + 24px) 24px calc(env(safe-area-inset-bottom) + 24px);
+  transition: opacity 0.28s ease;
+}
+#splash[hidden] { display: none; }
+#splash.fade-out { opacity: 0; pointer-events: none; }
+#splash .splash-logo {
+  width: 76px;
+  height: 76px;
+  animation: splash-in 0.45s ease both;
+}
+#splash .splash-name { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+#splash .splash-tagline { font-size: 13px; color: #8b949e; text-align: center; max-width: 22ch; line-height: 1.5; }
+#splash .splash-bar {
+  width: 132px;
+  height: 3px;
+  border-radius: 2px;
+  background: #21262d;
+  overflow: hidden;
+}
+#splash .splash-bar span {
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: 2px;
+  background: #7c72f0;
+  animation: splash-slide 1.1s ease-in-out infinite;
+}
+@keyframes splash-in { from { opacity: 0; transform: scale(0.88); } to { opacity: 1; transform: none; } }
+@keyframes splash-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+/* Le logo clair est réservé au thème clair : l'autre disparaîtrait sur le fond. */
+#splash .splash-logo-light { display: none; }
+@media (prefers-color-scheme: light) {
+  #splash .splash-logo-dark { display: none; }
+  #splash .splash-logo-light { display: block; }
+  #splash { background: #ffffff; color: #1f2328; }
+  #splash .splash-tagline { color: #59636e; }
+  #splash .splash-bar { background: #e6e9ec; }
+}
+/* Une animation qui tourne quand la personne a demandé le calme : on s'arrête. */
+@media (prefers-reduced-motion: reduce) {
+  #splash .splash-logo, #splash .splash-bar span { animation: none; }
+}
