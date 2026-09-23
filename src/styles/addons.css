@@ -3995,7 +3995,7 @@ button.shortcut-key:hover { border-color: var(--accent); }
    * retirerait de l'arbre d'accessibilité et un lecteur d'écran n'annoncerait
    * plus rien. Il est donc sorti de l'œil, pas de la machine.
    */
-  .sidebar-collapsed .nav-item-left > span:not(.nav-item-icon):not(.nav-vault-icon) {
+  .sidebar-collapsed .nav-item-left > span:not(.nav-item-icon):not(.nav-vault-icon):not(.tag-dot):not(.tag-icon) {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -4020,9 +4020,24 @@ button.shortcut-key:hover { border-color: var(--accent); }
   .sidebar-collapsed .nav-item-right { display: flex; }
   .sidebar-collapsed .nav-item.active { box-shadow: inset 2px 0 0 var(--accent); }
 
-  /* Tags : une seule entrée qui ouvre le sélecteur, au lieu de pastilles muettes */
-  .sidebar-collapsed #tag-list > .nav-item:not(.tag-picker-entry) { display: none; }
-  .sidebar-collapsed #tag-list > .tag-picker-entry { display: flex; }
+  /*
+   * Tags : la pastille de couleur de chacun (les huit premiers), puis une
+   * entrée qui ouvre le sélecteur pour tous les autres et pour en créer.
+   */
+  .sidebar-collapsed #tag-list { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .sidebar-collapsed #tag-list > .nav-item:not(.tag-picker-entry) { display: flex; width: 40px; min-height: 30px; justify-content: center; }
+  .sidebar-collapsed #tag-list > .nav-item:not(.tag-picker-entry):nth-child(n + 9) { display: none; }
+  .sidebar-collapsed #tag-list .nav-item-left > span:not(.tag-dot):not(.tag-icon),
+  .sidebar-collapsed #tag-list .nav-count { display: none; }
+  .sidebar-collapsed #tag-list .tag-dot { display: block; width: 11px; height: 11px; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+  .sidebar-collapsed #tag-list .nav-item:hover .tag-dot { transform: scale(1.25); }
+  .sidebar-collapsed #tag-list .nav-item.active:not(.tag-picker-entry) { box-shadow: none; background: var(--bg-hover); }
+  .sidebar-collapsed #tag-list .nav-item.active .tag-dot { box-shadow: 0 0 0 3px var(--bg-secondary), 0 0 0 5px currentColor; color: var(--text-muted); }
+  .sidebar-collapsed #tag-list > .tag-picker-entry { display: flex; width: 40px; justify-content: center; }
+  .sidebar-collapsed #tag-list > .tag-picker-entry .nav-item-icon { display: inline-flex; color: var(--text-secondary); }
+  .sidebar-collapsed #tag-list > .nav-empty { display: none; }
+  /* La règle générale de la barre réduite écrase le contenu à zéro : ici, la pastille garde sa place */
+  .sidebar-collapsed #tag-list .nav-item-left { width: auto; min-width: 0; overflow: visible; flex: 0 0 auto; justify-content: center; }
 
   .sidebar-collapsed .sidebar-footer { padding: 8px; }
   .sidebar-collapsed .sidebar-footer > div,

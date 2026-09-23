@@ -2135,6 +2135,8 @@ export class AppController {
       const li = document.createElement('li');
       li.className = `nav-item ${this.activeTag === tag.name ? 'active' : ''}`;
       li.tabIndex = 0;
+      // Barre réduite : seule la pastille reste, le nom passe en info-bulle
+      li.title = `${tag.name} (${count})`;
       li.setAttribute('aria-pressed', String(this.activeTag === tag.name));
       li.innerHTML = `
         <span class="nav-item-left">
