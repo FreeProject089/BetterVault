@@ -2,9 +2,8 @@
 
 Les applications utilisent [Tauri 2](https://v2.tauri.app) : la même interface que le site, avec un cœur Rust.
 
-:::note[Disponibilité aujourd'hui]
-Versions publiées : **web**, **Windows**, **Linux** et **Android**. Le code macOS, iOS et de l'extension de navigateur est dans le dépôt, mais ces versions ne sont pas encore publiées ni testées sur l'appareil.
-:::
+!!! note "Disponibilité"
+    La version **web** s'utilise et s'installe depuis n'importe quel serveur BetterVault. Les applications **Windows**, **Linux** et **Android** sont testées sur l'appareil ; le code **macOS**, **iOS** et de l'**extension** est dans le dépôt, sans avoir encore été testé sur l'appareil. Ce qui est réellement publié se voit sur la page **Télécharger** de votre serveur (`/telecharger`). Pour construire soi-même, voir [Construire pas à pas](../developpement/guide-construire.md).
 
 ## Ce qui existe par plateforme
 

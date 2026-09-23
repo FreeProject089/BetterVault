@@ -2,7 +2,7 @@
 
 BetterVault se décline en six paquets, tous construits à partir des mêmes sources : application web, extension de navigateur, image Docker du serveur, application de bureau, application Android et application iOS.
 
-Cette page décrit ce qu'il faut installer et la commande à lancer pour chacun.
+Cette page est la référence : ce qu'il faut et ce que produit chaque paquet. Pour partir d'une machine vierge, étape par étape, voir [Construire pas à pas](guide-construire.md).
 
 !!! tip "Tout construire sans rien publier"
     Si vous voulez seulement vérifier que les chaînes de build fonctionnent, lancez le workflow **Release** à la main depuis GitHub en laissant l'option « Publier » décochée : il construit les paquets bureau, l'APK Android et l'archive de l'extension, puis les dépose en artefacts téléchargeables sans créer de release.
@@ -91,7 +91,7 @@ npx tauri build
     npx tauri build --target aarch64-apple-darwin
     ```
 
-    Produit un `.app` et un `.dmg`. La signature et la notarisation sont facultatives : renseignez les secrets `APPLE_*` décrits dans le workflow de release.
+    Produit un `.app` et un `.dmg`. La signature et la notarisation sont facultatives : voir [les secrets de signature](publier.md#les-secrets-de-signature).
 
 === "Linux"
 
@@ -184,15 +184,4 @@ L'intégration continue lance exactement ces contrôles, plus un démarrage rée
 
 ## Publier une version
 
-Le numéro de version figure dans huit endroits (serveur, `package.json` et son verrou, `Cargo.toml` et son verrou, `tauri.conf.json`, manifeste de l'extension). Un script les change tous d'un coup :
-
-```bash
-node scripts/version.mjs 1.2.0
-git commit -am "version 1.2.0"
-git tag v1.2.0
-git push origin main v1.2.0
-```
-
-`node scripts/version.mjs` sans argument affiche les versions et échoue si elles diffèrent. Le workflow **Release** fait la même vérification contre le tag avant de construire quoi que ce soit : une version `v1.2.0` ne peut pas contenir des installeurs numérotés 1.1.0.
-
-Le workflow **Release** construit et publie alors : l'image Docker multi-architecture sur GHCR, les paquets bureau pour les trois systèmes, l'APK Android et l'archive de l'extension. Les releases sont créées en **brouillon** : rien n'est visible tant que vous ne les publiez pas vous-même.
+Le numéro de version, le tag, ce que construit le workflow **Release**, les secrets de signature et la publication du brouillon : voir [Publier une version](publier.md).

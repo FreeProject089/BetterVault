@@ -84,6 +84,8 @@ nav:
   - Développement:
       - Architecture: developpement/architecture.md
       - Choix techniques: developpement/technique.md
+      - Construire pas à pas: developpement/guide-construire.md
       - Construire l'application: developpement/build.md
+      - Publier une version: developpement/publier.md
       - API du serveur: developpement/api.md
       - Contribuer: developpement/contribuer.md
