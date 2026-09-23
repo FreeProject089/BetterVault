@@ -40,7 +40,7 @@ export function openVaultModal(app: AppController, vaultId?: string): void {
     </div>
     <div class="modal-body">
       ${shared ? `
-        <div class="tab-btn-group" role="tablist">
+        <div class="tab-btn-group segmented" role="tablist">
           <button type="button" class="tab-btn active" data-tab="general" role="tab">${tabIcon('general')}<span>${tr('Général', 'General')}</span></button>
           <button type="button" class="tab-btn" data-tab="members" role="tab">${tabIcon('members')}<span>${tr('Membres', 'Members')}</span></button>
           <button type="button" class="tab-btn" data-tab="roles" role="tab">${tabIcon('roles')}<span>${tr('Rôles', 'Roles')}</span></button>

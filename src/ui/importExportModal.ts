@@ -93,7 +93,7 @@ export function openImportExportModal(app: ModalHost, { accountService, sharedVa
         <button class="modal-close">${GEN_ICONS.close}</button>
       </div>
       <div class="modal-body">
-        <div class="tab-btn-group" role="tablist">
+        <div class="tab-btn-group segmented" role="tablist">
           <button type="button" class="tab-btn active" role="tab" data-tab="import" aria-selected="true">${tabIcon('import')}<span>${tr('Importer', 'Import')}</span></button>
           <button type="button" class="tab-btn" role="tab" data-tab="export" aria-selected="false">${tabIcon('export')}<span>${tr('Exporter', 'Export')}</span></button>
         </div>

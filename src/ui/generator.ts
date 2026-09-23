@@ -86,7 +86,7 @@ export function mountGenerator(app: AppController, host: HTMLElement, options: {
         <div class="strength-meter" data-gen="meter">${'<div class="strength-segment"></div>'.repeat(4)}</div>
         <span class="gen-strength-label" data-gen="strength"></span>
       </div>
-      <div class="tab-btn-group" role="tablist">
+      <div class="tab-btn-group segmented" role="tablist">
         <button type="button" class="tab-btn" role="tab" data-mode="password">${tabIcon('password')}<span>${app.tr('Mot de passe', 'Password')}</span></button>
         <button type="button" class="tab-btn" role="tab" data-mode="passphrase">${tabIcon('passphrase')}<span>${app.tr('Phrase secrète', 'Passphrase')}</span></button>
         <button type="button" class="tab-btn" role="tab" data-mode="pin">${tabIcon('pin')}<span>${app.tr('Code PIN', 'PIN')}</span></button>

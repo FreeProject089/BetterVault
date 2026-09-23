@@ -1076,6 +1076,10 @@
 }
 
 .gen-chip span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
   padding: 5px 11px;
   font-size: 12px;
   font-family: var(--font-mono);
@@ -4133,8 +4137,20 @@ button.shortcut-key:hover { border-color: var(--accent); }
 }
 input[type="range"]::-webkit-slider-thumb { width: 20px; height: 20px; }
 @media (max-width: 900px) {
-  /* Les puces du générateur sont la vraie cible, pas la case qu'elles portent */
-  .gen-chip { min-height: var(--tap); }
+  /*
+   * Les puces du générateur sont la vraie cible, pas la case qu'elles portent.
+   * La hauteur va sur l'étiquette visible : posée sur la puce, elle étirait
+   * l'étiquette jusqu'à en faire un rond, et « A–Z » devenait une pastille
+   * deux fois plus haute que large.
+   */
+  .gen-chip span {
+    min-height: var(--tap);
+    /* Sans largeur plancher, « A–Z » ressort presque aussi large que haut :
+       une pastille ronde au milieu de puces allongées. */
+    min-width: 72px;
+    padding-inline: var(--space-4);
+    justify-content: center;
+  }
 }
 
 /* ── Icônes du menu ───────────────────────────────────────────────────────
@@ -4294,4 +4310,10 @@ label.check,
 @media (max-width: 900px) {
   /* Les petits boutons restent visables au pouce, y compris « Copier ». */
   .btn-primary.btn-sm, .btn-sm { min-height: var(--tap); padding-inline: var(--space-3); }
+}
+
+/* En dessous de 420 px, une bascule de trois choix n'a plus la place pour ses
+   icônes : le libellé passait sur deux lignes. Le texte prime, l'icône part. */
+@media (max-width: 420px) {
+  .tab-btn-group.segmented .tab-icon { display: none; }
 }

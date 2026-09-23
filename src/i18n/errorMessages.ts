@@ -14,6 +14,7 @@ const EXACT: Record<string, string> = {
   'Clé non utilisée : saisissez plutôt un code de votre application d’authentification': 'Key not used: enter a code from your authenticator app instead',
   'Clé de sécurité non utilisée : réessayez en la touchant quand elle clignote': 'Security key not used: try again and touch it when it blinks',
   'Les clés de sécurité ne sont pas prises en charge ici': 'Security keys are not supported here',
+  'Cet appareil n’a pas proposé sa biométrie : utilisez une clé branchée': 'This device did not offer its biometrics: use a plugged-in key',
   'Cette clé est déjà enregistrée': 'This key is already registered',
   'Clé non enregistrée : l’opération a été annulée ou a expiré': 'Key not registered: the operation was cancelled or timed out',
   'Aucune clé n’a répondu': 'No key responded',

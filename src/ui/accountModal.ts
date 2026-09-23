@@ -375,7 +375,7 @@ export function openAccountModal(app: AppController): void {
   const keysRoot = $<HTMLElement>('[data-security-keys]');
   if (keysRoot) wireSecurityKeys(keysRoot, {
     list: () => accountService.listSecurityKeys(),
-    add: (password, name) => accountService.addSecurityKey(password, name),
+    add: (password, name, kind) => accountService.addSecurityKey(password, name, kind),
     remove: (password, id) => accountService.removeSecurityKey(password, id),
     tr,
     escape: value => app.escapeHtml(value),

@@ -1,4 +1,4 @@
-import { currentRpId, securityKeysSupported, type SecurityKeyInfo } from '../account/securityKey';
+import { currentRpId, platformAuthenticatorAvailable, securityKeysSupported, type SecurityKeyInfo } from '../account/securityKey';
 
 /**
  * Section « Clés de sécurité » de la fenêtre du compte : liste, ajout, retrait.
@@ -7,7 +7,7 @@ import { currentRpId, securityKeysSupported, type SecurityKeyInfo } from '../acc
 
 export interface SecurityKeysActions {
   list(): Promise<SecurityKeyInfo[]>;
-  add(password: string, name: string): Promise<SecurityKeyInfo>;
+  add(password: string, name: string, kind: 'platform' | 'roaming'): Promise<SecurityKeyInfo>;
   remove(password: string, id: string): Promise<void>;
   tr(fr: string, en: string): string;
   escape(value: string): string;
@@ -34,6 +34,13 @@ export function wireSecurityKeys(root: HTMLElement, a: SecurityKeysActions): voi
   if (!status || !list || !addBox || !addButton) return;
   const here = currentRpId();
   let keys: SecurityKeyInfo[] = [];
+  /*
+   * Clé intégrée à l'appareil (Windows Hello, Touch ID, empreinte Android) :
+   * la réponse arrive en asynchrone, alors on part du principe qu'il n'y en a
+   * pas et le choix apparaît si l'appareil confirme. Sur l'extension, c'est le
+   * seul moyen d'utiliser la biométrie : il n'y a pas de trousseau système.
+   */
+  let platformKey = false;
 
   const date = (ms: number | null) => (ms ? new Date(ms).toLocaleDateString(a.locale) : tr('jamais', 'never'));
   const render = () => {
@@ -61,6 +68,11 @@ export function wireSecurityKeys(root: HTMLElement, a: SecurityKeysActions): voi
     addBox.innerHTML = `
       ${mode === 'add'
         ? `<p class="modal-text">${tr('La clé sera liée à cette application. Sur une autre (site, bureau, extension), ajoutez-la aussi, ou gardez le code de l’application d’authentification.', 'The key is tied to this app. On another one (website, desktop, extension), add it there too, or keep the authenticator app code.')}</p>
+           ${platformKey ? `<div class="tab-btn-group segmented" role="tablist" data-key-kind>
+             <button type="button" class="tab-btn active" role="tab" aria-selected="true" data-kind="platform"><span>${tr('Cet appareil', 'This device')}</span></button>
+             <button type="button" class="tab-btn" role="tab" aria-selected="false" data-kind="roaming"><span>${tr('Clé branchée', 'Plugged-in key')}</span></button>
+           </div>
+           <p class="field-hint" data-kind-hint>${tr('Empreinte, visage ou code de l’appareil, sans rien brancher.', 'Fingerprint, face or device code, nothing to plug in.')}</p>` : ''}
            <input class="form-input" data-key-name maxlength="40" placeholder="${tr('Nom (ex. YubiKey bleue)', 'Name (e.g. blue YubiKey)')}">`
         : `<p class="modal-text">${tr(`Retirer « ${a.escape(key?.name ?? '')} » ?`, `Remove “${a.escape(key?.name ?? '')}”?`)}</p>`}
       <input class="form-input" type="password" data-key-password autocomplete="current-password" placeholder="${tr('Mot de passe principal', 'Master password')}">
@@ -80,7 +92,8 @@ export function wireSecurityKeys(root: HTMLElement, a: SecurityKeysActions): voi
       try {
         if (mode === 'add') {
           const name = addBox.querySelector<HTMLInputElement>('[data-key-name]')!.value.trim() || tr('Clé de sécurité', 'Security key');
-          keys = [...keys, await a.add(password.value, name)];
+          const kind = (addBox.querySelector<HTMLElement>('[data-key-kind] .tab-btn.active')?.dataset.kind ?? 'roaming') as 'platform' | 'roaming';
+          keys = [...keys, await a.add(password.value, name, kind)];
           a.toast(tr('Clé de sécurité ajoutée', 'Security key added'), 'success');
         } else if (key) {
           await a.remove(password.value, key.id);
@@ -96,11 +109,34 @@ export function wireSecurityKeys(root: HTMLElement, a: SecurityKeysActions): voi
         confirm.disabled = false;
       }
     };
+    // Choix du type de clé : le libellé du bouton de confirmation suit
+    addBox.querySelectorAll<HTMLButtonElement>('[data-key-kind] .tab-btn').forEach(tab => tab.addEventListener('click', () => {
+      addBox.querySelectorAll('[data-key-kind] .tab-btn').forEach(other => {
+        other.classList.toggle('active', other === tab);
+        other.setAttribute('aria-selected', String(other === tab));
+      });
+      const platform = tab.dataset.kind === 'platform';
+      const hint = addBox.querySelector<HTMLElement>('[data-kind-hint]');
+      if (hint) hint.textContent = platform
+        ? tr('Empreinte, visage ou code de l’appareil, sans rien brancher.', 'Fingerprint, face or device code, nothing to plug in.')
+        : tr('Branchez la clé ou approchez-la en NFC, puis touchez-la.', 'Plug the key in or hold it over NFC, then touch it.');
+      confirm.textContent = platform ? tr('Vérifier sur cet appareil', 'Verify on this device') : tr('Toucher la clé', 'Touch the key');
+      const nom = addBox.querySelector<HTMLInputElement>('[data-key-name]');
+      if (nom) nom.placeholder = platform
+        ? tr('Nom (ex. mon téléphone)', 'Name (e.g. my phone)')
+        : tr('Nom (ex. YubiKey bleue)', 'Name (e.g. blue YubiKey)');
+    }));
+    if (platformKey) {
+      confirm.textContent = tr('Vérifier sur cet appareil', 'Verify on this device');
+      const nom = addBox.querySelector<HTMLInputElement>('[data-key-name]');
+      if (nom) nom.placeholder = tr('Nom (ex. mon téléphone)', 'Name (e.g. my phone)');
+    }
     confirm.addEventListener('click', () => void submit());
     password.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); void submit(); } });
   };
 
   addButton.addEventListener('click', () => (addBox.hidden ? openForm('add') : (addBox.hidden = true)));
+  void platformAuthenticatorAvailable().then(available => { platformKey = available; });
   a.list().then(result => {
     if (!root.isConnected) return;
     keys = result;

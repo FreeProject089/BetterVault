@@ -57,8 +57,37 @@ export const currentRpId = (): string | undefined => {
   return host ? host.toLowerCase() : undefined;
 };
 
+/**
+ * WebAuthn utilisable ici. Vérifier la seule présence de l'objet ne suffit
+ * pas : hors contexte sécurisé (serveur en http simple), l'appel échoue
+ * toujours, et proposer un bouton qui ne peut pas marcher est pire que ne rien
+ * proposer. Les vues natives sans WebAuthn (WebKitGTK sous Linux, WebView
+ * Android) n'exposent pas l'objet du tout et sont donc déjà écartées.
+ */
 export const securityKeysSupported = (): boolean =>
-  typeof globalThis.PublicKeyCredential === 'function' && !!globalThis.navigator?.credentials && !!currentRpId();
+  typeof globalThis.PublicKeyCredential === 'function'
+  && typeof globalThis.navigator?.credentials?.create === 'function'
+  && globalThis.isSecureContext !== false
+  && !!currentRpId();
+
+/**
+ * L'appareil porte-t-il une clé intégrée avec vérification de la personne :
+ * Windows Hello, Touch ID, empreinte ou visage Android ? Si oui, le second
+ * facteur peut être la biométrie de l'appareil au lieu d'une clé branchée —
+ * y compris dans l'extension, où il n'y a pas de trousseau système.
+ */
+export async function platformAuthenticatorAvailable(): Promise<boolean> {
+  if (!securityKeysSupported()) return false;
+  const probe = (globalThis.PublicKeyCredential as unknown as {
+    isUserVerifyingPlatformAuthenticatorAvailable?: () => Promise<boolean>;
+  }).isUserVerifyingPlatformAuthenticatorAvailable;
+  if (typeof probe !== 'function') return false;
+  try {
+    return await probe.call(globalThis.PublicKeyCredential);
+  } catch {
+    return false;
+  }
+}
 
 const descriptors = (list: Descriptor[]): PublicKeyCredentialDescriptor[] =>
   list.map(d => ({ type: 'public-key', id: fromB64url(d.id) }));
@@ -83,7 +112,15 @@ export async function getAssertion(options: LoginOptions): Promise<SecurityKeyAs
   };
 }
 
-export async function createCredential(options: RegistrationOptions): Promise<{ clientDataJSON: string; attestationObject: string }> {
+/**
+ * `kind` choisit le type de clé : `platform` pour la biométrie de l'appareil
+ * (vérification de la personne exigée, sinon l'invite ne servirait à rien),
+ * `roaming` pour une clé branchée ou NFC.
+ */
+export async function createCredential(
+  options: RegistrationOptions,
+  kind: 'platform' | 'roaming' = 'roaming'
+): Promise<{ clientDataJSON: string; attestationObject: string }> {
   const credential = await navigator.credentials.create({
     publicKey: {
       challenge: fromB64url(options.challenge),
@@ -91,7 +128,9 @@ export async function createCredential(options: RegistrationOptions): Promise<{ 
       user: { ...options.user, id: fromB64url(options.user.id) },
       pubKeyCredParams: options.pubKeyCredParams,
       excludeCredentials: descriptors(options.excludeCredentials),
-      authenticatorSelection: { userVerification: 'discouraged', residentKey: 'discouraged' },
+      authenticatorSelection: kind === 'platform'
+        ? { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' }
+        : { authenticatorAttachment: 'cross-platform', userVerification: 'discouraged', residentKey: 'discouraged' },
       attestation: 'none',
       timeout: options.timeout
     }

@@ -127,6 +127,48 @@ describe('Clés de sécurité', () => {
     expect(remove).toHaveBeenCalledWith('mot de passe', 'k1');
     expect(host.querySelector('.security-key')).toBeNull();
   });
+
+  it('ne propose la biométrie de l’appareil que s’il en a une, et l’exige à l’ajout', async () => {
+    const pkc = globalThis as unknown as { PublicKeyCredential?: unknown; isSecureContext?: boolean };
+    const avant = pkc.PublicKeyCredential;
+    const faux = function () {} as unknown as Record<string, unknown>;
+    pkc.PublicKeyCredential = faux;
+    Object.defineProperty(globalThis, 'isSecureContext', { value: true, configurable: true, writable: true });
+    const navigateur = globalThis.navigator as unknown as { credentials?: unknown };
+    const credsAvant = navigateur.credentials;
+    Object.defineProperty(navigateur, 'credentials', { value: { create: async () => null }, configurable: true, writable: true });
+
+    const monter = async () => {
+      host.innerHTML = `<span data-keys-status></span><ul data-keys-list></ul><div data-keys-add hidden></div><button data-action="add-key"></button>`;
+      const add = vi.fn(async () => ({ id: 'k2', name: 'Mon téléphone', rpId: 'localhost', createdAt: 2, lastUsedAt: null }));
+      wireSecurityKeys(host, { list: async () => [], add, remove: async () => undefined, tr, escape: esc, errorMessage: e => String(e), toast: () => undefined, locale: 'fr-FR' });
+      await tick(); await tick();
+      host.querySelector<HTMLButtonElement>('[data-action="add-key"]')!.click();
+      return add;
+    };
+
+    // Appareil sans clé intégrée : aucun choix, on reste sur la clé branchée
+    faux.isUserVerifyingPlatformAuthenticatorAvailable = async () => false;
+    let add = await monter();
+    expect(host.querySelector('[data-key-kind]')).toBeNull();
+    host.querySelector<HTMLInputElement>('[data-key-password]')!.value = 'mot de passe';
+    host.querySelector<HTMLButtonElement>('[data-key-confirm]')!.click();
+    await tick();
+    expect(add).toHaveBeenCalledWith('mot de passe', 'Clé de sécurité', 'roaming');
+
+    // Appareil avec empreinte ou visage : le choix apparaît et vient en premier
+    faux.isUserVerifyingPlatformAuthenticatorAvailable = async () => true;
+    add = await monter();
+    expectClean(host);
+    expect(host.querySelector('[data-key-kind] .tab-btn.active')!.getAttribute('data-kind')).toBe('platform');
+    host.querySelector<HTMLInputElement>('[data-key-password]')!.value = 'mot de passe';
+    host.querySelector<HTMLButtonElement>('[data-key-confirm]')!.click();
+    await tick();
+    expect(add).toHaveBeenCalledWith('mot de passe', 'Clé de sécurité', 'platform');
+
+    pkc.PublicKeyCredential = avant;
+    Object.defineProperty(navigateur, 'credentials', { value: credsAvant, configurable: true, writable: true });
+  });
 });
 
 describe('Serveurs proposés', () => {

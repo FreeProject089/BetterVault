@@ -985,7 +985,7 @@ export class AccountService {
   }
 
   /** Enregistre une clé pour l'application courante ; le mot de passe confirme que c'est bien le titulaire */
-  async addSecurityKey(password: string, name: string): Promise<SecurityKeyInfo> {
+  async addSecurityKey(password: string, name: string, kind: 'platform' | 'roaming' = 'roaming'): Promise<SecurityKeyInfo> {
     const rpId = currentRpId();
     if (!rpId || !securityKeysSupported()) throw new Error('Les clés de sécurité ne sont pas prises en charge ici');
     const client = this.cloudClient();
@@ -993,9 +993,13 @@ export class AccountService {
     const options = await this.withSessionRetry(() => client.securityKeyOptions(authHash, rpId));
     let created;
     try {
-      created = await createCredential(options);
+      created = await createCredential(options, kind);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'InvalidStateError') throw new Error('Cette clé est déjà enregistrée');
+      // Un appareil sans clé intégrée refuse la demande « platform » : le dire, plutôt que parler d'annulation
+      if (kind === 'platform' && err instanceof DOMException && err.name === 'NotAllowedError') {
+        throw new Error('Cet appareil n’a pas proposé sa biométrie : utilisez une clé branchée');
+      }
       throw new Error('Clé non enregistrée : l’opération a été annulée ou a expiré');
     }
     return this.withSessionRetry(() => client.addSecurityKey({ name, rpId, ...created }));
