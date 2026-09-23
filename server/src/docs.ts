@@ -109,7 +109,7 @@ export function renderMarkdown(markdown: string, page = ''): string {
    * documentation. Avant, ils restaient affichés tels quels, crochets compris.
    */
   const dossier = page.includes('/') ? page.slice(0, page.lastIndexOf('/')) : '';
-  text = text.replace(/\]\(((?:\.\.\/|\.\/)?[a-z0-9/_-]+)\.md(#[\w-]+)?\)/gi, (entier, cible: string, ancre = '') => {
+  text = text.replace(/\]\(((?:\.\.\/|\.\/)?[a-z0-9/_-]+)\.md(#[\w-]+)?\)/gi, (_entier, cible: string, ancre = '') => {
     const parts = dossier ? dossier.split('/') : [];
     for (const seg of cible.split('/')) {
       if (seg === '..') parts.pop();
