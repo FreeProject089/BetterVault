@@ -236,6 +236,25 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
   };
 
   /*
+   * Adresse telle que la comptent les limites de tentatives.
+   *
+   * Une connexion IPv6 reçoit tout un bloc (un /64, souvent un /56 ou un /48) :
+   * compter chaque adresse à part laissait changer d'adresse à chaque essai et
+   * repartir de zéro, sur toutes les limites. On compte donc par /56. Une IPv4
+   * écrite en IPv6 (« ::ffff:1.2.3.4 ») est ramenée à l'IPv4.
+   */
+  const rateAddress = (req: IncomingMessage) => {
+    const address = clientAddress(req).replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/i, '');
+    if (!address.includes(':')) return address;
+    const [head, tail = ''] = address.toLowerCase().split('%')[0].split('::');
+    const left = head ? head.split(':') : [];
+    const right = tail ? tail.split(':') : [];
+    const groups = address.includes('::') ? [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill('0'), ...right] : left;
+    const hex = groups.slice(0, 4).map(g => g.padStart(4, '0')).join('');
+    return `${hex.slice(0, 14)}::/56`;
+  };
+
+  /*
    * Limites de tentatives, par action et par adresse.
    *
    * Une seule règle pour tout (20 par minute) était à la fois trop large pour
@@ -263,9 +282,53 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     ? `Trop de tentatives, réessayez dans ${seconds} s`
     : `Trop de tentatives, réessayez dans ${Math.ceil(seconds / 60)} min`;
 
+  /*
+   * Échecs comptés par compte, quelle que soit l'adresse : une limite par
+   * adresse ne voit rien d'un essai réparti sur beaucoup d'adresses. La clé est
+   * ce que la personne a tapé (email en minuscules, ou identifiant du compte),
+   * si bien que la réponse est la même que le compte existe ou non.
+   * Contrepartie assumée : un tiers peut bloquer un compte quelques minutes en
+   * accumulant les échecs. Le propriétaire garde la clé de secours.
+   */
+  const ACCOUNT_RULES: Record<string, { windowMs: number; max: number }> = {
+    // Récupération sans clé de secours : un code TOTP deviné remplace le coffre
+    'totp-recovery': { windowMs: 15 * 60_000, max: 5 },
+    // Mauvais mot de passe ou mauvais code, à la connexion d'un compte
+    'login-fail': { windowMs: 15 * 60_000, max: 20 },
+    // Mauvais identifiants sur un compte d'administration
+    'admin-login-fail': { windowMs: 15 * 60_000, max: 10 }
+  };
+  const accountAttempts = new Map<string, { count: number; resetAt: number }>();
+  const accountBlocked = (bucket: string, key: string) => {
+    const entry = accountAttempts.get(`${bucket}:${key}`);
+    const current = now();
+    if (entry && entry.resetAt > current && entry.count >= ACCOUNT_RULES[bucket].max) {
+      const seconds = Math.max(1, Math.ceil((entry.resetAt - current) / 1000));
+      throw new RateLimitError(seconds, waitMessage(seconds));
+    }
+  };
+  const accountFailure = (bucket: string, key: string) => {
+    const id = `${bucket}:${key}`;
+    const current = now();
+    const entry = accountAttempts.get(id);
+    if (!entry || entry.resetAt <= current) {
+      if (accountAttempts.size > 50_000) {
+        for (const [existing, value] of accountAttempts) if (value.resetAt <= current) accountAttempts.delete(existing);
+        let excess = accountAttempts.size - 40_000;
+        for (const existing of accountAttempts.keys()) {
+          if (excess-- <= 0) break;
+          accountAttempts.delete(existing);
+        }
+      }
+      accountAttempts.set(id, { count: 1, resetAt: current + ACCOUNT_RULES[bucket].windowMs });
+      return;
+    }
+    entry.count++;
+  };
+
   /** Refuse si le plafond est déjà atteint, sans compter cette requête */
   const blocked = (req: IncomingMessage, bucket: string) => {
-    const entry = attempts.get(`${bucket}:${clientAddress(req)}`);
+    const entry = attempts.get(`${bucket}:${rateAddress(req)}`);
     const current = now();
     if (entry && entry.resetAt > current && entry.count >= bucketRule(bucket).max) {
       const seconds = Math.max(1, Math.ceil((entry.resetAt - current) / 1000));
@@ -275,7 +338,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
 
   const limit = (req: IncomingMessage, bucket: string) => {
     const rule = bucketRule(bucket);
-    const key = `${bucket}:${clientAddress(req)}`;
+    const key = `${bucket}:${rateAddress(req)}`;
     const current = now();
     const entry = attempts.get(key);
     if (!entry || entry.resetAt <= current) {
@@ -285,7 +348,16 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         for (const [existing, value] of attempts) {
           if (value.resetAt <= current) attempts.delete(existing);
         }
-        if (attempts.size > 20_000) attempts.clear();
+        // Encore plein : on retire les plus anciennes (ordre d'insertion), jamais tout.
+        // Vider la table remettait à zéro les blocages de tout le monde, il suffisait
+        // de la remplir d'adresses différentes pour lever un blocage.
+        if (attempts.size > 20_000) {
+          let excess = attempts.size - 15_000;
+          for (const existing of attempts.keys()) {
+            if (excess-- <= 0) break;
+            attempts.delete(existing);
+          }
+        }
       }
       attempts.set(key, { count: 1, resetAt: current + rule.windowMs });
       return;
@@ -439,6 +511,8 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     now,
     limit: (req, bucket) => limit(req, bucket),
     blocked: (req, bucket) => blocked(req, bucket),
+    accountBlocked: key => accountBlocked('admin-login-fail', key),
+    accountFailure: key => accountFailure('admin-login-fail', key),
     audit: (type, detail) => audit(type, detail)
   });
   const requireAdmin = (req: IncomingMessage, permission: AdminPermission = 'view', sensitive = false) => adminAuth.require(req, permission, sensitive);
@@ -521,8 +595,10 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       const authHash = parseBase64(body.authHash, 'authHash', { exact: 32 });
       const totp = parseCode(body.totp, 'totp');
       const user = sql.userByEmail.get(email) as UserRow | undefined;
+      accountBlocked('login-fail', email.toLowerCase());
 
       if (!(await verifyAuthHash(user, authHash)) || !user) {
+        accountFailure('login-fail', email.toLowerCase());
         throw new HttpError(401, 'invalid_credentials', 'Email ou mot de passe incorrect');
       }
       /*
@@ -535,7 +611,10 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         if (body.webauthn) {
           webauthn.verifyLogin(user.id, body.rpId, body.webauthn as AssertionInput);
         } else if (totp && user.totp_enabled) {
-          if (!consumeTotp(user, totp)) throw new HttpError(401, 'totp_invalid', 'Code incorrect ou déjà utilisé');
+          if (!consumeTotp(user, totp)) {
+            accountFailure('login-fail', email.toLowerCase());
+            throw new HttpError(401, 'totp_invalid', 'Code incorrect ou déjà utilisé');
+          }
         } else {
           const options = hasKeys && body.rpId !== undefined ? webauthn.loginOptions(user.id, parseRpId(body.rpId)) : null;
           const details = { totp: !!user.totp_enabled, webauthn: options, otherKeys: hasKeys && !options };
@@ -773,7 +852,11 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       let totpVerified = false;
       if (user.totp_enabled) {
         if (!totp) throw new HttpError(401, 'totp_required', 'Code de l’application d’authentification requis');
-        if (!consumeTotp(user, totp)) throw new HttpError(401, 'totp_invalid', 'Code incorrect ou déjà utilisé');
+        accountBlocked('totp-recovery', user.id);
+        if (!consumeTotp(user, totp)) {
+          accountFailure('totp-recovery', user.id);
+          throw new HttpError(401, 'totp_invalid', 'Code incorrect ou déjà utilisé');
+        }
         totpVerified = true;
       }
 

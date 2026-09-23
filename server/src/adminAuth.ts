@@ -106,6 +106,9 @@ export function createAdminAuth(options: {
   limit: (req: IncomingMessage, bucket: string) => void;
   /** Refuse si le plafond est déjà atteint, sans compter la requête */
   blocked: (req: IncomingMessage, bucket: string) => void;
+  /** Échecs comptés par compte d'administration, quelle que soit l'adresse */
+  accountBlocked?: (key: string) => void;
+  accountFailure?: (key: string) => void;
   audit: (type: string, detail?: Record<string, unknown>) => void;
 }) {
   const { db, now, audit } = options;
@@ -209,7 +212,16 @@ export function createAdminAuth(options: {
       options.limit(req, 'admin-login');
       if (!enabled()) throw new HttpError(404, 'not_found', 'Route inconnue');
       const body = await readJson(req, 4096);
-      const row = await checkCredentials(parseEmail(body.email), String(body.password ?? ''), body.totp);
+      const email = parseEmail(body.email);
+      options.accountBlocked?.(email.toLowerCase());
+      let row: AdminRow;
+      try {
+        row = await checkCredentials(email, String(body.password ?? ''), body.totp);
+      } catch (err) {
+        // « Code requis » est l'étape normale d'une connexion à deux facteurs, pas un échec
+        if (err instanceof HttpError && err.status === 401 && err.code !== 'totp_required') options.accountFailure?.(email.toLowerCase());
+        throw err;
+      }
       const token = TOKEN_PREFIX + randomBytes(32).toString('base64url');
       db.prepare('INSERT INTO admin_sessions (token_hash, admin_id, created_at, expires_at, confirmed_at) VALUES (?, ?, ?, ?, ?)')
         .run(sha256(token), row.id, now(), now() + SESSION_TTL_MS, now());
