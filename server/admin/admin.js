@@ -49,6 +49,16 @@ const TEXT = {
   adminThemeLight: ['Clair', 'Light'],
   adminThemeDark: ['Sombre', 'Dark'],
   home: ['Accueil', 'Home'],
+  linksUrl: ['Liens communautaires (fichier JSON, https)', 'Community links (JSON file, https)'],
+  linksUrlHint: ['Discord, page d’état… lus dans un fichier JSON hébergé ailleurs, relu chaque heure. GitHub et BetterCommunity s’affichent toujours.', 'Discord, status page… read from a JSON file hosted elsewhere, re-read every hour. GitHub and BetterCommunity always show.'],
+  billingHint2: ['Facultatif. Paiement sur Stripe Checkout : le serveur ne voit ni carte ni adresse, et n’envoie pas l’email du compte à Stripe.', 'Optional. Payment on Stripe Checkout: the server sees neither card nor address, and does not send the account email to Stripe.'],
+  stepKey: ['Clé secrète Stripe', 'Stripe secret key'],
+  stepKeyHint: ['Tableau de bord Stripe → Développeurs → Clés API. Une clé restreinte (rk_…) suffit : écriture sur Products, Prices, Checkout Sessions ; lecture sur Subscriptions.', 'Stripe dashboard → Developers → API keys. A restricted key (rk_…) is enough: write on Products, Prices, Checkout Sessions; read on Subscriptions.'],
+  stepWebhook: ['Webhook', 'Webhook'],
+  stepWebhookHint: ['Stripe → Développeurs → Webhooks → Ajouter un endpoint, avec cette adresse et ces événements, puis collez le secret de signature (whsec_…).', 'Stripe → Developers → Webhooks → Add endpoint, with this address and these events, then paste the signing secret (whsec_…).'],
+  stepPlans: ['Offres', 'Plans'],
+  stepPlansHint: ['Créez vos offres ci-dessous avec un montant et une période, puis « Créer dans Stripe » : produits et prix y sont créés pour vous.', 'Create your plans below with an amount and a period, then “Create in Stripe”: products and prices are created for you.'],
+  stripeSync: ['Créer dans Stripe', 'Create in Stripe'],
   siteLink: ['Site', 'Site'],
   openApp: ['Application', 'App'],
   adminGuide: ['Guide de l’administration', 'Admin guide'],
@@ -311,6 +321,7 @@ function fill({ settings }) {
   const page = settings.publicPage ?? {};
   $('landingEnabled').checked = page.landingEnabled !== false;
   $('adminTheme').value = page.adminTheme ?? 'app';
+  $('linksUrl').value = page.linksUrl ?? '';
   window.bvAdminThemeDefault?.(page.adminTheme ?? 'app');
   $('landingTitle').value = page.title ?? '';
   $('landingDescription').value = page.description ?? '';
@@ -423,6 +434,7 @@ $('settings-form').addEventListener('submit', async event => {
     publicPage: {
       landingEnabled: $('landingEnabled').checked,
       adminTheme: $('adminTheme').value,
+      linksUrl: $('linksUrl').value.trim(),
       title: $('landingTitle').value,
       description: $('landingDescription').value,
       directoryEnabled: $('directoryEnabled').checked,
@@ -885,19 +897,35 @@ const BOOSTS = [
   ['maxCredentialsPerVault', fr ? 'Identifiants par coffre en plus' : 'Extra credentials per vault', 1]
 ];
 
-/** Une durée d'une offre : son identifiant, son prix affiché et le prix Stripe correspondant */
+/**
+ * Un tarif d'une offre. Deux façons de le définir : un montant, une devise et
+ * une période (le prix est alors créé dans Stripe par « Créer dans Stripe »),
+ * ou l'identifiant d'un prix déjà créé dans le tableau de bord Stripe.
+ */
 function priceRow(price = {}) {
   const row = document.createElement('div');
-  row.className = 'price-row row';
+  row.className = 'price-row';
+  const montant = typeof price.amount === 'number' ? (price.amount / 100).toFixed(2).replace(/\.00$/, '') : '';
+  const periode = price.interval ?? (price.mode === 'payment' ? 'once' : 'month');
   row.innerHTML = `
-    <div class="small"><label>${fr ? 'Identifiant' : 'ID'}</label><input data-price="id" value="${escapeHtml(price.id)}" placeholder="mensuel" pattern="[a-z0-9-]{2,32}"></div>
-    <div class="small"><label>${fr ? 'Prix affiché' : 'Price label'}</label><input data-price="label" value="${escapeHtml(price.label)}" placeholder="2 € / mois" maxlength="40"></div>
-    <div><label>${fr ? 'Prix Stripe' : 'Stripe price'}</label><input data-price="stripePriceId" value="${escapeHtml(price.stripePriceId)}" placeholder="price_…"></div>
-    <div class="small"><label>${fr ? 'Paiement' : 'Billing'}</label><select data-price="mode">
-      <option value="subscription">${fr ? 'Renouvelé' : 'Recurring'}</option>
-      <option value="payment" ${price.mode === 'payment' ? 'selected' : ''}>${fr ? 'Une fois' : 'One-time'}</option>
-    </select></div>
-    <button type="button" class="btn ghost" data-remove-price aria-label="${fr ? 'Retirer cette durée' : 'Remove this duration'}">✕</button>`;
+    <div class="price-grid">
+      <div><label>${fr ? 'Identifiant' : 'ID'}</label><input data-price="id" value="${escapeHtml(price.id)}" placeholder="${fr ? 'mensuel' : 'monthly'}" pattern="[a-z0-9-]{2,32}"></div>
+      <div><label>${fr ? 'Montant' : 'Amount'}</label><input data-price="amount" type="number" min="0.5" step="0.01" value="${montant}" placeholder="4.90"></div>
+      <div><label>${fr ? 'Devise' : 'Currency'}</label><select data-price="currency">${['eur', 'chf', 'usd', 'gbp', 'cad'].map(c => `<option value="${c}" ${(price.currency ?? 'eur') === c ? 'selected' : ''}>${c.toUpperCase()}</option>`).join('')}</select></div>
+      <div><label>${fr ? 'Période' : 'Period'}</label><select data-price="interval">
+        <option value="month" ${periode === 'month' ? 'selected' : ''}>${fr ? 'Par mois' : 'Monthly'}</option>
+        <option value="year" ${periode === 'year' ? 'selected' : ''}>${fr ? 'Par an' : 'Yearly'}</option>
+        <option value="once" ${periode === 'once' ? 'selected' : ''}>${fr ? 'Une fois' : 'One-time'}</option>
+      </select></div>
+      <div><label>${fr ? 'Libellé (facultatif)' : 'Label (optional)'}</label><input data-price="label" value="${escapeHtml(price.label)}" placeholder="4,90 € / mois" maxlength="40"></div>
+      <button type="button" class="btn ghost price-remove" data-remove-price aria-label="${fr ? 'Retirer ce tarif' : 'Remove this price'}" title="${fr ? 'Retirer ce tarif' : 'Remove this price'}">✕</button>
+    </div>
+    <div class="price-stripe">
+      <span class="stripe-state ${price.stripePriceId ? 'ok' : 'todo'}">${price.stripePriceId
+        ? (fr ? 'Créé dans Stripe' : 'Created in Stripe')
+        : (fr ? 'Pas encore dans Stripe' : 'Not in Stripe yet')}</span>
+      <input data-price="stripePriceId" value="${escapeHtml(price.stripePriceId)}" placeholder="${fr ? 'ou un prix existant : price_…' : 'or an existing price: price_…'}" aria-label="${fr ? 'Prix Stripe existant' : 'Existing Stripe price'}">
+    </div>`;
   row.querySelector('[data-remove-price]').addEventListener('click', () => {
     const list = row.parentElement;
     row.remove();
@@ -927,6 +955,7 @@ function planRow(plan = {}) {
     <div class="limits">${BOOSTS.map(([key, label, unit]) => `<div><label>${label}</label><input type="number" min="0" data-boost="${key}" data-unit="${unit}" value="${plan.boosts?.[key] ? plan.boosts[key] / unit : ''}"></div>`).join('')}</div>
     <div class="row test"><button type="button" class="btn ghost" data-remove>${fr ? 'Retirer cette offre' : 'Remove this plan'}</button></div>`;
 
+  if (plan.stripeProductId) row.dataset.product = plan.stripeProductId;
   const prices = row.querySelector('[data-prices]');
   // Relit aussi l'ancienne forme à un seul tarif, enregistrée avant les durées
   const existing = plan.prices?.length
@@ -952,6 +981,11 @@ function renderEmptyPlans() {
 
 function fillBilling(billing) {
   $('webhook-url').textContent = `${location.origin}/api/v1/billing/webhook`;
+  // L'adresse et les événements exacts viennent du serveur (adresse publique réglée)
+  api('GET', 'billing/webhook-info').then(info => {
+    if (info.url) $('webhook-url').textContent = info.url;
+    $('webhook-events').innerHTML = info.events.map(e => `<code>${escapeHtml(e)}</code>`).join(' ');
+  }, () => {});
   $('billingEnabled').checked = !!billing.enabled;
   $('stripeSecret').value = '';
   $('stripeSecret').placeholder = billing.hasSecretKey ? t('secretKept') : 'sk_live_…';
@@ -975,12 +1009,44 @@ function readBilling() {
       });
       const prices = [...row.querySelectorAll('.price-row')].map(priceEl => {
         const value = name => priceEl.querySelector(`[data-price="${name}"]`).value.trim();
-        return { id: value('id'), label: value('label'), stripePriceId: value('stripePriceId'), mode: value('mode') };
+        const amount = value('amount') ? Math.round(Number(value('amount').replace(',', '.')) * 100) : undefined;
+        const interval = value('interval');
+        return {
+          id: value('id'), label: value('label'), stripePriceId: value('stripePriceId'),
+          mode: interval === 'once' ? 'payment' : 'subscription', amount, currency: value('currency'), interval
+        };
       });
-      return { id: field('id'), name: field('name'), description: field('description'), prices, boosts };
+      return { id: field('id'), name: field('name'), description: field('description'), prices, boosts, stripeProductId: row.dataset.product || undefined };
     })
   };
 }
+
+/*
+ * Crée dans Stripe les offres et tarifs qui n'y sont pas encore. Les réglages
+ * sont d'abord enregistrés (le serveur travaille sur ce qui est enregistré),
+ * puis le serveur crée produits et prix et renvoie les identifiants obtenus.
+ */
+$('stripe-sync').addEventListener('click', async () => {
+  const button = $('stripe-sync');
+  const status = $('stripe-sync-status');
+  button.disabled = true;
+  status.className = 'status';
+  status.textContent = fr ? 'Enregistrement, puis création dans Stripe…' : 'Saving, then creating in Stripe…';
+  try {
+    await api('PUT', 'settings', { billing: readBilling() });
+    const result = await api('POST', 'billing/stripe-sync', {});
+    fillBilling(result.settings.billing);
+    status.className = 'status ok';
+    status.textContent = result.created
+      ? (fr ? `${result.created} tarif(s) créé(s) dans Stripe.` : `${result.created} price(s) created in Stripe.`)
+      : (fr ? 'Tout est déjà dans Stripe.' : 'Everything is already in Stripe.');
+  } catch (err) {
+    status.className = 'status fail';
+    status.textContent = err.message;
+  } finally {
+    button.disabled = false;
+  }
+});
 
 $('add-plan').addEventListener('click', () => {
   $('plans').appendChild(planRow());

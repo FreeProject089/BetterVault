@@ -50,3 +50,34 @@ L'application affiche ces serveurs sous le champ **Adresse du serveur**, au mome
 
 !!! tip "Version web hébergée"
     Quand l'application web est servie par un serveur, sa politique de sécurité ne l'autorise à contacter que ce serveur. Les serveurs proposés se choisissent donc depuis l'application de bureau, l'extension, ou une installation que vous hébergez.
+
+
+## Tarifs (`/tarifs`)
+
+Dès qu'une offre payante a un tarif créé dans Stripe, la page **`/tarifs`** apparaît, avec un lien dans la barre du haut et le pied de page. Elle montre le compte gratuit et ses limites, chaque offre avec l'espace qu'elle ajoute, et une bascule **par an / par mois** quand les offres proposent les deux. Voir [Espace payant](offres-stripe.md).
+
+## Langue des pages
+
+Les pages publiques (accueil, tarifs, serveurs, documentation, documents légaux) existent en français et en anglais. La langue suit celle du navigateur ; le sélecteur de la barre du haut l'impose et la retient un an (cookie `bv_lang`, sans autre contenu). Avec deux langues, c'est une bascule ; au-delà, un menu déroulant.
+
+## Liens communautaires
+
+La barre du haut et le pied de page montrent toujours **GitHub** (le code source) et **BetterCommunity**. Discord et une page d'état s'ajoutent quand ils sont connus : ils sont lus dans un **fichier JSON hébergé ailleurs**, dont l'adresse se règle dans **/admin → Réglages → Liens communautaires**. Un seul fichier peut servir plusieurs serveurs : changer l'invitation Discord ne demande de toucher à aucun d'eux.
+
+```json
+{
+  "discord": "https://discord.gg/xxxxxxx",
+  "github": "https://github.com/FreeProject089/BetterVault",
+  "status": "https://status.exemple.org",
+  "community": "https://bettercommunity.ch"
+}
+```
+
+| Clé | Rôle |
+| --- | --- |
+| `discord` | Invitation Discord : bouton dans la barre, le pied et la FAQ |
+| `github` | Remplace le lien du code source |
+| `status` | Page d'état du service, dans le pied de page |
+| `community` | Remplace le lien BetterCommunity |
+
+Toutes les clés sont facultatives ; seules les adresses `https://` sont gardées. Le fichier est relu au plus une fois par heure. S'il est injoignable, les pages gardent les derniers liens connus : l'accueil ne dépend jamais d'un serveur tiers pour s'afficher.

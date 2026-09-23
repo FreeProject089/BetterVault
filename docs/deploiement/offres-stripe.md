@@ -4,21 +4,55 @@ Fonction **facultative**, désactivée par défaut. Elle permet à un hébergeur
 
 ## Mise en route
 
-1. Dans Stripe, créez un produit et un **prix** (abonnement mensuel ou paiement unique). Notez son identifiant `price_…`.
-2. Dans `.env` :
+Tout se fait depuis `/admin`, onglet **Offres** : aucun produit à préparer à la main dans Stripe.
 
-   ```bash
-   BILLING_ENABLED=true
-   STRIPE_SECRET_KEY=sk_live_…
-   STRIPE_WEBHOOK_SECRET=whsec_…
-   PUBLIC_URL=https://vault.exemple.fr
-   ```
+:::steps
+:::step[Clé secrète Stripe]
+Stripe → **Développeurs → Clés API**. Une **clé restreinte** (`rk_…`) suffit, avec au minimum :
 
-3. Dans Stripe, créez un webhook vers `https://votre-domaine/api/v1/billing/webhook` avec les événements :
-   `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`.
-4. Dans `/admin`, onglet **Offres**, ajoutez chaque offre : nom, description, l'espace ajouté, et **une ou plusieurs durées** — une par tarif Stripe.
+| Ressource | Accès |
+| --- | --- |
+| Products | Écriture |
+| Prices | Écriture |
+| Checkout Sessions | Écriture |
+| Subscriptions | Lecture et écriture (renouvellement automatique) |
+| Customers | Lecture |
 
-Les offres apparaissent alors dans **Compte › Espace** dans les applications.
+Collez-la dans **Offres → Clé secrète Stripe**.
+:::
+:::step[Webhook]
+Stripe → **Développeurs → Webhooks → Ajouter un endpoint**. L'onglet Offres affiche l'adresse exacte (`https://votre-domaine/api/v1/billing/webhook`, d'après `PUBLIC_URL`) et les événements à cocher :
+
+`checkout.session.completed`, `checkout.session.async_payment_succeeded`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`.
+
+Collez ensuite le **secret de signature** (`whsec_…`).
+:::
+:::step[Offres]
+**Ajouter une offre** : nom, description, l'espace ajouté, puis un ou plusieurs tarifs avec **montant, devise et période** (par mois, par an, une fois).
+:::
+:::step[Créer dans Stripe]
+Le bouton **Créer dans Stripe** enregistre les réglages, crée un produit par offre et un prix par tarif, puis note leurs identifiants. Chaque tarif affiche alors « Créé dans Stripe ».
+:::
+:::
+
+:::tip[Un prix déjà créé dans Stripe ?]
+Collez son identifiant `price_…` dans le champ du tarif : il est utilisé tel quel, rien n'est recréé.
+:::
+
+:::warning[Changer un montant]
+Un prix Stripe ne change jamais de montant. Pour changer un tarif, ajoutez-en un nouveau et retirez l'ancien : les abonnements en cours gardent leur prix.
+:::
+
+Les offres apparaissent alors dans **Compte › Espace** dans les applications, et sur la page publique **`/tarifs`**.
+
+Le même réglage existe par variables d'environnement, pour un serveur sans administration :
+
+```bash
+BILLING_ENABLED=true
+STRIPE_SECRET_KEY=rk_live_…
+STRIPE_WEBHOOK_SECRET=whsec_…
+PUBLIC_URL=https://vault.exemple.fr
+```
 
 ## Ce qui est envoyé à Stripe
 

@@ -598,3 +598,22 @@ a.brand:hover { background: color-mix(in srgb, var(--muted) 12%, transparent); }
 .theme-menu button[aria-checked="true"] { color: var(--accent); font-weight: 600; }
 .theme-menu button[aria-checked="true"] svg { color: var(--accent); }
 @keyframes menu-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+/* ── Offres et Stripe ───────────────────────────────────────────────── */
+.setup-steps { list-style: none; counter-reset: step; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.setup-steps > li { counter-increment: step; position: relative; padding-left: 38px; display: flex; flex-direction: column; gap: 6px; }
+.setup-steps > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-weight: 800; font-size: 13px; }
+.setup-steps .hint { margin: 0; }
+.webhook-events { display: flex; flex-wrap: wrap; gap: 6px; }
+.webhook-events code { padding: 2px 7px; border-radius: 6px; border: 1px solid var(--border); background: var(--field); font-size: 11.5px; }
+.price-row { padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--field); margin-bottom: 10px; }
+.price-grid { display: grid; grid-template-columns: 1.1fr 0.9fr 0.8fr 1fr 1.4fr auto; gap: 10px; align-items: end; }
+.price-grid label { margin-top: 0; }
+.price-remove { min-width: 40px; }
+.price-stripe { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.price-stripe input { flex: 1; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12.5px; }
+.stripe-state { flex: 0 0 auto; padding: 3px 9px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+.stripe-state.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.stripe-state.todo { color: #d29922; background: color-mix(in srgb, #d29922 14%, transparent); }
+@media (max-width: 900px) { .price-grid { grid-template-columns: 1fr 1fr; } .price-remove { justify-self: start; } }
