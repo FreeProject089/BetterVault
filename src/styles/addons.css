@@ -4394,3 +4394,90 @@ label.check,
 
 /* Pastille de filtre portant un avatar : la teinte reste lisible sur la puce */
 .filter-chip .member-dot { margin-right: 2px; }
+
+/* ── Priorités : la même couleur partout ──────────────────────────────────
+   Le sélecteur reprenait l'accent pour les quatre niveaux : « Haute » sortait
+   en violet alors que son étiquette est orange ailleurs. Chaque option porte
+   maintenant sa couleur, et un point la rappelle même quand elle est inactive. */
+.priority-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.priority-option::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--prio-color, var(--text-muted));
+  flex: 0 0 auto;
+}
+.priority-option[data-priority="low"] { --prio-color: var(--accent-green); }
+.priority-option[data-priority="medium"] { --prio-color: var(--accent); }
+.priority-option[data-priority="high"] { --prio-color: var(--accent-orange); }
+.priority-option[data-priority="urgent"] { --prio-color: var(--accent-red); }
+.priority-option.active {
+  color: var(--prio-color);
+  border-color: color-mix(in srgb, var(--prio-color) 60%, transparent);
+  background-color: color-mix(in srgb, var(--prio-color) 14%, transparent);
+}
+
+/* ── Formulaires par étapes (tâche, identifiant) ──────────────────────────
+   Les sections étaient en « block » sans espacement : les champs se touchaient
+   exactement, le bas de l'un au niveau du haut du suivant. Le rythme vertical
+   est celui du reste de l'application. */
+.task-form,
+.task-form [data-step]:not([hidden]),
+.cred-form [data-step]:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+/* Une aide reste collée au champ qu'elle explique, pas à mi-chemin du suivant */
+.form-field > .field-hint { margin-top: calc(var(--space-1) * -1); }
+
+/* ── Sélecteur d'affichage des tâches ─────────────────────────────────────
+   Quatre icônes de 13 px sans libellé, dans une cible de 21 px : on devinait
+   le mode plutôt que de le lire. Cibles au doigt, libellé dès qu'il y a la
+   place, et l'actif ressort à l'accent plutôt qu'en gris clair. */
+.view-toggle { padding: 2px; gap: 2px; }
+.view-toggle-btn {
+  gap: 6px;
+  min-height: 32px;
+  min-width: 32px;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 500;
+}
+.view-toggle-btn .view-toggle-label { display: none; }
+.view-toggle-btn.active {
+  color: var(--accent);
+  background-color: var(--bg-secondary);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+/* Assez large : chaque mode dit son nom */
+@media (min-width: 1100px) {
+  .view-toggle-btn { padding-inline: 10px; }
+  .view-toggle-btn .view-toggle-label { display: inline; }
+}
+/* Au doigt : la cible passe à 40 px, sans libellé pour garder la barre courte */
+@media (max-width: 900px) {
+  .view-toggle-btn { min-height: 40px; min-width: 40px; }
+}
+
+/* ── En-tête d'une fiche ──────────────────────────────────────────────────
+   Les boutons passaient à la ligne dès que le titre tenait sur deux lignes :
+   la mise en page sautait d'une fiche à l'autre. Ils restent désormais sur la
+   même ligne, et c'est le titre qui s'adapte. */
+@media (min-width: 901px) {
+  .detail-header { flex-wrap: nowrap; }
+  .detail-header-left { flex: 1 1 auto; min-width: 0; }
+}
+@media (max-width: 900px) {
+  .detail-header { align-items: center; }
+  /* Toujours à droite, jamais flottants au milieu d'une ligne à moitié vide */
+  .detail-actions { margin-left: auto; }
+  .detail-header .detail-main-icon { width: 38px; height: 38px; }
+}
+.detail-title { overflow-wrap: anywhere; }

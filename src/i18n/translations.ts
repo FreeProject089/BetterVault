@@ -51,6 +51,7 @@ export interface Translations {
     title: string;
     viewList: string;
     viewKanban: string;
+    viewMatrix: string;
     viewCalendar: string;
     statusTodo: string;
     statusInProgress: string;
@@ -130,6 +131,7 @@ export const fr: Translations = {
     title: 'Tâches',
     viewList: 'Liste',
     viewKanban: 'Kanban',
+    viewMatrix: 'Matrice',
     viewCalendar: 'Calendrier',
     statusTodo: 'À faire',
     statusInProgress: 'En cours',
@@ -209,6 +211,7 @@ export const en: Translations = {
     title: 'Tasks',
     viewList: 'List',
     viewKanban: 'Kanban',
+    viewMatrix: 'Matrix',
     viewCalendar: 'Calendar',
     statusTodo: 'To do',
     statusInProgress: 'In progress',

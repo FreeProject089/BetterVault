@@ -378,14 +378,22 @@ body {
   flex-shrink: 0;
 }
 
-/* Mode tâches (Kanban / Matrice / Calendrier) : la colonne centrale prend la place */
-.app-container.tasks-board {
-  grid-template-columns: 260px minmax(0, 1fr) minmax(340px, 420px);
-}
-
-@media (max-width: 1280px) {
+/*
+ * Mode tâches (Kanban / Matrice / Calendrier) : la colonne centrale prend la
+ * place. La règle est bornée aux écrans larges : sans cette borne, elle
+ * l'emportait sur la mise en page téléphone (sa spécificité est plus forte) et
+ * la colonne du tableau tombait à 0 px de large sur un écran étroit.
+ */
+@media (min-width: 901px) {
   .app-container.tasks-board {
-    grid-template-columns: 220px minmax(0, 1fr) minmax(320px, 380px);
+    grid-template-columns: 260px minmax(0, 1fr) minmax(340px, 420px);
+  }
+
+  /* Le tableau garde un plancher : mieux vaut une fiche plus étroite qu'un tableau écrasé */
+  @media (max-width: 1280px) {
+    .app-container.tasks-board {
+      grid-template-columns: 220px minmax(360px, 1fr) minmax(260px, 340px);
+    }
   }
 }
 
@@ -496,16 +504,33 @@ body {
   color: var(--text-secondary);
 }
 
+/*
+ * Une couleur par priorité, prise dans la palette du thème : les quatre
+ * niveaux se lisent d'un coup d'œil, et un thème importé les emporte avec lui.
+ * « Basse » et « Moyenne » restaient grises, donc indistinctes.
+ */
 .badge.priority-urgent {
-  background-color: rgba(218, 54, 51, 0.15);
-  color: #f85149;
-  border-color: rgba(218, 54, 51, 0.4);
+  background-color: color-mix(in srgb, var(--accent-red) 16%, transparent);
+  color: var(--accent-red);
+  border-color: color-mix(in srgb, var(--accent-red) 45%, transparent);
 }
 
 .badge.priority-high {
-  background-color: rgba(210, 153, 34, 0.15);
-  color: #e3b341;
-  border-color: rgba(210, 153, 34, 0.4);
+  background-color: color-mix(in srgb, var(--accent-orange) 16%, transparent);
+  color: var(--accent-orange);
+  border-color: color-mix(in srgb, var(--accent-orange) 45%, transparent);
+}
+
+.badge.priority-medium {
+  background-color: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.badge.priority-low {
+  background-color: color-mix(in srgb, var(--accent-green) 14%, transparent);
+  color: var(--accent-green);
+  border-color: color-mix(in srgb, var(--accent-green) 40%, transparent);
 }
 
 /* Colonne 3 : Panneau de Détails Droit */
