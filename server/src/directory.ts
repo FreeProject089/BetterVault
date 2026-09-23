@@ -157,7 +157,7 @@ export function renderLanding(ctx: LandingContext): string {
 a{color:var(--accent)}
 header{border-bottom:1px solid var(--border);background:var(--card)}
 header div{max-width:1040px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;gap:12px}
-header img{width:28px;height:28px}header strong{margin-right:auto;font-size:15px}
+header picture{display:flex}header img{width:28px;height:28px}header strong{margin-right:auto;font-size:15px}
 main{max-width:1040px;margin:0 auto;padding:0 20px 72px}
 section{padding:56px 0 0}
 .hero{padding:64px 0 8px}
@@ -193,7 +193,7 @@ ${illustre ? ART_CSS : ''}
 </head>
 <body>
 <header><div>
-  <img src="/admin/logo-on-dark.svg" alt="" width="28" height="28">
+  <picture><source srcset="/admin/logo-on-light.svg" media="(prefers-color-scheme: light)"><img src="/admin/logo-on-dark.svg" alt="" width="28" height="28"></picture>
   <strong>BetterVault</strong>
   <a href="/docs">${t('Documentation', 'Documentation')}</a>
   ${ctx.appAvailable ? `<a href="/">${t('Application', 'App')}</a>` : ''}

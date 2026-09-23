@@ -182,7 +182,7 @@ export function renderDocPage(path: string, ctx: DocsContext): string | null {
 .cards>ul>li{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin:0}
 header{position:sticky;top:0;z-index:2;background:var(--card);border-bottom:1px solid var(--border)}
 header div{max-width:1160px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:12px}
-header img{width:26px;height:26px}header strong{margin-right:auto}
+header picture{display:flex}header img{width:26px;height:26px}header strong{margin-right:auto}
 .shell{max-width:1160px;margin:0 auto;padding:24px 16px 64px;display:grid;gap:28px}
 nav{display:flex;flex-direction:column;gap:18px;font-size:14px}
 .doc-group{display:flex;flex-direction:column;gap:2px}
@@ -216,7 +216,7 @@ hr{border:none;border-top:1px solid var(--border);margin:32px 0}
 </head>
 <body>
 <header><div>
-  <img src="/admin/logo-on-dark.svg" alt="" width="26" height="26">
+  <picture><source srcset="/admin/logo-on-light.svg" media="(prefers-color-scheme: light)"><img src="/admin/logo-on-dark.svg" alt="" width="26" height="26"></picture>
   <strong>BetterVault · ${t('Documentation', 'Documentation')}</strong>
   ${ctx.appAvailable ? `<a class="btn" href="/">${t('Ouvrir l’application', 'Open the app')}</a>` : ''}
   <a class="btn" href="/about">${t('À propos', 'About')}</a>
