@@ -73,19 +73,19 @@ const FOND = '#f6f8fa';
 const marque = (publicUrl: string) => {
   const base = publicUrl.replace(/\/+$/, '');
   const pastille = base
-    ? `<img src="${escapeHtml(base)}/brand/logo-on-dark.png" width="20" height="20" alt="BetterVault"
-         style="display:block;width:20px;height:20px;border:0;">`
+    ? `<img src="${escapeHtml(base)}/brand/logo-on-dark.png" width="26" height="26" alt="BetterVault"
+         style="display:block;width:26px;height:26px;border:0;">`
     : `<span style="font:700 14px/20px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#ffffff;">B</span>`;
   return `
   <table role="presentation" cellpadding="0" cellspacing="0" border="0">
     <tr>
       <td style="padding-right:10px;">
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="30" height="30"
-          style="width:30px;height:30px;background-color:#18181b;border-radius:9px;">
-          <tr><td align="center" valign="middle" style="width:30px;height:30px;text-align:center;">${pastille}</td></tr>
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="38" height="38"
+          style="width:38px;height:38px;background-color:#161b22;border-radius:10px;">
+          <tr><td align="center" valign="middle" style="width:38px;height:38px;text-align:center;">${pastille}</td></tr>
         </table>
       </td>
-      <td style="font:600 16px/30px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${ENCRE};">BetterVault</td>
+      <td class="bv-ink" style="font:600 17px/38px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${ENCRE};">BetterVault</td>
     </tr>
   </table>`;
 };
@@ -94,7 +94,7 @@ const marque = (publicUrl: string) => {
 const blocCode = (code: string) => `
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:22px 0;">
     <tr>
-      <td align="center" style="padding:18px 12px;background-color:${FOND};border:1px solid ${BORDURE};border-radius:10px;
+      <td align="center" class="bv-code" style="padding:18px 12px;background-color:${FOND};border:1px solid ${BORDURE};border-radius:10px;
         font:700 30px/1.2 ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;letter-spacing:8px;color:${ENCRE};">
         ${escapeHtml(code)}
       </td>
@@ -106,13 +106,13 @@ const faits = (lignes: Array<[string, string]>) => `
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:18px 0;border-collapse:collapse;">
     ${lignes.map(([cle, valeur]) => `
     <tr>
-      <td style="padding:7px 12px 7px 0;border-bottom:1px solid ${BORDURE};font:400 13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${DISCRET};white-space:nowrap;">${escapeHtml(cle)}</td>
-      <td style="padding:7px 0;border-bottom:1px solid ${BORDURE};font:500 13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${ENCRE};word-break:break-word;">${escapeHtml(valeur)}</td>
+      <td class="bv-muted bv-line" style="padding:7px 12px 7px 0;border-bottom:1px solid ${BORDURE};font:400 13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${DISCRET};white-space:nowrap;">${escapeHtml(cle)}</td>
+      <td class="bv-ink bv-line" style="padding:7px 0;border-bottom:1px solid ${BORDURE};font:500 13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${ENCRE};word-break:break-word;">${escapeHtml(valeur)}</td>
     </tr>`).join('')}
   </table>`;
 
 const paragraphe = (texte: string) =>
-  `<p style="margin:0 0 14px;font:400 15px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${ENCRE};">${texte}</p>`;
+  `<p class="bv-ink" style="margin:0 0 14px;font:400 15px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${ENCRE};">${texte}</p>`;
 
 /**
  * Ce qu'il faut faire si l'on n'est pas à l'origine de l'événement.
@@ -125,7 +125,7 @@ const paragraphe = (texte: string) =>
 const alerte = (texte: string, notMeUrl?: string, locale: Locale = 'en') => `
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:18px 0 4px;">
     <tr>
-      <td style="padding:12px 14px;background-color:#fff8c5;border:1px solid #d4a72c;border-radius:8px;
+      <td class="bv-alert" style="padding:12px 14px;background-color:#fff8c5;border:1px solid #d4a72c;border-radius:8px;
         font:400 13.5px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#4d2d00;">
         ${texte}
         ${notMeUrl ? `
@@ -137,42 +137,65 @@ const alerte = (texte: string, notMeUrl?: string, locale: Locale = 'en') => `
             </td>
           </tr>
         </table>
-        <div style="margin-top:7px;font-size:12px;color:#6b4a00;">${t(locale, 'Déconnecte tous les appareils du compte. Utilisable une seule fois.', 'Signs every device out of your account. Works once.')}</div>` : ''}
+        <div class="bv-alert-note" style="margin-top:7px;font-size:12px;color:#6b4a00;">${t(locale, 'Déconnecte tous les appareils du compte. Utilisable une seule fois.', 'Signs every device out of your account. Works once.')}</div>` : ''}
       </td>
     </tr>
   </table>`;
 
 function page(titre: string, corps: string, publicUrl: string, locale: Locale = 'en'): string {
   const lien = publicUrl
-    ? `<a href="${escapeHtml(publicUrl)}" style="color:${ACCENT};text-decoration:none;">${escapeHtml(publicUrl)}</a><br>`
+    ? `<a class="bv-link" href="${escapeHtml(publicUrl)}" style="color:${ACCENT};text-decoration:none;">${escapeHtml(publicUrl)}</a><br>`
     : '';
   return `<!DOCTYPE html>
 <html lang="${locale}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
 <title>${escapeHtml(titre)}</title>
+<style>
+  /* Thème sombre, pour les clients qui le demandent (Apple Mail, Outlook,
+     Gmail sur mobile…). Les styles en ligne restent la version claire : un
+     client qui retire cette balise affiche un email clair et lisible. */
+  :root { color-scheme: light dark; supported-color-schemes: light dark; }
+  @media (prefers-color-scheme: dark) {
+    .bv-bg { background-color: #0d1117 !important; }
+    .bv-card { background-color: #161b22 !important; border-color: #30363d !important; }
+    .bv-ink { color: #e6edf3 !important; }
+    .bv-muted { color: #8b949e !important; }
+    .bv-line { border-color: #30363d !important; }
+    .bv-code { background-color: #0d1117 !important; border-color: #30363d !important; color: #e6edf3 !important; }
+    .bv-alert { background-color: #2b2111 !important; border-color: #9e6a03 !important; color: #f0d58a !important; }
+    .bv-alert-note { color: #d4b35c !important; }
+    a.bv-link { color: #a5a2f5 !important; }
+  }
+  [data-ogsc] .bv-ink { color: #e6edf3 !important; }
+  [data-ogsc] .bv-muted { color: #8b949e !important; }
+  [data-ogsb] .bv-bg { background-color: #0d1117 !important; }
+  [data-ogsb] .bv-card, [data-ogsb] .bv-code { background-color: #161b22 !important; }
+</style>
 </head>
-<body style="margin:0;padding:0;background-color:${FOND};">
+<body class="bv-bg" style="margin:0;padding:0;background-color:${FOND};">
   <!-- Repris comme aperçu dans la liste des messages, jamais affiché dans le corps -->
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${escapeHtml(titre)}</div>
-  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${FOND};">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" class="bv-bg" style="background-color:${FOND};">
     <tr>
       <td align="center" style="padding:28px 14px;">
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:520px;background-color:#ffffff;border:1px solid ${BORDURE};border-radius:14px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" class="bv-card" style="max-width:520px;background-color:#ffffff;border:1px solid ${BORDURE};border-radius:14px;">
           <tr>
             <td style="padding:22px 26px 0;">${marque(publicUrl)}</td>
           </tr>
           <tr>
             <td style="padding:18px 26px 24px;">
-              <h1 style="margin:0 0 14px;font:600 20px/1.3 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${ENCRE};">${escapeHtml(titre)}</h1>
+              <h1 class="bv-ink" style="margin:0 0 14px;font:600 20px/1.3 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${ENCRE};">${escapeHtml(titre)}</h1>
               ${corps}
             </td>
           </tr>
         </table>
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:520px;">
           <tr>
-            <td style="padding:16px 26px 0;font:400 12px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${DISCRET};">
+            <td class="bv-muted" style="padding:16px 26px 0;font:400 12px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${DISCRET};">
               ${lien}${t(locale, 'Vous recevez cet email parce qu’il concerne la sécurité de votre compte BetterVault.', 'You are receiving this email because it concerns the security of your BetterVault account.')}
             </td>
           </tr>
@@ -226,7 +249,7 @@ export const emails = {
         `Your code: ${code}\n\nIt is valid for ${minutes} minutes.\nIf you did not ask to reset your password, ignore this email: nothing changes without this code.`),
       paragraphe(t(l, 'Utilisez ce code pour continuer la réinitialisation de votre mot de passe principal.', 'Use this code to continue resetting your master password.'))
         + blocCode(code)
-        + paragraphe(`<span style="color:${DISCRET};">${t(l, `Il expire dans ${minutes} minutes.`, `It expires in ${minutes} minutes.`)}</span>`)
+        + paragraphe(`<span class="bv-muted" style="color:${DISCRET};">${t(l, `Il expire dans ${minutes} minutes.`, `It expires in ${minutes} minutes.`)}</span>`)
         + alerte(
           t(l,
             'Si vous n’avez pas demandé cette réinitialisation, ignorez cet email — rien ne change sans ce code. Vous pouvez aussi l’annuler tout de suite.',
@@ -265,7 +288,7 @@ export const emails = {
         `Your account's master password was changed${comment} on ${formatDate(when, l)}.\nOther devices will need to sign in again.\n\nIf this wasn't you, contact the server administrator.`),
       paragraphe(t(l, `Le mot de passe principal de votre compte a été changé${comment}.`, `Your account’s master password was changed${comment}.`))
         + faits([[t(l, 'Quand', 'When'), formatDate(when, l)]])
-        + paragraphe(`<span style="color:${DISCRET};">${t(l, 'Les autres appareils devront se reconnecter.', 'Other devices will need to sign in again.')}</span>`)
+        + paragraphe(`<span class="bv-muted" style="color:${DISCRET};">${t(l, 'Les autres appareils devront se reconnecter.', 'Other devices will need to sign in again.')}</span>`)
         + alerte(t(l, 'Si ce n’était pas vous, agissez maintenant.', 'If this wasn’t you, act now.'), ctx.notMeUrl, l)
     );
   },
@@ -338,7 +361,7 @@ export const emails = {
       paragraphe(t(l,
         `<strong>${escapeHtml(inviterEmail)}</strong> vous invite à un coffre partagé BetterVault.`,
         `<strong>${escapeHtml(inviterEmail)}</strong> invited you to a shared BetterVault vault.`))
-        + paragraphe(`<span style="color:${DISCRET};">${t(l,
+        + paragraphe(`<span class="bv-muted" style="color:${DISCRET};">${t(l,
           'Ouvrez BetterVault, puis <strong>Coffres partagés</strong>, pour accepter ou refuser. Rien n’est partagé tant que vous n’avez pas accepté.',
           'Open BetterVault, then <strong>Shared vaults</strong>, to accept or decline. Nothing is shared until you accept.')}</span>`)
     );
