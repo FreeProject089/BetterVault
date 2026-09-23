@@ -31,6 +31,11 @@ Correspondance :
 
 **Arrêter** supprime le cache de l'appareil. Aucun identifiant n'est lisible par le service de remplissage sans authentification biométrique.
 
+
+:::warning[Sites dans une application : seulement depuis un navigateur]
+Une application peut prétendre afficher une page d'un site (« banque.fr ») pour recevoir ses identifiants. BetterVault ne croit le domaine d'une page que s'il vient d'un navigateur connu (Chrome, Firefox, Brave, Edge, Samsung Internet, DuckDuckGo, Vivaldi, Opera…). Dans toute autre application, seuls les éléments liés à cette application par une adresse `androidapp://nom.du.paquet` sont proposés.
+:::
+
 ## Remplissage automatique sur iOS
 
 Le code de l'extension « AutoFill Credential Provider » est dans `src-tauri/ios-extension/`. Il demande un Mac :

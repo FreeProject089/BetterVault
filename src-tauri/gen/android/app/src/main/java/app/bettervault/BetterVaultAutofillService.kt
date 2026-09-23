@@ -79,8 +79,17 @@ class BetterVaultAutofillService : AutofillService() {
         val fields = StructureParser.parse(structure)
         if (fields.passwordIds.isEmpty() && fields.usernameIds.isEmpty()) return callback.onSuccess(null)
 
+        /*
+         * Le domaine d'une page web est déclaré par l'application qui affiche
+         * l'écran : n'importe quelle application peut prétendre montrer
+         * « banque.fr » et recevoir ses identifiants (famille « AutoSpill »).
+         * On ne le croit que venant d'un navigateur connu ; ailleurs, seul le nom
+         * de paquet compte — Android le garantit, il ne se falsifie pas.
+         */
+        val trustedDomain = if (packageName in TRUSTED_BROWSERS) fields.webDomain else null
+
         val intent = Intent(this, AutofillAuthActivity::class.java).apply {
-            putExtra(AutofillAuthActivity.EXTRA_DOMAIN, fields.webDomain)
+            putExtra(AutofillAuthActivity.EXTRA_DOMAIN, trustedDomain)
             putExtra(AutofillAuthActivity.EXTRA_PACKAGE, packageName)
             putExtra(AutofillAuthActivity.EXTRA_USERNAME_IDS, fields.usernameIds.toTypedArray())
             putExtra(AutofillAuthActivity.EXTRA_PASSWORD_IDS, fields.passwordIds.toTypedArray())
@@ -93,6 +102,18 @@ class BetterVaultAutofillService : AutofillService() {
         }
         val ids = (fields.usernameIds + fields.passwordIds).toTypedArray()
         callback.onSuccess(FillResponse.Builder().setAuthentication(ids, sender, presentation).build())
+    }
+
+    companion object {
+        /** Navigateurs dont le domaine de page est fiable : ils l'obtiennent de leur propre barre d'adresse */
+        val TRUSTED_BROWSERS = setOf(
+            "com.android.chrome", "com.chrome.beta", "com.chrome.dev", "com.chrome.canary", "org.chromium.chrome",
+            "org.mozilla.firefox", "org.mozilla.firefox_beta", "org.mozilla.fenix", "org.mozilla.focus", "org.mozilla.klar",
+            "com.brave.browser", "com.brave.browser_beta", "com.microsoft.emmx", "com.opera.browser", "com.opera.gx",
+            "com.sec.android.app.sbrowser", "com.duckduckgo.mobile.android", "com.vivaldi.browser",
+            "com.kiwibrowser.browser", "org.bromite.bromite", "app.vanadium.browser", "com.ecosia.android",
+            "com.yandex.browser", "com.mi.globalbrowser", "com.huawei.browser"
+        )
     }
 
     override fun onSaveRequest(request: SaveRequest, callback: SaveCallback) {
