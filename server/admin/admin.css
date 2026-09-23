@@ -498,3 +498,24 @@ code.fp.big { font-size: 18px; }
 .meter.good span { background: var(--ok); }
 .meter.warning span { background: #d29922; }
 .meter.critical span { background: var(--danger); }
+
+/* Espacement des écrans : les cartes d'un même écran ne se touchent jamais,
+   et les lignes d'état vides ne laissent pas de trou en bas des cartes */
+[data-panel]:not([hidden]),
+[data-panel] > div[id$="-panel"] { display: flex; flex-direction: column; gap: 16px; }
+[data-panel] > div[id$="-panel"]:empty { display: none; }
+[data-panel] > .card, [data-panel] > div[id$="-panel"] > .card { margin-top: 0; margin-bottom: 0; }
+.status:empty { display: none; }
+.card > :last-child { margin-bottom: 0; }
+.grid-2 > .span-all { grid-column: 1 / -1; }
+/* Ajout d'un administrateur : email et mot de passe prennent la place, le rôle et le bouton la leur */
+#admin-add input { flex: 1 1 220px; }
+#admin-add select { flex: 0 1 160px; }
+#admin-add .btn { flex: 0 0 auto; }
+/* Tableau de bord : les cinq chiffres sur une ligne dès que la place le permet,
+   des cartes à la hauteur de leur contenu, des lignes de mesures serrées */
+.stats { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+[data-panel="overview"] .grid { align-items: start; }
+.perf { align-items: start; }
+.perf .kv { align-content: start; }
+[data-panel] > div[id$="-panel"] > p.status.fail { margin: 0; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--danger) 10%, var(--card)); }

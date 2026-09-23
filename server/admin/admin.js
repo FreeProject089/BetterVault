@@ -25,7 +25,7 @@ const TEXT = {
   roleViewer: ['Lecteur', 'Viewer'],
   roleOperator: ['Opérateur', 'Operator'],
   roleOwner: ['Propriétaire', 'Owner'],
-  tempPassword: ['Mot de passe provisoire (12 caractères min.)', 'Temporary password (12+ characters)'],
+  tempPassword: ['Mot de passe provisoire', 'Temporary password'],
   add: ['Ajouter', 'Add'],
   myAccount: ['Mon compte', 'My account'],
   newPassword: ['Nouveau mot de passe', 'New password'],
@@ -1053,7 +1053,7 @@ function nodeFieldsHtml(prefix, defaults = {}) {
       <div><label for="${prefix}-name">${fr ? 'Nom du nœud' : 'Node name'}</label><input id="${prefix}-name" required maxlength="40" placeholder="EU-W" value="${escapeHtml(defaults.name ?? '')}"></div>
       <div><label for="${prefix}-zone">${fr ? 'Zone de résidence' : 'Residency zone'}</label><input id="${prefix}-zone" required maxlength="10" placeholder="EU" value="${escapeHtml(defaults.zone ?? '')}"></div>
       <div><label for="${prefix}-region">${fr ? 'Région' : 'Region'}</label><input id="${prefix}-region" required maxlength="20" placeholder="eu-west" value="${escapeHtml(defaults.region ?? '')}"></div>
-      <div><label for="${prefix}-url">${fr ? 'Adresse publique du nœud' : 'Node public address'}</label><input id="${prefix}-url" type="url" required value="${escapeHtml(defaults.url ?? location.origin)}"></div>
+      <div class="span-all"><label for="${prefix}-url">${fr ? 'Adresse publique du nœud' : 'Node public address'}</label><input id="${prefix}-url" type="url" required value="${escapeHtml(defaults.url ?? location.origin)}"></div>
     </div>
     <p class="hint">${fr
       ? 'Les comptes ne sont répliqués qu’entre nœuds de la même zone (EU, US, CH…). Ils ne franchissent jamais les zones.'
