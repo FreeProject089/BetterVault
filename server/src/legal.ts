@@ -118,7 +118,9 @@ export function markdownToHtml(markdown: string): string {
     list = null;
     if (table) {
       const [head, , ...rows] = table;
-      out.push(`<div class="table"><table><thead><tr>${head.map(c => `<th>${inline(c)}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td>${inline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+      // Un en-tête entièrement vide (« | | | ») sert de tableau clé / valeur : on ne l'affiche pas
+      const entete = head.some(c => c) ? `<thead><tr>${head.map(c => `<th>${inline(c)}</th>`).join('')}</tr></thead>` : '';
+      out.push(`<div class="table"><table>${entete}<tbody>${rows.map(r => `<tr>${r.map(c => `<td>${inline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
     }
     table = null;
   };
