@@ -2599,3 +2599,26 @@ if ('serviceWorker' in navigator && window.location.protocol.startsWith('http') 
   }
 }
 
+/*
+ * Installer l'application web : quand le navigateur le permet, on le propose
+ * une fois, discrètement. Refusé ou ignoré, on ne le repropose plus sur cet
+ * appareil ; la page /telecharger garde son bouton.
+ */
+const INSTALL_OFFERED_KEY = 'bettervault.install-offered';
+if (!isTauri()) {
+  window.addEventListener('beforeinstallprompt', event => {
+    event.preventDefault();
+    let offered = false;
+    try { offered = localStorage.getItem(INSTALL_OFFERED_KEY) === '1'; } catch { /* stockage indisponible */ }
+    if (offered) return;
+    try { localStorage.setItem(INSTALL_OFFERED_KEY, '1'); } catch { /* stockage indisponible */ }
+    const prompt = event as Event & { prompt: () => Promise<void> };
+    // Laisse la page se charger avant de proposer quoi que ce soit
+    window.setTimeout(() => pushToast(i18n.pick('Installer BetterVault sur cet appareil ?', 'Install BetterVault on this device?'), {
+      kind: 'info',
+      duration: 12_000,
+      action: { label: i18n.pick('Installer', 'Install'), run: () => { void prompt.prompt(); } }
+    }), 4000);
+  });
+}
+

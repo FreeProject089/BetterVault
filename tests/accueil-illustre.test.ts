@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderLanding, renderPlansPage, renderServersPage, DEFAULT_PUBLIC_PAGE } from '../server/src/directory.ts';
+import { renderDownloadsPage, renderLanding, renderPlansPage, renderServersPage, DEFAULT_PUBLIC_PAGE } from '../server/src/directory.ts';
 import { parseSiteLinks } from '../server/src/siteLinks.ts';
 
 /**
@@ -129,5 +129,32 @@ describe('Langues des pages publiques', () => {
   it('échappe le nom d’une langue venu de l’administration', () => {
     const html = renderLanding({ ...base, langs: [...langs, { code: 'xx', label: '<b>x</b>' }], path: '/' });
     expect(html).not.toContain('<b>x</b>');
+  });
+});
+
+describe('Page des téléchargements', () => {
+  it('propose Windows, Linux et Android, et marque le reste « bientôt »', () => {
+    const html = renderDownloadsPage(base);
+    expect(html).toContain('href="https://github.com/FreeProject089/BetterVault/releases/latest"');
+    for (const k of ['windows', 'linux', 'android']) expect(html).toMatch(new RegExp(`class="dl-card" data-platform="${k}"`));
+    for (const k of ['macos', 'ios', 'extension']) expect(html).toMatch(new RegExp(`class="dl-card soon" data-platform="${k}"`));
+    // L'application web s'installe depuis la page : manifeste et bouton
+    expect(html).toContain('<link rel="manifest" href="/manifest.json">');
+    expect(html).toContain('data-install');
+  });
+
+  it('prend les liens publiés par l’hébergeur, et rend disponible ce qu’il publie', () => {
+    const html = renderDownloadsPage({ ...base, links: { github: 'https://github.com/x/y', community: 'https://bettercommunity.ch', downloads: { macos: 'https://exemple.org/BetterVault.dmg', windows: 'https://exemple.org/setup.exe' } } });
+    expect(html).toContain('href="https://exemple.org/BetterVault.dmg"');
+    expect(html).toContain('href="https://exemple.org/setup.exe"');
+    expect(html).toMatch(/class="dl-card" data-platform="macos"/);
+  });
+
+  it('ne garde des liens de téléchargement que les adresses https', () => {
+    expect(parseSiteLinks({ downloads: { windows: 'javascript:alert(1)', linux: 'http://x.org/a', android: 'https://x.org/a.apk' } })).toEqual({ downloads: { android: 'https://x.org/a.apk' } });
+  });
+
+  it('apparaît dans la barre du haut', () => {
+    expect(renderLanding(base)).toContain('href="/telecharger"');
   });
 });

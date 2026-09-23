@@ -226,6 +226,7 @@ function page(ctx: LandingContext, title: string, description: string, body: str
 <meta name="description" content="${escapeHtml(description)}">
 <link rel="icon" type="image/svg+xml" href="/admin/logo-on-dark.svg" media="(prefers-color-scheme: dark)">
 <link rel="icon" type="image/svg+xml" href="/admin/logo-on-light.svg" media="(prefers-color-scheme: light)">
+${ctx.appAvailable ? '<link rel="manifest" href="/manifest.json">\n<meta name="theme-color" content="#161b22">' : ''}
 <style>${baseCss()}${CHROME_CSS}${ART_CSS}</style>
 ${SITE_JS_TAG}
 </head>
@@ -521,6 +522,106 @@ export function renderPlansPage(ctx: LandingContext): string | null {
 .plan .btn{width:100%}
 </style>`;
   return page(ctx, t('Tarifs · BetterVault', 'Pricing · BetterVault'), t('Les offres de ce serveur BetterVault.', 'The plans of this BetterVault server.'), body);
+}
+
+/* ── Téléchargements ──────────────────────────────────────────────────────── */
+
+/**
+ * Où trouver BetterVault, plateforme par plateforme. Seul ce qui est réellement
+ * publié a un bouton : le reste est marqué « bientôt », avec de quoi le
+ * construire soi-même. Les liens viennent du fichier de liens de l'hébergeur ;
+ * à défaut, Windows, Linux et Android mènent à la dernière version publiée.
+ * L'application web s'installe depuis la page (bouton géré par /site.js).
+ */
+export function renderDownloadsPage(ctx: LandingContext): string {
+  const t = translator(ctx);
+  const links = ctx.links ?? DEFAULT_LINKS;
+  const releases = `${links.github.replace(/\/+$/, '')}/releases/latest`;
+  const dl = links.downloads ?? {};
+  type Card = { key: string; icon: IconName; name: string; detail: string; href?: string; label?: string; soon?: boolean; doc?: string };
+  const cards: Card[] = [
+    { key: 'windows', icon: 'monitor', name: 'Windows', detail: t('Windows 10 et 11 · installeur .exe ou .msi · déverrouillage par Windows Hello', 'Windows 10 and 11 · .exe or .msi installer · unlock with Windows Hello'), href: dl.windows ?? releases, label: t('Télécharger pour Windows', 'Download for Windows') },
+    { key: 'linux', icon: 'monitor', name: 'Linux', detail: t('AppImage ou paquet .deb · trousseau de la session', 'AppImage or .deb package · session keyring'), href: dl.linux ?? releases, label: t('Télécharger pour Linux', 'Download for Linux') },
+    { key: 'android', icon: 'phone', name: 'Android', detail: t('APK · empreinte ou visage · remplissage automatique', 'APK · fingerprint or face · autofill'), href: dl.android ?? releases, label: t('Télécharger l’APK', 'Download the APK') },
+    { key: 'macos', icon: 'monitor', name: 'macOS', detail: t('Touch ID et trousseau macOS', 'Touch ID and macOS keychain'), href: dl.macos, label: t('Télécharger pour macOS', 'Download for macOS'), soon: !dl.macos, doc: '/docs/applications/apple' },
+    { key: 'ios', icon: 'phone', name: 'iOS · iPadOS', detail: t('Face ID et remplissage des mots de passe', 'Face ID and password autofill'), href: dl.ios, label: t('Télécharger pour iOS', 'Get it for iOS'), soon: !dl.ios, doc: '/docs/applications/apple' },
+    { key: 'extension', icon: 'globe', name: t('Extension de navigateur', 'Browser extension'), detail: t('Chrome, Edge, Firefox · remplissage des formulaires', 'Chrome, Edge, Firefox · form filling'), href: dl.extension, label: t('Ajouter au navigateur', 'Add to browser'), soon: !dl.extension, doc: '/docs/guide/extension' }
+  ];
+
+  const card = (c: Card) => `
+    <li class="dl-card${c.soon ? ' soon' : ''}" data-platform="${c.key}" data-reveal>
+      <div class="dl-head">${tile(c.icon, 'md')}<div><h2>${escapeHtml(c.name)}</h2><span class="dl-for" hidden>${t('Pour votre appareil', 'For your device')}</span></div>
+        ${c.soon ? `<span class="badge soon-badge">${t('Bientôt', 'Soon')}</span>` : ''}</div>
+      <p>${escapeHtml(c.detail)}</p>
+      ${c.soon
+        ? `<a class="btn small" href="${c.doc}">${t('Le construire soi-même', 'Build it yourself')}</a>`
+        : `<a class="btn primary small" href="${escapeHtml(c.href!)}" rel="noopener">${ICONS.arrow}${escapeHtml(c.label!)}</a>`}
+    </li>`;
+
+  const body = `${siteHeader(chrome(ctx), 'download')}
+<main id="contenu">
+  <section class="center" data-reveal>
+    <p class="eyebrow">${t('Télécharger', 'Download')}</p>
+    <h1>${t(`BetterVault, ${highlight('partout', 'yellow')}`, `BetterVault, ${highlight('everywhere', 'yellow')}`)}</h1>
+    <p class="lede" style="margin:0 auto">${t('Le même coffre chiffré dans le navigateur, sur ordinateur et sur téléphone. Tout se synchronise avec ce serveur.', 'The same encrypted vault in the browser, on desktop and on phone. Everything syncs with this server.')}</p>
+  </section>
+
+  ${ctx.appAvailable ? `
+  <section class="pwa" data-reveal>
+    <div class="pwa-card">
+      <span class="safe">${icon('safe', 56)}</span>
+      <div class="pwa-text">
+        <p class="eyebrow">${t('Application web', 'Web app')}</p>
+        <h2>${t('Rien à télécharger : installez-la depuis le navigateur', 'Nothing to download: install it from the browser')}</h2>
+        <p>${t('Elle s’ouvre dans sa propre fenêtre, sans barre d’adresse, fonctionne hors ligne et se met à jour toute seule. Chrome, Edge, Brave, Samsung Internet et Safari savent l’installer.', 'It opens in its own window without an address bar, works offline and updates itself. Chrome, Edge, Brave, Samsung Internet and Safari can install it.')}</p>
+        <div class="actions" style="margin-top:18px">
+          <button type="button" class="btn primary" data-install hidden>${icon('export', 20)}${t('Installer l’application', 'Install the app')}</button>
+          <a class="btn primary" href="/app" data-install-fallback>${t('Ouvrir l’application', 'Open the app')}<span class="go">${ICONS.arrow}</span></a>
+        </div>
+        <p class="note" data-install-help>${t('Sur iPhone et iPad : ouvrez l’application dans Safari, touchez Partager, puis « Sur l’écran d’accueil ». Ailleurs : menu du navigateur, puis « Installer BetterVault ».', 'On iPhone and iPad: open the app in Safari, tap Share, then “Add to Home Screen”. Elsewhere: browser menu, then “Install BetterVault”.')}</p>
+        <p class="note ok-note" data-installed hidden>✓ ${t('Application installée. Vous la retrouverez avec vos autres applications.', 'App installed. You will find it with your other apps.')}</p>
+      </div>
+    </div>
+  </section>` : ''}
+
+  <section>
+    <ul class="dl-grid">${cards.map(card).join('')}</ul>
+  </section>
+
+  <section class="dl-more" data-reveal>
+    <div class="dl-mini">${tile('server', 'sm')}<div><strong>${t('Héberger son serveur', 'Host your own server')}</strong><span class="meta">${t('Image Docker, en quelques minutes', 'Docker image, in a few minutes')}</span></div><a class="btn small" href="/docs/deploiement/installation">${t('Guide', 'Guide')}</a></div>
+    <div class="dl-mini">${tile('files', 'sm')}<div><strong>${t('Code source', 'Source code')}</strong><span class="meta">${t('Libre, sur GitHub', 'Open source, on GitHub')}</span></div><a class="btn small" href="${escapeHtml(links.github)}" rel="noopener">${ICONS.github}GitHub</a></div>
+    <div class="dl-mini">${tile('export', 'sm')}<div><strong>${t('Toutes les versions', 'All releases')}</strong><span class="meta">${t('Notes de version et fichiers', 'Release notes and files')}</span></div><a class="btn small" href="${escapeHtml(links.github.replace(/\/+$/, ''))}/releases" rel="noopener">${t('Versions', 'Releases')}</a></div>
+  </section>
+</main>
+<style>
+.pwa{padding-top:48px}
+.pwa-card{display:grid;grid-template-columns:auto 1fr;gap:28px;align-items:center;padding:30px;border-radius:9px;border:1px solid color-mix(in srgb,var(--accent) 40%,var(--border));
+  background:radial-gradient(600px 240px at 90% 0%,color-mix(in srgb,var(--accent) 22%,transparent),transparent),var(--card)}
+.pwa-card h2{font-size:clamp(22px,2.6vw,28px);margin:0 0 8px}
+.pwa-card p{margin:0;color:var(--muted)}
+.pwa-card .note{font-size:13.5px;margin-top:14px}
+.ok-note{color:#3fb950!important;font-weight:600}
+.dl-grid{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.dl-card{display:flex;flex-direction:column;gap:12px;padding:22px;border-radius:9px;background:var(--card);border:1px solid var(--border);transition:border-color .2s,transform .2s,box-shadow .2s}
+.dl-card:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border));transform:translateY(-3px);box-shadow:0 18px 36px -24px var(--accent)}
+.dl-card.mine{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 20px 40px -26px var(--accent)}
+.dl-card.soon{opacity:.72}
+.dl-card.soon:hover{transform:none}
+.dl-head{display:flex;align-items:center;gap:14px}
+.dl-head>div{flex:1;min-width:0}
+.dl-head h2{font-size:18px;margin:0}
+[hidden]{display:none!important}.dl-for{display:inline-block;margin-top:3px;font-size:12px;font-weight:700;color:var(--accent)}
+.soon-badge{border-color:var(--border);color:var(--muted)}
+.dl-card p{margin:0;color:var(--muted);font-size:14.5px;flex:1}
+.dl-card .btn{align-self:flex-start}
+.dl-card .btn .ph,.dl-card .btn svg{flex:0 0 auto}
+.dl-more{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.dl-mini{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:8px;border:1px solid var(--border);background:var(--card)}
+.dl-mini>div{flex:1;min-width:0}.dl-mini strong{display:block}
+@media (max-width:640px){.pwa-card{grid-template-columns:1fr;padding:22px}.pwa-card .safe{width:84px;height:84px}}
+</style>`;
+  return page(ctx, t('Télécharger · BetterVault', 'Download · BetterVault'), t('Installer BetterVault : web, Windows, Linux, Android.', 'Install BetterVault: web, Windows, Linux, Android.'), body);
 }
 
 /**

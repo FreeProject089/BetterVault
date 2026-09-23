@@ -157,7 +157,7 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
      * Les pages d'accueil, de serveurs, de doc et de documents légaux sont
      * rendues par le serveur ; l'application est un fichier statique.
      */
-    if (pathname === '/' || pathname === '/about' || pathname === '/serveurs' || pathname === '/tarifs' || pathname === '/site.js' || pathname === '/docs' || pathname.startsWith('/docs/')
+    if (pathname === '/' || pathname === '/about' || pathname === '/serveurs' || pathname === '/tarifs' || pathname === '/telecharger' || pathname === '/download' || pathname === '/site.js' || pathname === '/docs' || pathname.startsWith('/docs/')
       || pathname === '/legal' || pathname.startsWith('/legal/')) {
       void api(req, res);
       return;

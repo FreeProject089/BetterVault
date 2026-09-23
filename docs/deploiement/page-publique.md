@@ -77,7 +77,10 @@ La barre du haut et le pied de page montrent toujours **GitHub** (le code source
   "discord": "https://discord.gg/xxxxxxx",
   "github": "https://github.com/FreeProject089/BetterVault",
   "status": "https://status.exemple.org",
-  "community": "https://bettercommunity.ch"
+  "community": "https://bettercommunity.ch",
+  "downloads": {
+    "macos": "https://exemple.org/BetterVault.dmg"
+  }
 }
 ```
 
@@ -87,5 +90,16 @@ La barre du haut et le pied de page montrent toujours **GitHub** (le code source
 | `github` | Remplace le lien du code source |
 | `status` | Page d'état du service, dans le pied de page |
 | `community` | Remplace le lien BetterCommunity |
+| `downloads` | Liens de la page Télécharger, par plateforme : `windows`, `linux`, `android`, `macos`, `ios`, `extension` |
 
 Toutes les clés sont facultatives ; seules les adresses `https://` sont gardées. Le fichier est relu au plus une fois par heure. S'il est injoignable, les pages gardent les derniers liens connus : l'accueil ne dépend jamais d'un serveur tiers pour s'afficher.
+
+## Page Télécharger
+
+`/telecharger` (et `/download`, qui y renvoie) rassemble toutes les façons d'utiliser BetterVault :
+
+- **L'application web**, installable depuis le navigateur. Le bouton **Installer l'application** apparaît quand le navigateur le permet (Chrome, Edge, Brave, Samsung Internet) ; sur iPhone et iPad, la page explique le passage par Safari → Partager → Sur l'écran d'accueil. L'application propose aussi l'installation une fois, par une notification.
+- **Les applications** : Windows, Linux et Android mènent à la dernière version publiée sur GitHub ; macOS, iOS et l'extension de navigateur sont marqués « Bientôt » avec un lien pour les construire soi-même. Une clé de `downloads` remplace le lien d'une plateforme, et rend disponible une plateforme marquée « Bientôt ».
+- **Le code source**, toutes les versions et le guide pour héberger son serveur.
+
+La carte de l'appareil de la personne qui visite est mise en avant en premier.

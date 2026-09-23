@@ -184,6 +184,54 @@ export const SITE_JS = `(() => {
     setInterval(tic, 1000);
   }
 
+  /*
+   * Page des téléchargements : l'application web s'installe par le bouton du
+   * navigateur, que l'on garde pour l'offrir au bon moment. Le service worker
+   * de l'application doit contrôler la page pour que le navigateur la propose.
+   * La plateforme du visiteur est mise en avant, sans rien envoyer nulle part.
+   */
+  const installer = document.querySelector('[data-install]');
+  if (installer) {
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+    const aide = document.querySelector('[data-install-help]');
+    const installe = document.querySelector('[data-installed]');
+    let invite = null;
+    const dejaInstallee = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    if (dejaInstallee && installe) { installe.hidden = false; if (aide) aide.hidden = true; }
+    addEventListener('beforeinstallprompt', e => {
+      e.preventDefault();
+      invite = e;
+      installer.hidden = false;
+      if (aide) aide.hidden = true;
+    });
+    installer.addEventListener('click', async () => {
+      if (!invite) return;
+      invite.prompt();
+      const choix = await invite.userChoice.catch(() => null);
+      invite = null;
+      installer.hidden = true;
+      if (choix && choix.outcome === 'accepted' && installe) installe.hidden = false;
+    });
+    addEventListener('appinstalled', () => {
+      installer.hidden = true;
+      if (aide) aide.hidden = true;
+      if (installe) installe.hidden = false;
+    });
+    const ua = navigator.userAgent;
+    const plateforme = /Android/i.test(ua) ? 'android'
+      : /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ? 'ios'
+      : /Windows/i.test(ua) ? 'windows'
+      : /Mac OS X|Macintosh/i.test(ua) ? 'macos'
+      : /Linux|X11/i.test(ua) ? 'linux' : '';
+    const carte = plateforme && document.querySelector('.dl-card[data-platform="' + plateforme + '"]');
+    if (carte) {
+      carte.classList.add('mine');
+      const marque = carte.querySelector('.dl-for');
+      if (marque) marque.hidden = false;
+      carte.parentElement.prepend(carte);
+    }
+  }
+
   /* Pied de page : un accordéon sur écran étroit, des colonnes ouvertes ailleurs */
   const colonnes = document.querySelectorAll('.site-footer-col');
   const etroit = matchMedia('(max-width: 760px)');

@@ -44,7 +44,7 @@ import { createEmailTemplates, isEmailKind, isEmailLocale } from './emailTemplat
 import { createLanguages, LanguageError } from './languages.ts';
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.ts';
 import { createWebauthn, parseRpId, type AssertionInput } from './webauthn.ts';
-import { DEFAULT_PUBLIC_PAGE, publicDirectory, renderLanding, renderPlansPage, renderServersPage, type PublicPlan } from './directory.ts';
+import { DEFAULT_PUBLIC_PAGE, publicDirectory, renderDownloadsPage, renderLanding, renderPlansPage, renderServersPage, type PublicPlan } from './directory.ts';
 import { renderDocPage } from './docs.ts';
 import { SITE_JS } from './siteScript.ts';
 import { createSiteLinks } from './siteLinks.ts';
@@ -1265,7 +1265,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
    * aucun script, rien d'externe. La politique le dit, de sorte qu'une éventuelle
    * faille d'échappement ne suffirait ni à exécuter du code ni à sortir une donnée.
    */
-  const PAGE_CSP = "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+  const PAGE_CSP = "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
   const htmlReply = (html: string, status = 200): Reply => ({
     status,
     raw: Buffer.from(html),
@@ -1729,6 +1729,12 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       const html = renderPlansPage(ctx);
       return withCookie(html ? htmlReply(html) : htmlReply('<!DOCTYPE html><title>404</title><p>Not found</p>', 404), cookie);
     }),
+    // Où télécharger ou installer BetterVault, plateforme par plateforme
+    route('GET', '/telecharger', async req => {
+      const { ctx, cookie } = await landingContext(req);
+      return withCookie(htmlReply(renderDownloadsPage(ctx)), cookie);
+    }),
+    route('GET', '/download', async () => ({ status: 301, headers: { Location: '/telecharger' } })),
     // Script des pages publiques : du confort (apparitions, démonstrations), jamais indispensable
     route('GET', '/site.js', async () => ({
       status: 200, raw: Buffer.from(SITE_JS), contentType: 'text/javascript; charset=utf-8',

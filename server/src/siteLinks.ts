@@ -12,8 +12,17 @@ import { DEFAULT_LINKS, type SiteLinks } from './siteChrome.ts';
  *     "discord":   "https://discord.gg/xxxxxxx",
  *     "github":    "https://github.com/FreeProject089/BetterVault",
  *     "status":    "https://status.exemple.org",
- *     "community": "https://bettercommunity.ch"
+ *     "community": "https://bettercommunity.ch",
+ *     "downloads": {
+ *       "windows": "https://…/BetterVault-setup.exe",
+ *       "linux": "https://…/BetterVault.AppImage",
+ *       "android": "https://…/BetterVault.apk",
+ *       "macos": "https://…",  "ios": "https://…",  "extension": "https://…"
+ *     }
  *   }
+ *
+ * Sans « downloads », Windows, Linux et Android pointent vers la dernière
+ * version publiée sur GitHub ; macOS, iOS et l'extension sont « bientôt ».
  *
  * Le fichier est relu au plus une fois par heure. S'il est injoignable ou
  * invalide, les pages gardent les derniers liens connus, sinon les liens par
@@ -23,19 +32,35 @@ import { DEFAULT_LINKS, type SiteLinks } from './siteChrome.ts';
 const TTL_MS = 60 * 60 * 1000;
 const MAX_BYTES = 16 * 1024;
 const KEYS = ['discord', 'github', 'status', 'community'] as const;
+const DOWNLOAD_KEYS = ['windows', 'linux', 'android', 'macos', 'ios', 'extension'] as const;
+
+/** Adresse https sans identifiants, sinon rien */
+const safeUrl = (value: unknown): string | null => {
+  if (typeof value !== 'string' || value.length > 300) return null;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'https:' && !url.username && !url.password ? url.href : null;
+  } catch {
+    return null;
+  }
+};
 
 export function parseSiteLinks(raw: unknown): Partial<SiteLinks> {
   if (!raw || typeof raw !== 'object') return {};
   const out: Partial<SiteLinks> = {};
   for (const key of KEYS) {
-    const value = (raw as Record<string, unknown>)[key];
-    if (typeof value !== 'string') continue;
-    try {
-      const url = new URL(value.trim());
-      if (url.protocol === 'https:' && !url.username && !url.password && value.length <= 300) out[key] = url.href;
-    } catch {
-      // adresse illisible : ignorée
+    const url = safeUrl((raw as Record<string, unknown>)[key]);
+    if (url) out[key] = url;
+  }
+  // Liens de téléchargement par plateforme (facultatifs, page /telecharger)
+  const downloads = (raw as Record<string, unknown>).downloads;
+  if (downloads && typeof downloads === 'object') {
+    const found: NonNullable<SiteLinks['downloads']> = {};
+    for (const key of DOWNLOAD_KEYS) {
+      const url = safeUrl((downloads as Record<string, unknown>)[key]);
+      if (url) found[key] = url;
     }
+    if (Object.keys(found).length) out.downloads = found;
   }
   return out;
 }

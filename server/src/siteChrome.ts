@@ -11,7 +11,7 @@
 
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
-export type SiteSection = 'home' | 'plans' | 'servers' | 'docs' | 'legal';
+export type SiteSection = 'home' | 'plans' | 'servers' | 'docs' | 'legal' | 'download';
 
 /** Liens communautaires : GitHub et BetterCommunity toujours, Discord et page d'état s'ils sont connus */
 export interface SiteLinks {
@@ -19,6 +19,8 @@ export interface SiteLinks {
   community: string;
   discord?: string;
   status?: string;
+  /** Téléchargements publiés, par plateforme (page /telecharger) */
+  downloads?: Partial<Record<'windows' | 'linux' | 'android' | 'macos' | 'ios' | 'extension', string>>;
 }
 
 export const DEFAULT_LINKS: SiteLinks = {
@@ -111,6 +113,7 @@ export function siteHeader(ctx: ChromeContext, current: SiteSection): string {
   const nav = `
       <a href="/#fonctions">${t('Fonctionnalités', 'Features')}</a>
       <a href="/#comment">${t('Comment ça marche', 'How it works')}</a>
+      <a href="/telecharger"${cur('download')}>${t('Télécharger', 'Download')}</a>
       ${ctx.plansOn ? `<a href="/tarifs"${cur('plans')}>${t('Tarifs', 'Pricing')}</a>` : ''}
       ${ctx.serversOn ? `<a href="/serveurs"${cur('servers')}>${t('Serveurs', 'Servers')}</a>` : ''}
       <a href="/docs"${cur('docs')}>${t('Documentation', 'Docs')}</a>`;
@@ -158,6 +161,7 @@ export function siteFooter(ctx: ChromeContext): string {
   ${col(t('Produit', 'Product'), `
     <a href="/#fonctions">${t('Fonctionnalités', 'Features')}</a>
     <a href="/#comment">${t('Comment ça marche', 'How it works')}</a>
+    <a href="/telecharger">${t('Télécharger', 'Download')}</a>
     ${ctx.plansOn ? `<a href="/tarifs">${t('Tarifs', 'Pricing')}</a>` : ''}
     ${ctx.serversOn ? `<a href="/serveurs">${t('Serveurs', 'Servers')}</a>` : ''}
     ${ctx.appAvailable ? `<a href="/app">${t('Ouvrir l’application', 'Open the app')}</a>` : ''}`)}
