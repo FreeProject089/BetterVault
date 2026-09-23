@@ -101,7 +101,7 @@ export function openImportExportModal(app: ModalHost, { accountService, sharedVa
 
         <div data-panel="import">
           <div data-step="sources">
-            <p class="modal-text" style="margin-bottom:10px;">${tr('D’où viennent vos identifiants ?', 'Where are your credentials coming from?')}</p>
+            <p class="modal-text" style="margin-bottom:10px;">${tr('D’où viennent vos identifiants ?', 'Where are your credentials coming from?')}${learnMore('guide/import-export', tr)}</p>
             <div class="ie-sources">
               ${sources.map(source => `
                 <button type="button" class="ie-source" data-source="${source.id}">
@@ -612,7 +612,9 @@ export function openImportExportModal(app: ModalHost, { accountService, sharedVa
           keyFileRow.hidden = err.kind !== 'kdbx';
           secretLabel.textContent = err.kind === 'kdbx'
             ? tr('Mot de passe de la base KeePass', 'KeePass database password')
-            : tr('Mot de passe de l’export chiffré', 'Encrypted export password');
+            : err.kind === 'bitwarden-encrypted'
+              ? tr('Mot de passe de l’export Bitwarden', 'Bitwarden export password')
+              : tr('Mot de passe de l’export chiffré', 'Encrypted export password');
           setStatus(secrets ? `<div class="notice notice-danger">${app.escapeHtml(err.message)}</div>` : '');
           secretPwd.focus();
           return;

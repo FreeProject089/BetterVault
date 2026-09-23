@@ -1,4 +1,5 @@
 import { GEN_ICONS } from '../ui/icons';
+import { learnMore } from './docsLink';
 import { bindingFromEvent, checkBinding, DEFAULT_SHORTCUTS, formatBinding, saveShortcuts, SHORTCUT_ORDER, type ShortcutAction } from '../ui/shortcuts';
 import type { AppController } from '../main';
 
@@ -29,7 +30,7 @@ export function openShortcutsModal(app: AppController): void {
       <button class="modal-close">${GEN_ICONS.close}</button>
     </div>
     <div class="modal-body">
-      <p class="modal-text">${tr('Cliquez sur une combinaison puis appuyez sur les touches voulues. Échap annule, Retour arrière retire le raccourci.', 'Click a combination, then press the keys you want. Esc cancels, Backspace removes the shortcut.')}</p>
+      <p class="modal-text">${tr('Cliquez sur une combinaison puis appuyez sur les touches voulues. Échap annule, Retour arrière retire le raccourci.', 'Click a combination, then press the keys you want. Esc cancels, Backspace removes the shortcut.')}${learnMore('guide/raccourcis', tr)}</p>
       <div class="shortcut-list" data-shortcut-list></div>
       <div class="shortcut-row fixed">
         <span>${tr('Fermer la fenêtre ouverte', 'Close the open window')}</span>

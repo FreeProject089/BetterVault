@@ -1,4 +1,5 @@
 import { downloadExportFile } from '../import_export/importEngine';
+import { learnMore, learnMoreHint } from './docsLink';
 import { type AccountSession } from '../account/cloudClient';
 import { openExternal } from '../platform/tauriBridge';
 import { accountErrorMessage, DEFAULT_SERVER_URL } from '../ui/authScreen';
@@ -77,7 +78,7 @@ export function openAccountModal(app: AppController): void {
         </div>` : `
         <section class="account-section">
           <h3 class="account-section-title">${tr('Activer la synchronisation', 'Enable sync')}</h3>
-          <p class="modal-text">${tr('Le coffre est envoyé chiffré. Le mot de passe principal ne quitte jamais cet appareil.', 'The vault is uploaded encrypted. The master password never leaves app device.')}</p>
+          <p class="modal-text">${tr('Le coffre est envoyé chiffré. Le mot de passe principal ne quitte jamais cet appareil.', 'The vault is uploaded encrypted. The master password never leaves app device.')}${learnMore('guide/synchronisation', tr)}</p>
           <div class="form-field">
             <label class="form-label" for="account-server">${tr('Adresse du serveur', 'Server address')}</label>
             <input class="form-input" id="account-server" type="url" value="${app.escapeHtml(DEFAULT_SERVER_URL)}" autocomplete="url" spellcheck="false">
@@ -122,7 +123,7 @@ export function openAccountModal(app: AppController): void {
               <option value="custom" hidden data-theme-custom></option>
             </select>
           </div>
-          <span class="field-hint">${tr('Le bouton clair / sombre de l’en-tête change le jeu de couleurs du thème, sans le quitter.', 'The light / dark button in the header switches the theme’s colour set, without leaving it.')}</span>
+          <span class="field-hint">${tr('Le bouton clair / sombre de l’en-tête change le jeu de couleurs du thème, sans le quitter.', 'The light / dark button in the header switches the theme’s colour set, without leaving it.')}${learnMore('guide/apparence', tr)}</span>
         </div>
         <div class="account-actions">
           <button type="button" class="btn-primary" data-action="theme-import">${THEME_ICONS.upload}<span>${tr('Importer un thème', 'Import a theme')}</span></button>
@@ -137,6 +138,7 @@ export function openAccountModal(app: AppController): void {
       <div data-tab-panel="security" hidden>
       <section class="account-section">
         <h3 class="account-section-title">${tr('Sécurité du compte', 'Account security')}</h3>
+        ${learnMoreHint('guide/securite-compte', tr)}
         ${isCloud ? `
           <div class="switch-row" style="cursor:default;">
             <span>${tr('Double authentification', 'Two-factor authentication')}<small>${tr('Un code de votre application (Aegis, Google Authenticator, 2FAS…) est demandé à chaque connexion', 'A code from your app (Aegis, Google Authenticator, 2FAS…) is required at every sign-in')}</small></span>
@@ -200,6 +202,7 @@ export function openAccountModal(app: AppController): void {
       <div data-tab-panel="plan" hidden>
         ${isCloud ? `<section class="account-section" data-billing-section>
           <h3 class="account-section-title">${tr('Espace de stockage', 'Storage')}</h3>
+          ${learnMoreHint('guide/synchronisation', tr)}
           <div data-usage></div>
           <div data-plans></div>
         </section>` : ''}

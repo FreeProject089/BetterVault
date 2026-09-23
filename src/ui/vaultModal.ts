@@ -1,4 +1,5 @@
 import { ACTION_ICONS, VAULT_ICON } from './icons';
+import { learnMore } from './docsLink';
 import { memberAvatarHtml } from './memberChip';
 import { vaultStore } from '../store/vaultStore';
 import { renderItemIcon, type ItemIcon } from '../icons/iconLibrary';
@@ -90,7 +91,7 @@ export function openVaultModal(app: AppController, vaultId?: string): void {
         ${existing && !shared && cloud ? `
           <section class="account-section">
             <h3 class="account-section-title">${tr('Partager ce coffre', 'Share app vault')}</h3>
-            <p class="modal-text">${tr(`Ses ${credentialCount} identifiant(s) et ${taskCount} tâche(s) deviennent un coffre partagé, chiffré avec une nouvelle clé. Vous en êtes propriétaire.`, `Its ${credentialCount} credential(s) and ${taskCount} task(s) become a shared vault encrypted with a new key. You own it.`)}</p>
+            <p class="modal-text">${tr(`Ses ${credentialCount} identifiant(s) et ${taskCount} tâche(s) deviennent un coffre partagé, chiffré avec une nouvelle clé. Vous en êtes propriétaire.`, `Its ${credentialCount} credential(s) and ${taskCount} task(s) become a shared vault encrypted with a new key. You own it.`)}${learnMore('guide/partage', tr)}</p>
             <div class="account-actions account-actions-end">
               <button class="btn-primary" data-action="share-existing" ${personalCount <= 1 ? 'disabled' : ''}>${tr('Transformer en coffre partagé', 'Turn into a shared vault')}</button>
             </div>

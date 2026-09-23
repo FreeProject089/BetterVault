@@ -1,4 +1,5 @@
 import { i18n } from '../i18n';
+import { learnMore } from './docsLink';
 import { vaultStore } from '../store/vaultStore';
 import { extractDomain } from '../icons/serviceIcons';
 import { type ItemIcon } from '../icons/iconLibrary';
@@ -274,7 +275,7 @@ export function openCreateCredentialModal(app: AppController, existingCredId?: s
             <span class="field-hint">${accountService.isCloud()
               ? tr('Chiffrés sur cet appareil, puis envoyés à votre serveur.', 'Encrypted on app device, then uploaded to your server.')
               : tr(`Chiffrés et gardés dans le coffre, sur cet appareil. ${formatLimit(MAX_LOCAL_ATTACHMENT_BYTES, 'fr')} par fichier ; la synchronisation lève cette limite.`,
-                   `Encrypted and kept inside the vault, on app device. ${formatLimit(MAX_LOCAL_ATTACHMENT_BYTES, 'en')} per file; syncing lifts that limit.`)}</span>
+                   `Encrypted and kept inside the vault, on app device. ${formatLimit(MAX_LOCAL_ATTACHMENT_BYTES, 'en')} per file; syncing lifts that limit.`)}${learnMore('guide/pieces-jointes', tr)}</span>
           </div>
         </section>
 

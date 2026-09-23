@@ -4860,3 +4860,6 @@ a.workspace-home-link:focus-visible { outline: 2px solid var(--accent); outline-
 .shortcut-btn:not(:disabled):active { transform: scale(0.97); filter: brightness(0.92); }
 .shortcut-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .shortcut-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Lien « En savoir plus » seul sous un titre de section */
+.doc-hint { margin: -4px 0 10px; }

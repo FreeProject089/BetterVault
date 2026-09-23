@@ -32,3 +32,9 @@ export function learnMore(page: string, tr: (fr: string, en: string) => string):
     ? ` <a class="doc-link" href="${url}" target="_blank" rel="noopener noreferrer">${tr('En savoir plus', 'Learn more')}</a>`
     : '';
 }
+
+/** Même lien, seul sur sa ligne sous un titre de section ; rien s'il n'y a pas de documentation */
+export function learnMoreHint(page: string, tr: (fr: string, en: string) => string): string {
+  const lien = learnMore(page, tr);
+  return lien ? `<p class="field-hint doc-hint">${lien.trim()}</p>` : '';
+}
