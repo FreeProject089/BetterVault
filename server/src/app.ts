@@ -1137,7 +1137,8 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     const { locale, cookie } = pageLocale(req);
     const html = renderLegalPage(legalDir, slug, legalContext(), locale, { ...(await siteChrome(req)), locale });
     if (!html) throw new HttpError(404, 'not_found', 'Document inconnu');
-    return withCookie({ status: 200, raw: Buffer.from(html), contentType: 'text/html; charset=utf-8' }, cookie);
+    // Même politique que les autres pages : le texte vient en partie des réglages de l'hébergeur
+    return withCookie(htmlReply(html), cookie);
   };
 
   /*

@@ -203,6 +203,7 @@ export async function createMissingStripePrices(plans: BillingPlan[], stripe: St
           ...(plan.description ? { description: plan.description } : {}),
           'metadata[bettervault_plan]': plan.id
         });
+        if (!/^prod_[A-Za-z0-9]+$/.test(String(product?.id))) throw new HttpError(502, 'stripe_error', 'Stripe : identifiant de produit inattendu');
         productId = product.id;
       }
       const made = await stripe<{ id: string }>('POST', 'prices', {
@@ -213,6 +214,7 @@ export async function createMissingStripePrices(plans: BillingPlan[], stripe: St
         'metadata[bettervault_plan]': plan.id,
         'metadata[bettervault_price]': price.id
       });
+      if (!/^price_[A-Za-z0-9]+$/.test(String(made?.id))) throw new HttpError(502, 'stripe_error', 'Stripe : identifiant de prix inattendu');
       prices.push({ ...price, stripePriceId: made.id, mode: price.interval === 'once' ? 'payment' : 'subscription' });
       created++;
     }
@@ -294,6 +296,17 @@ export function verifyStripeSignature(payload: Buffer, header: string, secret: s
   });
 }
 
+/**
+ * Le message d'erreur de Stripe est relayé à l'administrateur (et peut finir
+ * dans un journal ou une capture d'écran) : aucune clé ne doit y figurer, même
+ * si Stripe la recopiait un jour en clair.
+ */
+export function redactStripeSecrets(message: string, key: string): string {
+  let out = key ? message.split(key).join('[clé masquée]') : message;
+  out = out.replace(/\b(?:sk|rk|whsec)_[A-Za-z0-9_*]{6,}/g, '[clé masquée]');
+  return out;
+}
+
 export function stripeClient(ctx: Pick<RouteContext, 'settings'>, fetchImpl: typeof fetch): StripeCall {
   const billing = () => ctx.settings().billing;
   return async <T>(method: 'GET' | 'POST', path: string, form?: Record<string, string>): Promise<T> => {
@@ -304,13 +317,14 @@ export function stripeClient(ctx: Pick<RouteContext, 'settings'>, fetchImpl: typ
       response = await fetchImpl(`https://api.stripe.com/v1/${path}`, {
         method,
         headers: { Authorization: `Bearer ${key}`, ...(form ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) },
-        body: form ? new URLSearchParams(form).toString() : undefined
+        body: form ? new URLSearchParams(form).toString() : undefined,
+        signal: AbortSignal.timeout(20_000)
       });
     } catch {
       throw new HttpError(502, 'stripe_unreachable', 'Stripe injoignable');
     }
     const json = await response.json().catch(() => null) as T & { error?: { message?: string } } | null;
-    if (!response.ok || !json) throw new HttpError(502, 'stripe_error', `Stripe : ${json?.error?.message ?? `HTTP ${response.status}`}`);
+    if (!response.ok || !json) throw new HttpError(502, 'stripe_error', `Stripe : ${redactStripeSecrets(String(json?.error?.message ?? `HTTP ${response.status}`), key).slice(0, 300)}`);
     return json;
   };
 }

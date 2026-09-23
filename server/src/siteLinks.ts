@@ -40,6 +40,31 @@ export function parseSiteLinks(raw: unknown): Partial<SiteLinks> {
   return out;
 }
 
+/**
+ * Lit le corps sans jamais en garder plus que `max` octets : l'hôte du fichier
+ * est un tiers, un corps géant (ou sans fin) ne doit pas remplir la mémoire.
+ */
+async function readCapped(response: Response, max: number): Promise<string> {
+  const declared = Number(response.headers.get('content-length') ?? '');
+  if (Number.isFinite(declared) && declared > max) throw new Error('trop grand');
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > max) throw new Error('trop grand');
+      chunks.push(value);
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 export function createSiteLinks(options: { url: () => string; fetchImpl?: typeof fetch; now?: () => number }) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? Date.now;
@@ -50,8 +75,7 @@ export function createSiteLinks(options: { url: () => string; fetchImpl?: typeof
     try {
       const response = await fetchImpl(url, { signal: AbortSignal.timeout(4000), redirect: 'error', headers: { Accept: 'application/json' } });
       if (!response.ok) throw new Error(String(response.status));
-      const text = await response.text();
-      if (text.length > MAX_BYTES) throw new Error('trop grand');
+      const text = await readCapped(response, MAX_BYTES);
       cache = { url, at: now(), links: parseSiteLinks(JSON.parse(text)) };
     } catch {
       // Injoignable : on garde l'ancien contenu, et on réessaiera plus tard

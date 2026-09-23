@@ -145,6 +145,8 @@ const EXACT: Record<string, string> = {
   'Coffre partagé introuvable': 'Shared vault not found',
   'Configurez d’abord le serveur SMTP': 'Configure the SMTP server first',
   'Stripe injoignable': 'Stripe unreachable',
+  'Stripe : identifiant de produit inattendu': 'Stripe: unexpected product identifier',
+  'Stripe : identifiant de prix inattendu': 'Stripe: unexpected price identifier',
   'La double authentification est déjà activée': 'Two-factor authentication is already on',
   'Code incorrect ou déjà utilisé': 'Incorrect or already used code',
   'Manifeste illisible': 'Unreadable manifest',
