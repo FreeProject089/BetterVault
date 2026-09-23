@@ -470,3 +470,31 @@ code.fp.big { font-size: 18px; }
   .language-form { grid-template-columns: minmax(0, 1fr); }
   .language-row { flex-wrap: wrap; }
 }
+
+/* ── Graphiques du tableau de bord ─────────────────────────────────────── */
+.chart-block { margin: 0; }
+.chart-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+.chart-legend { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; color: var(--muted); }
+.swatch-error { width: 10px; height: 10px; border-radius: 2px; background: var(--danger); display: inline-block; }
+.chart-plot { position: relative; }
+.chart-max { position: absolute; top: -2px; left: 0; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.chart { height: 120px; padding-top: 14px; box-sizing: border-box; overflow: visible; }
+.chart-base { stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.bar-fill { fill: var(--accent); }
+.bar-error { fill: var(--danger); }
+.bar-hit { fill: transparent; }
+.bar:hover .bar-fill { fill: color-mix(in srgb, var(--accent) 75%, var(--text)); }
+.chart-axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 6px; font-variant-numeric: tabular-nums; }
+.chart-empty { font-size: 13px; color: var(--muted); padding: 24px 0; text-align: center; border: 1px dashed var(--border); border-radius: 10px; }
+.chart-tip {
+  position: absolute; z-index: 50; pointer-events: none;
+  padding: 6px 10px; border-radius: 8px; font-size: 12px; white-space: nowrap;
+  background: var(--text); color: var(--card);
+  box-shadow: 0 4px 14px rgba(0,0,0,.25);
+}
+.meter-row { display: flex; align-items: center; gap: 10px; }
+.meter-row .meter { flex: 1 1 auto; margin: 0; }
+.meter-value { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.meter.good span { background: var(--ok); }
+.meter.warning span { background: #d29922; }
+.meter.critical span { background: var(--danger); }

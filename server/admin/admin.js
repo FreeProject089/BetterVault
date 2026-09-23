@@ -604,20 +604,92 @@ const duration = seconds => {
   return d ? `${d} j ${h} h` : h ? `${h} h ${m} min` : `${m} min`;
 };
 
-/** Histogramme SVG simple, sans bibliothèque */
-function bars(values, { height = 64, labels = [], color = 'var(--accent)', errors = [] } = {}) {
+/**
+ * Histogramme en barres, sans bibliothèque.
+ *
+ * Un résumé chiffré en tête (total et pic) : c'est ce qu'on vient lire.
+ * Barres fines, arrondies du côté des données, posées sur la ligne de base,
+ * séparées par un vide. Une info-bulle au survol donne la valeur exacte ;
+ * seules trois dates sont écrites sous l'axe, pas trente. Les erreurs,
+ * s'il y en a, sont une deuxième série avec sa légende.
+ */
+function bars(values, { labels = [], errors = [], unit = '', errorLabel = '' } = {}) {
+  const total = values.reduce((a, b) => a + b, 0);
+  if (!values.length || total === 0) {
+    return `<p class="chart-empty">${fr ? 'Rien sur la période.' : 'Nothing in this period.'}</p>`;
+  }
+  const W = 600;
+  const H = 120;
   const max = Math.max(1, ...values);
-  const width = 100 / values.length;
-  return `<svg class="chart" viewBox="0 0 100 ${height}" preserveAspectRatio="none" role="img">
-    ${values.map((v, i) => {
-      const h = (v / max) * (height - 2);
-      const e = errors[i] ? (errors[i] / max) * (height - 2) : 0;
-      return `<rect x="${i * width + width * 0.12}" y="${height - h}" width="${width * 0.76}" height="${h}" fill="${color}" rx="0.4"><title>${escapeHtml(labels[i] ?? '')} : ${v}</title></rect>${e ? `<rect x="${i * width + width * 0.12}" y="${height - e}" width="${width * 0.76}" height="${e}" fill="var(--danger)"/>` : ''}`;
-    }).join('')}
-  </svg>`;
+  const pic = values.indexOf(max);
+  const step = W / values.length;
+  const gap = Math.min(2, step * 0.2);
+  const w = Math.max(1, step - gap);
+  const r = Math.min(4, w / 2);
+  const totalErreurs = errors.reduce((a, b) => a + (b || 0), 0);
+  // Barre arrondie en haut seulement : le bas reste posé sur la ligne de base
+  const barre = (x, h) => h <= r
+    ? `M${x},${H} v${-h} h${w} v${h} z`
+    : `M${x},${H} v${-(h - r)} q0,${-r} ${r},${-r} h${w - 2 * r} q${r},0 ${r},${r} v${h - r} z`;
+  const marks = values.map((v, i) => {
+    const h = (v / max) * (H - 4);
+    const e = errors[i] ? Math.min(h, (errors[i] / max) * (H - 4)) : 0;
+    const x = i * step + gap / 2;
+    const texte = `${labels[i] ?? ''} · ${v.toLocaleString(locale)}${unit}${errors[i] ? ` · ${errors[i]} ${errorLabel}` : ''}`;
+    return `<g class="bar" data-tip="${escapeHtml(texte)}">
+      <rect class="bar-hit" x="${i * step}" y="0" width="${step}" height="${H}"/>
+      ${h > 0 ? `<path class="bar-fill" d="${barre(x, h)}"/>` : ''}
+      ${e > 0 ? `<rect class="bar-error" x="${x}" y="${H - e}" width="${w}" height="${e}"/>` : ''}
+    </g>`;
+  }).join('');
+  const resume = `${fr ? 'Total' : 'Total'} ${total.toLocaleString(locale)}${unit} · ${fr ? 'pic' : 'peak'} ${max.toLocaleString(locale)}${unit}${labels[pic] ? ` (${escapeHtml(labels[pic])})` : ''}`;
+  const aria = `${resume}${totalErreurs ? ` · ${totalErreurs} ${errorLabel}` : ''}`;
+  const milieu = Math.floor((values.length - 1) / 2);
+  return `<figure class="chart-block">
+    <figcaption class="chart-summary">${resume}${totalErreurs ? ` <span class="chart-legend"><i class="swatch-error"></i>${totalErreurs.toLocaleString(locale)} ${escapeHtml(errorLabel)}</span>` : ''}</figcaption>
+    <div class="chart-plot">
+      <span class="chart-max">${max.toLocaleString(locale)}</span>
+      <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(aria)}">
+        <line class="chart-base" x1="0" y1="${H - 0.5}" x2="${W}" y2="${H - 0.5}"/>
+        ${marks}
+      </svg>
+    </div>
+    <div class="chart-axis"><span>${escapeHtml(labels[0] ?? '')}</span><span>${escapeHtml(labels[milieu] ?? '')}</span><span>${escapeHtml(labels.at(-1) ?? '')}</span></div>
+  </figure>`;
 }
 
-const meter = (used, total) => `<div class="meter"><span style="width:${total ? Math.min(100, (used / total) * 100).toFixed(1) : 0}%"></span></div>`;
+/* Info-bulle partagée par tous les graphiques : suit la barre survolée */
+(() => {
+  const tip = document.createElement('div');
+  tip.className = 'chart-tip';
+  tip.hidden = true;
+  document.body.append(tip);
+  const show = target => {
+    const bar = target?.closest?.('.bar');
+    if (!bar) { tip.hidden = true; return; }
+    tip.textContent = bar.dataset.tip;
+    tip.hidden = false;
+    const box = bar.getBoundingClientRect();
+    const tw = tip.offsetWidth;
+    tip.style.left = `${Math.max(8, Math.min(box.left + box.width / 2 - tw / 2, innerWidth - tw - 8))}px`;
+    tip.style.top = `${box.top + scrollY - tip.offsetHeight - 8}px`;
+  };
+  document.addEventListener('pointerover', e => show(e.target));
+  document.addEventListener('pointerleave', () => { tip.hidden = true; }, true);
+})();
+
+/** Jauge : la couleur passe à l'avertissement puis à l'alerte, le pourcentage est écrit */
+const meter = (used, total) => {
+  const pct = total ? Math.min(100, (used / total) * 100) : 0;
+  const etat = pct >= 90 ? 'critical' : pct >= 75 ? 'warning' : 'good';
+  return `<div class="meter-row"><div class="meter ${etat}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct.toFixed(0)}"><span style="width:${pct.toFixed(1)}%"></span></div><span class="meter-value">${pct.toFixed(0)} %</span></div>`;
+};
+/** Jauge où plus est mieux (comptes protégés) : pas de couleur d'alerte, juste la part */
+const meterGood = (part, total) => {
+  const pct = total ? Math.min(100, (part / total) * 100) : 0;
+  return `<div class="meter-row"><div class="meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct.toFixed(0)}"><span style="width:${pct.toFixed(1)}%"></span></div><span class="meter-value">${part.toLocaleString(locale)} / ${total.toLocaleString(locale)}</span></div>`;
+};
+
 const kv = rows => `<dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`;
 
 async function loadOverview() {
@@ -648,7 +720,10 @@ async function loadOverview() {
     [fr ? 'Avec clé de secours' : 'With recovery key', `${pct(a.users.withRecoveryKey, a.users.total)} %`],
     [fr ? 'Coffres partagés' : 'Shared vaults', a.storage.sharedVaults],
     [fr ? 'Abonnements actifs' : 'Active subscriptions', a.billing.activeSubscriptions]
-  ]) + `<p class="chart-title">${fr ? 'Inscriptions, 30 derniers jours' : 'Sign-ups, last 30 days'}</p>${bars(a.users.signupsPerDay, { labels: days })}`;
+  ]) + `<p class="chart-title">${fr ? 'Inscriptions, 30 derniers jours' : 'Sign-ups, last 30 days'}</p>${bars(a.users.signupsPerDay, { labels: days })}`
+    + `<p class="chart-title">${fr ? 'Protection des comptes' : 'Account protection'}</p>`
+    + `<p class="hint">${fr ? 'Double authentification' : 'Two-factor authentication'}</p>${meterGood(a.users.withTwoFactor, a.users.total)}`
+    + `<p class="hint">${fr ? 'Clé de secours' : 'Recovery key'}</p>${meterGood(a.users.withRecoveryKey, a.users.total)}`;
 
   const disk = a.storage.disk;
   $('storage').innerHTML = kv([
@@ -673,7 +748,7 @@ async function loadOverview() {
         ])}
         <div>
           <p class="chart-title">${fr ? 'Requêtes par minute, dernière heure' : 'Requests per minute, last hour'}</p>
-          ${bars(s.requests.lastHour.map(b => b.count), { labels: minutes, errors: s.requests.lastHour.map(b => b.errors) })}
+          ${bars(s.requests.lastHour.map(b => b.count), { labels: minutes, errors: s.requests.lastHour.map(b => b.errors), errorLabel: fr ? 'erreurs' : 'errors' })}
           <div class="table-wrap"><table class="audit compact"><thead><tr><th>Route</th><th>${fr ? 'Appels' : 'Calls'}</th><th>${fr ? 'Moyenne' : 'Average'}</th></tr></thead>
           <tbody>${s.requests.topRoutes.map(r => `<tr><td><code>${escapeHtml(r.route)}</code></td><td>${r.count}</td><td>${r.avgMs} ms</td></tr>`).join('')}</tbody></table></div>
         </div>
@@ -1776,13 +1851,16 @@ async function refreshEmailPreview(draft) {
   if (!frame) return;
   try {
     const preview = await api('POST', 'emails/preview', { id: emailSelected, locale: emailLocale, ...(draft ? { draft } : {}) });
+    // L'onglet a pu changer pendant la requête : on n'écrit que dans l'aperçu encore affiché
+    if (!frame.isConnected) return;
     // Le sujet et le texte d'abord : s'ils dépendaient du rendu du cadre, un
     // HTML que le navigateur refuse effacerait aussi ce qu'on sait déjà afficher.
     $('email-preview-subject').textContent = preview.subject;
     $('email-preview-text').textContent = preview.text;
     frame.srcdoc = preview.html;
   } catch (err) {
-    $('email-preview-subject').textContent = err.message;
+    const sujet = $('email-preview-subject');
+    if (sujet) sujet.textContent = err.message;
   }
 }
 

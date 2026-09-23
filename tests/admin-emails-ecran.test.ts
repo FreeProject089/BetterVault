@@ -138,6 +138,26 @@ describe('Administration : onglet Emails', () => {
     expect(liste.languages).toEqual([]);
   });
 
+  it('dessine les graphiques du tableau de bord avec un résumé lisible', async () => {
+    (document.querySelector('[data-tab="overview"]') as unknown as { click(): void }).click();
+    await until(() => !!document.querySelector('#activity .meter-value')).catch(() => {
+      throw new Error(`tableau de bord non rendu : ${document.getElementById('stats')?.textContent}`);
+    });
+    // Aucune inscription dans une base neuve : un état vide explicite, pas un cadre blanc
+    expect(document.querySelector('#activity .chart-empty')).not.toBeNull();
+    // Les requêtes du test lui-même alimentent le graphique de performances
+    const bloc = document.querySelector('#performance .chart-block');
+    if (bloc) {
+      expect(bloc.querySelector('.chart-summary')!.textContent).toMatch(/Total \d+/);
+      expect(bloc.querySelector('svg')!.getAttribute('aria-label')).toMatch(/Total/);
+      expect(bloc.querySelectorAll('.bar').length).toBeGreaterThan(0);
+      // Trois dates sous l'axe, pas une par barre
+      expect(bloc.querySelectorAll('.chart-axis span').length).toBe(3);
+    }
+    // Les parts de comptes protégés sont écrites, pas seulement dessinées
+    expect(document.querySelectorAll('#activity .meter-value').length).toBe(2);
+  });
+
   it('change la langue d’envoi par défaut', async () => {
     await ouvrir();
     (document.querySelector('[data-default-locale="fr"]') as unknown as { click(): void }).click();
