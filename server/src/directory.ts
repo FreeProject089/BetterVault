@@ -8,6 +8,7 @@
  */
 
 import { SITE_JS_TAG } from './siteScript.ts';
+import type { ReleaseInfo } from './releases.ts';
 import { ART_CSS, artAccount, artCipher, artDevices, artUnlock, circled, faqList, heroArt, highlight, icon, snakeSteps, tile, underline, vaultFeatures, type IconName } from './landingArt.ts';
 import { CHROME_CSS, DEFAULT_LINKS, ICONS, pageLangCode, siteFooter, siteHeader, translator, type ChromeContext, type PageLang, type SiteLinks } from './siteChrome.ts';
 
@@ -111,6 +112,8 @@ export interface LandingContext {
   officialServers?: Array<{ name: string; region: string; zone: string; online: boolean }>;
   /** Offres payantes publiées, pour la page des tarifs */
   plans?: PublicPlan[];
+  /** Dernière version publiée (page Télécharger) : null s'il n'y en a pas, absente si inconnue */
+  release?: ReleaseInfo | null;
   /** Limites du compte gratuit, pour la page des tarifs */
   freeLimits?: { maxVaults: number; maxCredentialsPerVault: number; attachmentQuotaBytes: number };
 }
@@ -538,26 +541,49 @@ export function renderDownloadsPage(ctx: LandingContext): string {
   const links = ctx.links ?? DEFAULT_LINKS;
   const releases = `${links.github.replace(/\/+$/, '')}/releases/latest`;
   const dl = links.downloads ?? {};
-  type Card = { key: string; icon: IconName; name: string; detail: string; href?: string; label?: string; soon?: boolean; doc?: string };
+  const rel = ctx.release;
+  type Key = 'windows' | 'linux' | 'android' | 'macos' | 'ios' | 'extension';
+  type Card = { key: Key; icon: IconName; name: string; detail: string; label: string; doc: string };
   const cards: Card[] = [
-    { key: 'windows', icon: 'monitor', name: 'Windows', detail: t('Windows 10 et 11 · installeur .exe ou .msi · déverrouillage par Windows Hello', 'Windows 10 and 11 · .exe or .msi installer · unlock with Windows Hello'), href: dl.windows ?? releases, label: t('Télécharger pour Windows', 'Download for Windows') },
-    { key: 'linux', icon: 'monitor', name: 'Linux', detail: t('AppImage ou paquet .deb · trousseau de la session', 'AppImage or .deb package · session keyring'), href: dl.linux ?? releases, label: t('Télécharger pour Linux', 'Download for Linux') },
-    { key: 'android', icon: 'phone', name: 'Android', detail: t('APK · empreinte ou visage · remplissage automatique', 'APK · fingerprint or face · autofill'), href: dl.android ?? releases, label: t('Télécharger l’APK', 'Download the APK') },
-    { key: 'macos', icon: 'monitor', name: 'macOS', detail: t('Touch ID et trousseau macOS', 'Touch ID and macOS keychain'), href: dl.macos, label: t('Télécharger pour macOS', 'Download for macOS'), soon: !dl.macos, doc: '/docs/applications/apple' },
-    { key: 'ios', icon: 'phone', name: 'iOS · iPadOS', detail: t('Face ID et remplissage des mots de passe', 'Face ID and password autofill'), href: dl.ios, label: t('Télécharger pour iOS', 'Get it for iOS'), soon: !dl.ios, doc: '/docs/applications/apple' },
-    { key: 'extension', icon: 'globe', name: t('Extension de navigateur', 'Browser extension'), detail: t('Chrome, Edge, Firefox · remplissage des formulaires', 'Chrome, Edge, Firefox · form filling'), href: dl.extension, label: t('Ajouter au navigateur', 'Add to browser'), soon: !dl.extension, doc: '/docs/guide/extension' }
+    { key: 'windows', icon: 'monitor', name: 'Windows', detail: t('Windows 10 et 11 · déverrouillage par Windows Hello', 'Windows 10 and 11 · unlock with Windows Hello'), label: t('Télécharger pour Windows', 'Download for Windows'), doc: '/docs/applications/bureau-mobile' },
+    { key: 'linux', icon: 'monitor', name: 'Linux', detail: t('AppImage, paquet .deb ou .rpm · trousseau de la session', 'AppImage, .deb or .rpm package · session keyring'), label: t('Télécharger pour Linux', 'Download for Linux'), doc: '/docs/applications/bureau-mobile' },
+    { key: 'android', icon: 'phone', name: 'Android', detail: t('APK · empreinte ou visage · remplissage automatique', 'APK · fingerprint or face · autofill'), label: t('Télécharger l’APK', 'Download the APK'), doc: '/docs/applications/bureau-mobile' },
+    { key: 'macos', icon: 'monitor', name: 'macOS', detail: t('Touch ID et trousseau macOS', 'Touch ID and macOS keychain'), label: t('Télécharger pour macOS', 'Download for macOS'), doc: '/docs/applications/apple' },
+    { key: 'ios', icon: 'phone', name: 'iOS · iPadOS', detail: t('Face ID et remplissage des mots de passe', 'Face ID and password autofill'), label: t('Télécharger pour iOS', 'Get it for iOS'), doc: '/docs/applications/apple' },
+    { key: 'extension', icon: 'globe', name: t('Extension de navigateur', 'Browser extension'), detail: t('Chrome, Edge, Firefox · remplissage des formulaires', 'Chrome, Edge, Firefox · form filling'), label: t('Ajouter au navigateur', 'Add to browser'), doc: '/docs/guide/extension' }
   ];
+  const mo = (bytes: number) => bytes > 0 && bytes < 1024 ** 2 ? `${Math.max(1, Math.round(bytes / 1024))} ${t('Ko', 'KB')}` : bytes >= 1024 ** 2 ? `${(bytes / 1024 ** 2).toFixed(bytes >= 10 * 1024 ** 2 ? 0 : 1).replace('.', ctx.locale === 'fr' ? ',' : '.')} ${t('Mo', 'MB')}` : '';
+  // Format lisible d'un fichier : « .deb », « Intel · .dmg »
+  const format = (name: string, note?: string) => [note, `.${name.split('.').pop()}`].filter(Boolean).join(' · ');
 
-  const card = (c: Card) => `
-    <li class="dl-card${c.soon ? ' soon' : ''}" data-platform="${c.key}" data-reveal>
+  /*
+   * Lien de chaque plateforme : celui de l'hébergeur d'abord, puis le fichier
+   * de la dernière version publiée. Sans nouvelles de GitHub, Windows, Linux et
+   * Android renvoient à la page des versions, comme avant.
+   */
+  const target = (k: Key) => {
+    if (dl[k]) return { href: dl[k]! };
+    const file = rel?.files[k];
+    if (file) return { href: file.url, file };
+    if (rel === undefined && (k === 'windows' || k === 'linux' || k === 'android')) return { href: releases };
+    return null;
+  };
+
+  const card = (c: Card) => {
+    const to = target(c.key);
+    const file = to?.file;
+    const meta = file ? [rel!.version, mo(file.size), file.note].filter(Boolean).join(' · ') : '';
+    const others = file ? rel!.others[c.key] ?? [] : [];
+    return `
+    <li class="dl-card${to ? '' : ' soon'}" data-platform="${c.key}" data-reveal>
       <div class="dl-head">${tile(c.icon, 'md')}<div><h2>${escapeHtml(c.name)}</h2><span class="dl-for" hidden>${t('Pour votre appareil', 'For your device')}</span></div>
-        ${c.soon ? `<span class="badge soon-badge">${t('Bientôt', 'Soon')}</span>` : ''}</div>
+        ${to ? '' : `<span class="badge soon-badge">${t('Bientôt', 'Soon')}</span>`}</div>
       <p>${escapeHtml(c.detail)}</p>
-      ${c.soon
-        ? `<a class="btn small" href="${c.doc}">${t('Le construire soi-même', 'Build it yourself')}</a>`
-        : `<a class="btn primary small" href="${escapeHtml(c.href!)}" rel="noopener">${ICONS.arrow}${escapeHtml(c.label!)}</a>`}
+      ${to
+        ? `<div class="dl-go"><a class="btn primary small" href="${escapeHtml(to.href)}" rel="noopener">${ICONS.arrow}${escapeHtml(c.label)}</a>${meta || others.length ? `<span class="dl-meta">${escapeHtml(meta)}${others.length ? `${meta ? ' · ' : ''}${t('Aussi', 'Also')} : ${others.map(f => `<a href="${escapeHtml(f.url)}" rel="noopener">${escapeHtml(format(f.name, f.note))}</a>`).join(', ')}` : ''}</span>` : ''}</div>`
+        : `<a class="btn small" href="${c.doc}">${t('Le construire soi-même', 'Build it yourself')}</a>`}
     </li>`;
-
+  };
   const body = `${siteHeader(chrome(ctx), 'download')}
 <main id="contenu">
   <section class="center" data-reveal>
@@ -615,6 +641,8 @@ export function renderDownloadsPage(ctx: LandingContext): string {
 .soon-badge{border-color:var(--border);color:var(--muted)}
 .dl-card p{margin:0;color:var(--muted);font-size:14.5px;flex:1}
 .dl-card .btn{align-self:flex-start}
+.dl-go{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.dl-meta{font-size:12.5px;color:var(--muted)}.dl-meta a{white-space:nowrap;color:var(--text);text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:3px}.dl-meta a:hover{color:var(--accent)}
 .dl-card .btn .ph,.dl-card .btn svg{flex:0 0 auto}
 .dl-more{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
 .dl-mini{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:8px;border:1px solid var(--border);background:var(--card)}

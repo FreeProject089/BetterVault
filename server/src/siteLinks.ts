@@ -69,7 +69,7 @@ export function parseSiteLinks(raw: unknown): Partial<SiteLinks> {
  * Lit le corps sans jamais en garder plus que `max` octets : l'hôte du fichier
  * est un tiers, un corps géant (ou sans fin) ne doit pas remplir la mémoire.
  */
-async function readCapped(response: Response, max: number): Promise<string> {
+export async function readCapped(response: Response, max: number): Promise<string> {
   const declared = Number(response.headers.get('content-length') ?? '');
   if (Number.isFinite(declared) && declared > max) throw new Error('trop grand');
   if (!response.body) return '';

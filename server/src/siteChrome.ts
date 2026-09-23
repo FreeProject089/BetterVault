@@ -196,7 +196,8 @@ export const CHROME_CSS = `
 .site-brand picture{display:flex}.site-brand img{display:block}
 .site-bar .site-brand{margin-right:20px;padding:6px 8px 6px 4px;border-radius:8px;transition:background-color .15s}
 .site-bar .site-brand:hover{background:color-mix(in srgb,var(--muted) 10%,transparent)}
-.site-links{display:flex;align-items:center;gap:2px;margin-right:auto}
+.site-links{display:flex;align-items:center;gap:2px;margin-right:auto;min-width:0}
+.site-links a,.site-login,.site-cta{white-space:nowrap}
 .site-links a{position:relative;display:inline-flex;align-items:center;min-height:38px;padding:0 12px;border-radius:8px;color:var(--muted);text-decoration:none;font-size:14px;font-weight:550;transition:color .15s,background-color .15s}
 .site-links a:hover{color:var(--text);background:color-mix(in srgb,var(--muted) 10%,transparent)}
 .site-links a[aria-current]{color:var(--text)}
@@ -235,7 +236,8 @@ export const CHROME_CSS = `
 .site-menu nav a{display:flex;align-items:center;gap:10px;min-height:44px;padding:0 12px;border-radius:6px;color:var(--text);text-decoration:none;font-size:15px}
 .site-menu nav a:hover{background:color-mix(in srgb,var(--muted) 10%,transparent)}
 @keyframes drop{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
-@media (max-width:960px){.site-links{display:none}.site-bar .site-brand{margin-right:auto}.site-menu{display:block}}
+@media (max-width:1140px){.site-links a[href="/#comment"]{display:none}}
+@media (max-width:1000px){.site-links{display:none}.site-bar .site-brand{margin-right:auto}.site-menu{display:block}}
 @media (max-width:640px){.site-login,.site-bar .site-icon{display:none}}
 @media (max-width:420px){.site-cta span{display:none}.site-cta{padding:0 5px}.site-bar .site-brand span{display:none}.lang-bar .lang-sep,.lang-bar .lang-sep+span{display:none}}
 

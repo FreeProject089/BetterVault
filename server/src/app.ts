@@ -48,6 +48,7 @@ import { DEFAULT_PUBLIC_PAGE, publicDirectory, renderDownloadsPage, renderLandin
 import { renderDocPage } from './docs.ts';
 import { SITE_JS } from './siteScript.ts';
 import { createSiteLinks } from './siteLinks.ts';
+import { createReleases } from './releases.ts';
 import { BASE_LANGS, type ChromeContext, type PageLang } from './siteChrome.ts';
 
 /**
@@ -1152,6 +1153,9 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
   });
   /** Liens communautaires, relus au plus une fois par heure depuis l'adresse réglée dans /admin */
   const siteLinks = createSiteLinks({ url: () => (settings.publicPage ?? DEFAULT_PUBLIC_PAGE).linksUrl ?? '' });
+  /** Dernière version publiée sur le dépôt GitHub des liens, pour la page Télécharger */
+  let githubRepo = '';
+  const latestRelease = createReleases({ repoUrl: () => githubRepo });
 
   /*
    * Langue des pages publiques : ?lang= l'impose et la retient un an (cookie
@@ -1732,7 +1736,8 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     // Où télécharger ou installer BetterVault, plateforme par plateforme
     route('GET', '/telecharger', async req => {
       const { ctx, cookie } = await landingContext(req);
-      return withCookie(htmlReply(renderDownloadsPage(ctx)), cookie);
+      githubRepo = ctx.links?.github ?? '';
+      return withCookie(htmlReply(renderDownloadsPage({ ...ctx, release: await latestRelease() })), cookie);
     }),
     route('GET', '/download', async () => ({ status: 301, headers: { Location: '/telecharger' } })),
     // Script des pages publiques : du confort (apparitions, démonstrations), jamais indispensable

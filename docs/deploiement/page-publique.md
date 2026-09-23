@@ -6,6 +6,7 @@
 | --- | --- |
 | `/` | Page d'accueil : ce que fait BetterVault, comment c'est chiffré, ce serveur |
 | `/app` | L'application ; `/auth` et `/connexion` y mènent |
+| `/telecharger` | L'application web à installer, les applications par plateforme, le code source |
 | `/serveurs` | Serveurs recommandés par l'hébergeur, par région |
 | `/docs` | Cette documentation |
 | `/legal` | Documents légaux, s'ils sont activés |
@@ -99,7 +100,9 @@ Toutes les clés sont facultatives ; seules les adresses `https://` sont gardée
 `/telecharger` (et `/download`, qui y renvoie) rassemble toutes les façons d'utiliser BetterVault :
 
 - **L'application web**, installable depuis le navigateur. Le bouton **Installer l'application** apparaît quand le navigateur le permet (Chrome, Edge, Brave, Samsung Internet) ; sur iPhone et iPad, la page explique le passage par Safari → Partager → Sur l'écran d'accueil. L'application propose aussi l'installation une fois, par une notification.
-- **Les applications** : Windows, Linux et Android mènent à la dernière version publiée sur GitHub ; macOS, iOS et l'extension de navigateur sont marqués « Bientôt » avec un lien pour les construire soi-même. Une clé de `downloads` remplace le lien d'une plateforme, et rend disponible une plateforme marquée « Bientôt ».
+- **Les applications** : le serveur lit la dernière version publiée du dépôt GitHub des liens (`github`) et relie chaque bouton à son fichier : installeur `.exe` (ou `.msi`) pour Windows, AppImage (ou `.deb`, `.rpm`) pour Linux, `.dmg` Apple Silicon (ou Intel) pour macOS, APK pour Android, archive de l'extension. Version et taille s'affichent sous le bouton. Une plateforme sans fichier dans la version est marquée « Bientôt », avec un lien pour la construire soi-même. Une clé de `downloads` passe avant GitHub.
 - **Le code source**, toutes les versions et le guide pour héberger son serveur.
 
 La carte de l'appareil de la personne qui visite est mise en avant en premier.
+
+La version est lue sur `api.github.com` au plus une fois par heure, seulement quand quelqu'un ouvre la page, et sans aucune donnée de compte. Les brouillons et les préversions ne comptent pas : une version créée par la chaîne de publication n'apparaît qu'une fois publiée sur GitHub. Si GitHub ne répond pas, la page garde la dernière version connue, ou renvoie à la page des versions.
