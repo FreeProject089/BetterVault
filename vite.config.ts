@@ -9,7 +9,8 @@ export default defineConfig({
   test: {
     testTimeout: 30_000,
     // Les copies de travail des autres sessions vivent sous .claude/ : elles ont leurs propres tests
-    exclude: [...configDefaults.exclude, '.claude/**']
+    exclude: [...configDefaults.exclude, '.claude/**'],
+    setupFiles: ['tests/setup.ts']
   },
   server: {
     port: 3000,

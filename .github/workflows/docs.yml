@@ -21,7 +21,21 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      pages: ${{ steps.pages.outputs.enabled }}
     steps:
+      # Sans GitHub Pages activé (Settings > Pages > Source : GitHub Actions), le déploiement
+      # échoue en 404 : on construit quand même la documentation, mais on ne publie pas.
+      - id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${{ github.repository }}/pages" --silent 2>/dev/null; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=GitHub Pages désactivé::Documentation construite mais non publiée. Activer Pages (Source : GitHub Actions) dans les réglages du dépôt."
+          fi
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -36,6 +50,7 @@ jobs:
 
   deploy:
     needs: build
+    if: needs.build.outputs.pages == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
