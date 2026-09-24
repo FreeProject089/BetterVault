@@ -215,13 +215,16 @@ export function siteFooter(ctx: ChromeContext): string {
 }
 
 export const CHROME_CSS = `
+/* Une seule largeur de page et une seule marge : barre, contenu et pied s'alignent */
+:root{--page:1180px;--gutter:28px}
+@media (max-width:640px){:root{--gutter:18px}}
 .skip{position:absolute;left:-9999px}.skip:focus{left:12px;top:12px;z-index:20;background:var(--card);padding:8px 12px;border-radius:8px}
 .site-bar{position:sticky;top:0;z-index:10;border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent);
   background:color-mix(in srgb,var(--bg) 80%,transparent);backdrop-filter:saturate(1.5) blur(16px);-webkit-backdrop-filter:saturate(1.5) blur(16px)}
-.site-bar-in{max-width:1180px;margin:0 auto;padding:0 20px;height:64px;display:flex;align-items:center;gap:6px}
+.site-bar-in{max-width:var(--page);margin:0 auto;padding:0 var(--gutter);height:64px;display:flex;align-items:center;gap:6px}
 .site-brand{display:inline-flex;align-items:center;gap:10px;color:var(--text);text-decoration:none;font-weight:750;font-size:16px;letter-spacing:-.01em}
 .site-brand picture{display:flex}.site-brand img{display:block}.site-brand img.logo-l{display:none}
-.site-bar .site-brand{margin-right:20px;padding:6px 8px 6px 4px;border-radius:8px;transition:background-color .15s}
+.site-bar .site-brand{margin:0 20px 0 -8px;padding:6px 8px;border-radius:8px;transition:background-color .15s}
 .site-bar .site-brand:hover{background:color-mix(in srgb,var(--muted) 10%,transparent)}
 .site-links{display:flex;align-items:center;gap:2px;margin-right:auto;min-width:0}
 .site-links a,.site-login,.site-cta{white-space:nowrap}
@@ -273,7 +276,7 @@ export const CHROME_CSS = `
 @media (max-width:420px){.site-cta span{display:none}.site-cta{padding:0 5px}.site-bar .site-brand span{display:none}.lang-bar .lang-sep,.lang-bar .lang-sep+span{display:none}}
 
 .site-footer{border-top:1px solid var(--border);background:color-mix(in srgb,var(--card) 55%,var(--bg));font-size:14px}
-.site-footer-in{max-width:1180px;margin:0 auto;padding:52px 20px 28px;display:grid;grid-template-columns:minmax(0,1.5fr) repeat(3,minmax(0,1fr));gap:36px}
+.site-footer-in{max-width:var(--page);margin:0 auto;padding:52px var(--gutter) 28px;display:grid;grid-template-columns:minmax(0,1.5fr) repeat(3,minmax(0,1fr));gap:36px}
 .site-footer-brand p{color:var(--muted);margin:12px 0 16px;max-width:34ch;line-height:1.55}
 .site-social{display:flex;gap:6px}
 .site-social a{display:grid;place-items:center;width:38px;height:38px;border-radius:8px;border:1px solid var(--border);color:var(--muted);transition:color .15s,border-color .15s,transform .15s}
@@ -284,7 +287,7 @@ export const CHROME_CSS = `
 .site-footer-col>div{display:flex;flex-direction:column;gap:2px}
 .site-footer-col a{display:inline-flex;align-items:center;gap:8px;color:var(--muted);text-decoration:none;padding:5px 0;width:fit-content;transition:color .15s}
 .site-footer-col a:hover{color:var(--text)}
-.site-footer-bottom{max-width:1180px;margin:0 auto;padding:16px 20px 26px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 20px;color:var(--muted);font-size:12.5px}
+.site-footer-bottom{max-width:calc(var(--page) - 2 * var(--gutter));margin:0 auto;padding:16px 0 26px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 20px;color:var(--muted);font-size:12.5px}
 .site-footer-meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px}
 .site-footer-bottom a{color:var(--muted)}
 .site-footer-bottom .lang-toggle{min-height:32px;border:1px solid var(--border)}

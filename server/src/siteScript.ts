@@ -75,7 +75,7 @@ export const SITE_JS = `(() => {
         pts.push([bord + s * w * 0.4, bas]);
       });
       const bas = cartes[cartes.length - 1].b + M;
-      pts.push([cx, bas + Math.min(140, (fin - bas) * 0.5)]);
+      pts.push([cx, bas + (fin - bas) * 0.42]);
       pts.push([cx, fin]);
       // Conversion en courbes de Bézier (Catmull-Rom centripète, alpha = 0,5)
       const ext = [pts[0], ...pts, pts[pts.length - 1]];
@@ -98,17 +98,37 @@ export const SITE_JS = `(() => {
        */
       const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7773e8';
       const clair = 'color-mix(in srgb, ' + accent + ' 55%, #ffffff)';
-      const efface = Math.max(0.6, 1 - 170 / fin);
       const grad = large.querySelector('linearGradient');
       grad.setAttribute('y2', String(fin));
-      grad.replaceChildren(...[[0, clair, 1], [0.3, accent, 1], [0.55, clair, 1], [efface, accent, 1], [1, accent, 0]].map(([offset, color, opacity]) => {
+      const arret = (offset, color, opacity = 1) => {
         const stop = document.createElementNS(NS, 'stop');
         stop.setAttribute('offset', String(offset));
         stop.style.stopColor = color;
         stop.style.stopOpacity = String(opacity);
         return stop;
-      }));
+      };
+      grad.replaceChildren(arret(0, clair), arret(0.3, accent), arret(0.55, clair), arret(0.85, accent), arret(1, accent));
+      /*
+       * Fin du ruban : un masque circulaire autour du dernier point l'efface en
+       * douceur, quelle que soit la direction dans laquelle il arrive.
+       */
+      const bout = pts[pts.length - 1];
+      let masque = large.querySelector('mask');
+      if (!masque) {
+        masque = document.createElementNS(NS, 'mask');
+        masque.id = 'snake-fin';
+        masque.setAttribute('maskUnits', 'userSpaceOnUse');
+        const halo = document.createElementNS(NS, 'radialGradient');
+        halo.id = 'snake-fin-halo';
+        halo.append(arret(0, '#000'), arret(0.2, '#000'), arret(1, '#fff'));
+        masque.append(document.createElementNS(NS, 'rect'), document.createElementNS(NS, 'circle'));
+        large.querySelector('defs').append(halo, masque);
+      }
+      const [fond, cercle] = masque.children;
+      Object.entries({ x: -50, y: -50, width: W + 100, height: fin + 100, fill: '#fff' }).forEach(([k, v]) => fond.setAttribute(k, String(v)));
+      Object.entries({ cx: bout[0], cy: bout[1], r: 95, fill: 'url(#snake-fin-halo)' }).forEach(([k, v]) => cercle.setAttribute(k, String(v)));
       chemins = [...large.querySelectorAll('path')];
+      chemins.forEach(c => c.setAttribute('mask', 'url(#snake-fin)'));
       chemins.forEach(c => { c.setAttribute('d', d); c.removeAttribute('vector-effect'); });
       chemin = chemins[0];
       longueur = chemin.getTotalLength();
@@ -241,6 +261,69 @@ export const SITE_JS = `(() => {
   const plier = () => colonnes.forEach(c => { c.open = !etroit.matches; });
   plier();
   etroit.addEventListener('change', plier);
+
+  /*
+   * Documentation : bouton Copier sur chaque bloc de code, lien « # » sur les
+   * titres (pour partager une section), et champ qui filtre le sommaire.
+   */
+  const fr = (doc.lang || '').startsWith('fr');
+  document.querySelectorAll('.doc pre').forEach(bloc => {
+    const code = bloc.querySelector('code');
+    if (!code || !navigator.clipboard) return;
+    const bouton = document.createElement('button');
+    bouton.type = 'button';
+    bouton.className = 'copy';
+    bouton.textContent = fr ? 'Copier' : 'Copy';
+    bouton.addEventListener('click', () => {
+      navigator.clipboard.writeText(code.textContent).then(() => {
+        bouton.textContent = fr ? 'Copié' : 'Copied';
+        bouton.classList.add('ok');
+        setTimeout(() => { bouton.textContent = fr ? 'Copier' : 'Copy'; bouton.classList.remove('ok'); }, 1600);
+      }, () => {});
+    });
+    bloc.append(bouton);
+  });
+  document.querySelectorAll('.doc h2[id], .doc h3[id]').forEach(titre => {
+    const lien = document.createElement('a');
+    lien.className = 'anchor';
+    lien.href = '#' + titre.id;
+    lien.textContent = '#';
+    lien.setAttribute('aria-label', fr ? 'Lien vers cette section' : 'Link to this section');
+    titre.prepend(lien);
+  });
+  const sommaire = document.querySelector('.sidenav');
+  if (sommaire) {
+    const champ = document.createElement('input');
+    champ.type = 'search';
+    champ.className = 'doc-filter';
+    champ.placeholder = fr ? 'Filtrer les pages…' : 'Filter pages…';
+    champ.setAttribute('aria-label', champ.placeholder);
+    const vide = document.createElement('p');
+    vide.className = 'doc-empty';
+    vide.hidden = true;
+    vide.textContent = fr ? 'Aucune page ne correspond.' : 'No page matches.';
+    sommaire.prepend(champ);
+    sommaire.append(vide);
+    const sans = t => t.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase();
+    const groupes = [...sommaire.querySelectorAll('.doc-group')];
+    const ouverts = groupes.map(g => g.open);
+    champ.addEventListener('input', () => {
+      const q = sans(champ.value.trim());
+      let total = 0;
+      groupes.forEach((g, i) => {
+        let n = 0;
+        g.querySelectorAll('.doc-links a').forEach(a => { const ok = !q || sans(a.textContent).includes(q); a.hidden = !ok; if (ok) n++; });
+        g.hidden = !!q && n === 0;
+        g.open = q ? n > 0 : ouverts[i];
+        total += n;
+      });
+      vide.hidden = total > 0;
+    });
+    champ.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { const a = sommaire.querySelector('.doc-links a:not([hidden])'); if (a) location.href = a.href; }
+      if (e.key === 'Escape') { champ.value = ''; champ.dispatchEvent(new Event('input')); }
+    });
+  }
 
   /*
    * Bouton de thème : bascule sur place et retient le choix un an. Revenir au

@@ -172,7 +172,7 @@ ${themeVars('--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--muted
 html{scroll-behavior:smooth;scroll-padding-top:80px}
 body{margin:0;background:var(--bg);color:var(--text);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow-x:hidden}
 a{color:var(--accent)}
-main{max-width:1120px;margin:0 auto;padding:0 20px 96px}
+main{max-width:var(--page);margin:0 auto;padding:0 var(--gutter) 96px}
 section{padding:88px 0 0}
 h1{font-size:clamp(34px,5.4vw,58px);line-height:1.08;letter-spacing:-0.03em;margin:0 0 20px}
 .lede{font-size:clamp(17px,2.1vw,19px);color:var(--muted);max-width:56ch;margin:0 0 12px}

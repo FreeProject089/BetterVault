@@ -414,9 +414,10 @@ export const ART_CSS = `
 .unlock-ok{align-self:stretch;text-align:center;padding:9px;border-radius:7px;background:color-mix(in srgb,#3fb950 14%,transparent);color:#3fb950;font-weight:700;font-size:13.5px}
 
 /* Bandeau qui reçoit le ruban */
-.band{position:relative;margin:60px calc(50% - 50vw) 0;padding:72px 20px;background:linear-gradient(120deg,#2b1f9e,#4a3ad1 60%,#5b4ee6);color:#fff;overflow:hidden}
+.band{position:relative;margin:60px calc(50% - 50vw) 0;padding:72px var(--gutter);background:linear-gradient(120deg,#2b1f9e,#4a3ad1 60%,#5b4ee6);color:#fff;overflow:hidden}
+@media (min-width:861px){.band{margin-top:130px}}
 .band::before{content:"";position:absolute;inset:0;background:radial-gradient(600px 300px at 85% 0%,rgba(255,255,255,.14),transparent 70%)}
-.band-in{position:relative;max-width:1080px;margin:0 auto;display:grid;grid-template-columns:auto 1fr;gap:36px;align-items:center}
+.band-in{position:relative;max-width:calc(var(--page) - 2 * var(--gutter));margin:0 auto;display:grid;grid-template-columns:auto 1fr;gap:36px;align-items:center}
 .band .safe{width:132px;height:132px;color:#fff;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.25);box-shadow:0 20px 50px -20px rgba(0,0,0,.5)}
 .band h2{color:#fff;font-size:clamp(26px,3.6vw,38px);margin:0 0 8px}
 .band p{margin:0 0 22px;color:rgba(255,255,255,.84);max-width:60ch}
@@ -466,7 +467,7 @@ export const ART_CSS = `
 }
 @media (max-width:860px){
   .hero{grid-template-columns:1fr;gap:8px;padding-top:40px}
-  .hero-art{height:300px;order:-1}
+  .hero-art{height:280px;order:1;margin-top:18px}
   .window{inset:30px 24px 30px 44px}
   .safe{width:100px;height:100px}
   .snake-wide{display:none}
