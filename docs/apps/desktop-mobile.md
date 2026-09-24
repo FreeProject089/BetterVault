@@ -1,37 +1,53 @@
 # Applications de bureau et mobile
 
-Les applications utilisent [Tauri 2](https://v2.tauri.app) : la même interface que le site, avec un cœur Rust.
+Une seule interface, celle du site, dans toutes les applications. [Tauri 2](https://v2.tauri.app) l'emballe avec un cœur Rust, qui apporte ce qu'un navigateur ne sait pas faire.
 
-!!! note "Disponibilité"
-    La version **web** s'utilise et s'installe depuis n'importe quel serveur BetterVault. Les applications **Windows**, **Linux** et **Android** sont testées sur l'appareil ; le code **macOS**, **iOS** et de l'**extension** est dans le dépôt, sans avoir encore été testé sur l'appareil. Ce qui est réellement publié se voit sur la page **Télécharger** de votre serveur (`/download`). Pour construire soi-même, voir [Construire pas à pas](../development/build-guide.md).
+:::mermaid[Une interface, un cœur Rust par plateforme]
+```mermaid
+graph TD
+  UI[Interface web<br>TypeScript] --> W([Navigateur])
+  UI --> T[Tauri 2]
+  T --> D[Bureau<br>Windows · macOS · Linux]
+  T --> M[Mobile<br>Android · iOS]
+  D -.-> R[(Cœur Rust<br>Argon2id natif, trousseau,<br>biométrie)]
+  M -.-> R
+```
+:::
 
 ## Ce qui existe par plateforme
 
-| Plateforme | Installation | Déverrouillage rapide | Remplissage des formulaires |
-| --- | --- | --- | --- |
-| Windows | Installeur `.msi` / `.exe` | Windows Hello | Extension de navigateur |
-| macOS | `.dmg` | Touch ID | Extension de navigateur |
-| Linux | `.deb`, `.AppImage` | Trousseau de session (pas de biométrie) | Extension de navigateur |
-| Android | APK, ou installation depuis le navigateur | Empreinte ou visage | Service de remplissage Android |
-| iOS, iPadOS | Xcode, ou ajout à l'écran d'accueil | Face ID ou Touch ID | Extension de mots de passe iOS |
-| Navigateur | Aucune | Mot de passe principal | Extension de navigateur |
+:::table{style="striped"}
+| Plateforme | État | Installation | Déverrouillage rapide | Remplissage |
+| --- | --- | --- | --- | --- |
+| Navigateur | :badge[Disponible] | Aucune, ou « Installer l'application » | Mot de passe principal | Extension de navigateur |
+| Windows | :badge[Testé] | Installeur `.exe` ou `.msi` | Windows Hello | Extension de navigateur |
+| Linux | :badge[Testé] | AppImage, `.deb`, `.rpm` | Trousseau de session | Extension de navigateur |
+| Android | :badge[Testé] | APK | Empreinte ou visage | Service de remplissage Android |
+| macOS | :badge[Code prêt] | `.dmg` | Touch ID | Extension de navigateur |
+| iOS, iPadOS | :badge[Code prêt] | Xcode, TestFlight | Face ID ou Touch ID | Extension de mots de passe iOS |
+:::
 
-!!! tip "Sur téléphone, sans rien construire"
-    La version web s'installe comme une application : **Chrome sur Android** propose « Installer l'application », **Safari sur iOS** propose « Sur l'écran d'accueil ». L'application obtenue s'ouvre sans barre d'adresse, garde ses données hors ligne et se met à jour avec le serveur. C'est le chemin le plus simple ; les projets natifs servent surtout au remplissage automatique du système et au déverrouillage biométrique.
+**Testé** : essayé sur l'appareil. **Code prêt** : dans le dépôt, pas encore essayé sur l'appareil. Ce qui est réellement publié se voit sur la page **Télécharger** de votre serveur (`/download`).
+
+:::tip[Sur téléphone, sans rien construire]
+La version web s'installe comme une application : **Chrome sur Android** propose « Installer l'application », **Safari sur iOS** « Sur l'écran d'accueil ». Elle s'ouvre sans barre d'adresse, fonctionne hors ligne et se met à jour avec le serveur. Les applications natives ajoutent surtout le remplissage automatique du système et le déverrouillage biométrique.
+:::
 
 ### Construire sur la bonne machine
 
-Chaque système se construit chez lui : Tauri ne fabrique pas un `.dmg` depuis Windows, ni un APK signé sans le SDK Android.
+Chaque système se construit chez lui : Tauri ne fabrique pas un `.dmg` depuis Windows.
 
-| Cible | Machine nécessaire |
-| --- | --- |
-| Windows | Windows |
-| macOS, iOS | macOS avec Xcode |
-| Linux | Linux (ou un conteneur Linux) |
-| Android | Windows, macOS ou Linux, avec SDK et NDK Android |
+:::mermaid[Quelle machine construit quoi]
+```mermaid
+graph LR
+  WIN([Windows]) --> EXE[.exe · .msi]
+  LIN([Linux]) --> APP[AppImage · .deb · .rpm]
+  MAC([Mac avec Xcode]) --> DMG[.dmg · iOS]
+  ANY([Windows, Mac ou Linux<br>+ SDK et NDK Android]) --> APK[APK]
+```
+:::
 
-Pour les fichiers Apple (`.dmg`, TestFlight) et la liste de ce qu'il faut sur
-un Mac, voir [macOS et iOS](apple.md).
+Étape par étape : [Construire pas à pas](../development/build-guide.md). Pour les fichiers Apple : [macOS et iOS](apple.md).
 
 ## Bureau (Windows, macOS, Linux)
 

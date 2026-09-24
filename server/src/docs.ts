@@ -2,6 +2,7 @@ import { SITE_JS_TAG } from './siteScript.ts';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, normalize, sep } from 'node:path';
 import { markdownToHtml } from './legal.ts';
+import { renderDiagram } from './diagram.ts';
 import { CHROME_CSS, pageLangCode, siteFooter, siteHeader, themeAttr, themeVars, translator, type ChromeContext } from './siteChrome.ts';
 
 /**
@@ -128,8 +129,10 @@ export function renderMarkdown(markdown: string, page = ''): string {
    */
   text = text.replace(/^([ \t]*)```([\w-]*)\n([\s\S]*?)^[ \t]*```[ \t]*$/gm, (_, indent: string, lang: string, code: string) => {
     const sansRetrait = code.split('\n').map(line => (line.startsWith(indent) ? line.slice(indent.length) : line)).join('\n');
+    // Diagramme B.MD (```mermaid) : dessiné en SVG ; illisible, il reste affiché comme du code
+    const diagramme = lang === 'mermaid' ? renderDiagram(sansRetrait) : null;
     const label = lang ? `<span class="code-lang">${escapeHtml(lang)}</span>` : '';
-    return bloc(`<pre>${label}<code>${escapeHtml(sansRetrait.replace(/\n$/, ''))}</code></pre>`, indent).replace(/^\n/, '').replace(/\n$/, '');
+    return bloc(diagramme ?? `<pre>${label}<code>${escapeHtml(sansRetrait.replace(/\n$/, ''))}</code></pre>`, indent).replace(/^\n/, '').replace(/\n$/, '');
   });
 
   /*
@@ -167,10 +170,14 @@ export function renderMarkdown(markdown: string, page = ''): string {
    * Un bloc peut en contenir d'autres (du code dans un encadré, un encadré
    * dans un onglet) : on remplace jusqu'à ce qu'il n'en reste aucun.
    */
-  for (let tour = 0; tour < 12 && html.includes('@@BLOC'); tour++) {
-    html = html
-      .replace(/<p>@@BLOC(\d+)@@<\/p>/g, (entier, i: string) => blocks[Number(i)] ?? entier)
-      .replace(/@@BLOC(\d+)@@/g, (entier, i: string) => blocks[Number(i)] ?? entier);
+  // Cases à cocher (« - [ ] » et « - [x] », comme GFM et B.MD)
+  html = html.replace(/<li>\[([ xX])\]\s*/g, (_, mark: string) =>
+    `<li class="task${mark === ' ' ? '' : ' done'}"><span class="task-box" aria-hidden="true"></span>`);
+  for (let tour = 0; tour < 24 && html.includes('@@BLOC'); tour++) {
+    // Un bloc seul dans son paragraphe remplace le paragraphe (pas de <figure> dans un <p>)
+    const avant = html;
+    html = html.replace(/<p>@@BLOC(\d+)@@<\/p>/g, (entier, i: string) => blocks[Number(i)] ?? entier);
+    if (html === avant) html = html.replace(/@@BLOC(\d+)@@/g, (entier, i: string) => blocks[Number(i)] ?? entier);
   }
   return html;
 
@@ -275,6 +282,20 @@ export function renderMarkdown(markdown: string, page = ''): string {
         return `<div class="doc-columns">${enfants(body, ['column', 'col']).map(c => `<div>${fragment(c.body)}</div>`).join('')}</div>`;
       case 'center': case 'left': case 'right':
         return `<div style="text-align:${name}">${fragment(body)}</div>`;
+      case 'mermaid': case 'diagram':
+        // Le diagramme lui-même vient du bloc ```mermaid qu'il contient
+        return `<div class="diagram-block">${fragment(body)}${title ? `<p class="diagram-caption">${escapeHtml(title)}</p>` : ''}</div>`;
+      case 'timeline': case 'moments':
+        return `${title ? `<p class="doc-steps-title">${escapeHtml(title)}</p>` : ''}<ol class="doc-timeline">${enfants(body, ['event', 'moment']).map(ev => {
+          const s = ({ done: 'done', past: 'done', shipped: 'done', now: 'now', current: 'now', active: 'now' } as Record<string, string>)[ev.attrs.state ?? ''] ?? 'next';
+          return `<li class="tl-${s}"><span class="tl-dot" aria-hidden="true"></span><div>${ev.attrs.date ? `<small>${escapeHtml(ev.attrs.date)}</small>` : ''}${ev.title ? `<strong>${escapeHtml(ev.title)}</strong>` : ''}${fragment(ev.body)}</div></li>`;
+        }).join('')}</ol>`;
+      case 'compare': {
+        const [avant, apres] = [enfants(body, ['before'])[0], enfants(body, ['after'])[0]];
+        return `<div class="doc-compare"><div class="cmp-before"><span>${escapeHtml(avant?.title ?? a.before ?? 'Avant')}</span>${fragment(avant?.body ?? '')}</div><div class="cmp-after"><span>${escapeHtml(apres?.title ?? a.after ?? 'Après')}</span>${fragment(apres?.body ?? '')}</div></div>`;
+      }
+      case 'table':
+        return `<div class="doc-table${/\bcompact\b/.test(a.style ?? '') ? ' compact' : ''}">${fragment(body)}${title ? `<p class="diagram-caption">${escapeHtml(title)}</p>` : ''}</div>`;
       default:
         // Bloc inconnu : son contenu reste lisible, sans la syntaxe
         return fragment(body);
@@ -445,7 +466,40 @@ th{background:var(--card);font-size:13px;font-weight:700;letter-spacing:.02em}
 tbody tr:hover td{background:color-mix(in srgb,var(--card) 60%,transparent)}
 .admo{margin:22px 0;padding:14px 18px 14px 48px;position:relative;border:0;border-left:3px solid var(--accent);border-radius:4px 9px 9px 4px;background:color-mix(in srgb,var(--accent) 8%,var(--bg))}
 .admo::before{content:"i";position:absolute;left:14px;top:14px;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font:700 12px/1 Georgia,serif;color:#fff;background:var(--accent)}
-.admo strong{display:block;margin-bottom:4px}.admo p{margin:.3em 0}.admo p:last-child{margin-bottom:0}
+.admo>strong:first-child{display:block;margin-bottom:4px}
+.diagram{margin:22px 0;padding:18px 12px;border:1px solid var(--border);border-radius:12px;background:radial-gradient(420px 180px at 50% 0%,color-mix(in srgb,var(--accent) 7%,transparent),transparent),var(--card);overflow-x:auto;text-align:center}
+.diagram figcaption,.diagram-caption{max-width:none!important;margin:10px 0 0;color:var(--muted);font-size:13px;text-align:center}
+.diagram-block .diagram{margin-bottom:0}.diagram-block{margin:22px 0}
+.dg{max-width:100%;height:auto;font:13px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow:visible}
+.dg-node{fill:var(--bg);stroke:color-mix(in srgb,var(--accent) 55%,var(--border));stroke-width:1.4}
+.dg-choice{fill:color-mix(in srgb,var(--accent) 10%,var(--bg))}
+.dg-db{fill:color-mix(in srgb,#3fb950 8%,var(--bg));stroke:color-mix(in srgb,#3fb950 55%,var(--border))}
+.dg-text{fill:var(--text);font-weight:600;text-anchor:middle;dominant-baseline:central}
+.dg-edge{fill:none;stroke:var(--muted);stroke-width:1.6}
+.dg-dotted{stroke-dasharray:5 5}.dg-thick{stroke:var(--accent);stroke-width:2.6}
+.dg-head{fill:var(--muted)}
+.dg-label rect{fill:var(--card);stroke:var(--border)}.dg-label text{fill:var(--muted);font-size:12px;text-anchor:middle;dominant-baseline:central}
+.dg-group rect{fill:color-mix(in srgb,var(--accent) 5%,transparent);stroke:color-mix(in srgb,var(--accent) 30%,var(--border));stroke-dasharray:6 4}
+.dg-gtitle rect{fill:var(--card);stroke:color-mix(in srgb,var(--accent) 30%,var(--border))}.dg-gtitle text{fill:var(--accent);font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;dominant-baseline:central}
+.doc-timeline{list-style:none;margin:20px 0;padding:0;position:relative}
+.doc-timeline::before{content:"";position:absolute;left:9px;top:8px;bottom:8px;width:2px;background:var(--border)}
+.doc-timeline li{position:relative;padding:0 0 18px 34px}
+.doc-timeline .tl-dot{position:absolute;left:3px;top:5px;width:14px;height:14px;border-radius:50%;background:var(--bg);border:2px solid var(--muted)}
+.doc-timeline .tl-done .tl-dot{background:#3fb950;border-color:#3fb950}
+.doc-timeline .tl-now .tl-dot{background:var(--accent);border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 25%,transparent)}
+.doc-timeline small{display:block;color:var(--muted);font-size:12.5px}.doc-timeline strong{display:block}.doc-timeline p{margin:.2em 0 0}
+@media (max-width:640px){.diagram{text-align:left}.diagram .dg{max-width:none;width:max(100%,calc(var(--dgw) * .8))}}
+.doc ul:has(>li.task){list-style:none;padding-left:4px}
+li.task{position:relative;padding-left:30px}
+.task-box{position:absolute;left:0;top:.28em;width:18px;height:18px;border:2px solid var(--muted);border-radius:5px}
+li.task.done .task-box{background:#3fb950;border-color:#3fb950}
+li.task.done .task-box::after{content:"";position:absolute;left:4px;top:0;width:5px;height:10px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.doc-compare{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:20px 0}
+.doc-compare>div{padding:14px 16px;border:1px solid var(--border);border-radius:10px;background:var(--card)}
+.doc-compare span{display:inline-block;margin-bottom:6px;font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
+.cmp-before span{color:#f85149}.cmp-after{border-color:color-mix(in srgb,#3fb950 45%,var(--border))!important}.cmp-after span{color:#3fb950}
+.doc-compare p{margin:.3em 0}
+@media (max-width:640px){.doc-compare{grid-template-columns:1fr}}.admo p{margin:.3em 0}.admo p:last-child{margin-bottom:0}
 .admo-warning,.admo-danger,.admo-caution{border-left-color:#d29922;background:color-mix(in srgb,#d29922 9%,var(--bg))}
 .admo-warning::before,.admo-danger::before,.admo-caution::before{content:"!";background:#d29922}
 .admo-tip,.admo-success{border-left-color:#3fb950;background:color-mix(in srgb,#3fb950 8%,var(--bg))}

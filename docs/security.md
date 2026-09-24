@@ -6,23 +6,23 @@ BetterVault est conçu pour que le serveur, et toute personne y ayant accès, ne
 
 ## Clés
 
-```text
-mot de passe principal
-        │  Argon2id (64 Mio, 3 itérations, 4 voies, sel aléatoire de 16 octets)
-        ▼
-    clé principale (32 octets, jamais stockée)
-        │  HKDF-SHA-256
-        ├──────────────────────────────┐
-        ▼                              ▼
-clé de chiffrement              preuve d'authentification
-        │                              │  envoyée au serveur, protégée
-        │  AES-256-GCM                 │  à nouveau par scrypt
-        ▼                              ▼
-clé du coffre (aléatoire)       vérificateur stocké sur le serveur
-        │  AES-256-GCM
-        ▼
-     coffre chiffré
+:::mermaid[Du mot de passe principal au coffre chiffré]
+```mermaid
+graph TD
+  subgraph dev [Sur votre appareil]
+    P([Mot de passe principal]) -->|Argon2id · 64 Mio · 3 passes| K[Clé principale<br>jamais stockée]
+    K -->|HKDF-SHA-256| E[Clé de chiffrement]
+    K -->|HKDF-SHA-256| A[Preuve d'authentification]
+    E -->|AES-256-GCM| V[Clé du coffre<br>aléatoire]
+  end
+  subgraph srv [Sur le serveur]
+    A ==>|envoyée, protégée par scrypt| VER[(Vérificateur)]
+    V ==>|AES-256-GCM| C[(Coffre chiffré)]
+  end
 ```
+:::
+
+Le serveur ne reçoit que ce qui est à droite des flèches épaisses : une preuve, et des données déjà chiffrées.
 
 - La **clé du coffre** est aléatoire : changer le mot de passe principal ne re-chiffre que cette clé.
 - La **preuve d'authentification** est dérivée indépendamment de la clé de chiffrement : la connaître ne permet pas de déchiffrer.

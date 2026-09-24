@@ -16,6 +16,19 @@ git push origin main v1.2.0
 
 Puis, une fois le workflow terminé : **GitHub → Releases → le brouillon → Edit → Publish release**.
 
+:::mermaid[D'un numéro de version à la page Télécharger]
+```mermaid
+graph TD
+  V[version.mjs 1.2.0] --> T([git tag v1.2.0<br>+ push])
+  T --> C{Versions alignées<br>sur le tag ?}
+  C -->|non| X([Arrêt, rien n'est construit])
+  C -->|oui| B[Docker · Bureau ×4<br>Android · Extension]
+  B --> D[Brouillon GitHub]
+  D -->|Publish release| P[(Version publiée)]
+  P -.->|dans l'heure| DL[Page Télécharger<br>de chaque serveur]
+```
+:::
+
 ## 1. Avant de commencer
 
 - [ ] La CI de `main` est verte (onglet **Actions**, workflow **CI**).

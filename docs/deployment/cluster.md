@@ -2,6 +2,22 @@
 
 Une grappe relie plusieurs serveurs BetterVault **de votre infrastructure** — par exemple EU-W et EU-E, ou EU-W et US-E. Chaque nœud garde une copie chiffrée des comptes de sa zone : si un nœud tombe, un autre de la même zone prend le relais, et le nœud absent rattrape tout à son retour.
 
+:::mermaid[Les comptes se répliquent dans leur zone, jamais d'une zone à l'autre]
+```mermaid
+graph LR
+  subgraph eu [Zone EU]
+    EW[EU-W<br>eu-west] <--> EE[EU-E<br>eu-east]
+  end
+  subgraph us [Zone US]
+    UE[US-E<br>us-east] <--> UW[US-W<br>us-west]
+  end
+  ROOT([Clé racine<br>manifeste signé]) -.-> EW
+  ROOT -.-> EE
+  ROOT -.-> UE
+  ROOT -.-> UW
+```
+:::
+
 ## Ce que la grappe permet, et ce qu'elle interdit
 
 | | |

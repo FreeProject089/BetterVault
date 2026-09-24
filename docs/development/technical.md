@@ -16,16 +16,17 @@ En contrepartie, l'insertion de HTML impose une discipline : toute valeur venant
 
 ## Où vivent les clés
 
-```text
-mot de passe principal
-   │
-   ├─ Argon2id (t=3, m=64 Mio, p=4) ──► clé de compte
-   │                                      ├─ HKDF ─► preuve d'authentification (envoyée au serveur)
-   │                                      └─ HKDF ─► clé d'enveloppe
-   │                                                    │
-   │                                                    ▼
-   └──────────────────────────────────► clé du coffre (AES-256-GCM), chiffrée par la clé d'enveloppe
+:::mermaid[Où vivent les clés]
+```mermaid
+graph LR
+  P([Mot de passe principal]) -->|Argon2id t=3 · 64 Mio · p=4| K[Clé de compte]
+  K -->|HKDF| A[Preuve d'authentification]
+  K -->|HKDF| W[Clé d'enveloppe]
+  W -->|chiffre| V[Clé du coffre<br>AES-256-GCM]
+  R([Clé de secours]) -.->|seconde enveloppe| V
+  A ==>|seule à partir| S[(Serveur)]
 ```
+:::
 
 Ce qui compte :
 
