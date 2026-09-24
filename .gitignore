@@ -42,3 +42,4 @@ src-tauri/gen/**/*.lock
 src-tauri/target/
 build/splice.mjs
 
+.Prompt/

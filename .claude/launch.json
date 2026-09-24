@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "bum-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000,
+      "autoPort": true
+    },
+    {
+      "name": "bum-server",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "server"],
+      "port": 8787,
+      "autoPort": true
+    }
+  ]
+}
