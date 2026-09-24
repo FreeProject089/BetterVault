@@ -470,7 +470,7 @@ tbody tr:hover td{background:color-mix(in srgb,var(--card) 60%,transparent)}
 .diagram{margin:22px 0;padding:18px 12px;border:1px solid var(--border);border-radius:12px;background:radial-gradient(420px 180px at 50% 0%,color-mix(in srgb,var(--accent) 7%,transparent),transparent),var(--card);overflow-x:auto;text-align:center}
 .diagram figcaption,.diagram-caption{max-width:none!important;margin:10px 0 0;color:var(--muted);font-size:13px;text-align:center}
 .diagram-block .diagram{margin-bottom:0}.diagram-block{margin:22px 0}
-.dg{max-width:100%;height:auto;font:13px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow:visible}
+.dg{max-width:100%;min-width:calc(var(--dgw) * .75);height:auto;font:13px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow:visible}
 .dg-node{fill:var(--bg);stroke:color-mix(in srgb,var(--accent) 55%,var(--border));stroke-width:1.4}
 .dg-choice{fill:color-mix(in srgb,var(--accent) 10%,var(--bg))}
 .dg-db{fill:color-mix(in srgb,#3fb950 8%,var(--bg));stroke:color-mix(in srgb,#3fb950 55%,var(--border))}
@@ -488,7 +488,8 @@ tbody tr:hover td{background:color-mix(in srgb,var(--card) 60%,transparent)}
 .doc-timeline .tl-done .tl-dot{background:#3fb950;border-color:#3fb950}
 .doc-timeline .tl-now .tl-dot{background:var(--accent);border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 25%,transparent)}
 .doc-timeline small{display:block;color:var(--muted);font-size:12.5px}.doc-timeline strong{display:block}.doc-timeline p{margin:.2em 0 0}
-@media (max-width:640px){.diagram{text-align:left}.diagram .dg{max-width:none;width:max(100%,calc(var(--dgw) * .8))}}
+.has-narrow .dg-narrow{display:none}
+@media (max-width:640px){.diagram{text-align:left;padding:14px 8px}.diagram .dg{max-width:none;min-width:0;width:max(100%,calc(var(--dgw) * .8))}.has-narrow .dg-wide{display:none}.has-narrow .dg-narrow{display:block;margin:0 auto}}
 .doc ul:has(>li.task){list-style:none;padding-left:4px}
 li.task{position:relative;padding-left:30px}
 .task-box{position:absolute;left:0;top:.28em;width:18px;height:18px;border:2px solid var(--muted);border-radius:5px}
