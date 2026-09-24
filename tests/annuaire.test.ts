@@ -1,6 +1,6 @@
-﻿import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { parsePublicPage, parseServerUrl, publicDirectory, renderLanding, DEFAULT_PUBLIC_PAGE } from '../server/src/directory.ts';
-import { parseDirectory } from '../src/ui/serverDirectory';
+import { autoCandidates, parseDirectory } from '../src/ui/serverDirectory';
 
 /** Page publique et annuaire : seules des adresses sûres passent, tout est échappé */
 
@@ -49,5 +49,30 @@ describe('Annuaire de serveurs', () => {
       { name: 'Piège', url: 'javascript:alert(1)' },
       { name: 42, url: 'https://x.exemple.org' }
     ] }).map(s => s.name)).toEqual(['Bon']);
+  });
+
+  it('propose les nœuds de la grappe avec leur zone, même sans annuaire', () => {
+    const list = parseDirectory({ enabled: false, servers: [], cluster: [
+      { name: 'Paris', url: 'https://eu1.exemple.org', region: 'Europe', zone: 'EU' },
+      { name: 'Virginie', url: 'https://us1.exemple.org', region: 'Amérique', zone: 'US' },
+      { name: 'Zone piégée', url: 'https://x.exemple.org', zone: '<b>' }
+    ] });
+    expect(list.map(s => [s.name, s.zone, s.official])).toEqual([['Paris', 'EU', true], ['Virginie', 'US', true], ['Zone piégée', undefined, true]]);
+  });
+
+  it('Auto ne choisit, pour se connecter, que parmi les serveurs qui ont le compte', () => {
+    const servers = parseDirectory({ enabled: true,
+      cluster: [
+        { name: 'EU 1', url: 'https://eu1.exemple.org', zone: 'EU' },
+        { name: 'EU 2', url: 'https://eu2.exemple.org', zone: 'EU' },
+        { name: 'US 1', url: 'https://us1.exemple.org', zone: 'US' }
+      ],
+      servers: [{ name: 'Ailleurs', url: 'https://ailleurs.exemple.org' }] });
+    // Même zone que le serveur saisi : ils partagent les comptes
+    expect(autoCandidates(servers, 'https://eu1.exemple.org/', 'signin').map(s => s.name)).toEqual(['EU 1', 'EU 2']);
+    // Un serveur de l'annuaire a ses propres comptes : Auto le garde, seul
+    expect(autoCandidates(servers, 'https://ailleurs.exemple.org', 'signin').map(s => s.name)).toEqual(['Ailleurs']);
+    // Pour créer un compte, tout serveur convient
+    expect(autoCandidates(servers, 'https://eu1.exemple.org', 'create')).toHaveLength(4);
   });
 });

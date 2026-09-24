@@ -4070,13 +4070,37 @@ button.shortcut-key:hover { border-color: var(--accent); }
 .theme-preset:hover, .theme-preset:focus-visible { border-color: var(--p-accent); }
 .theme-swatch { width: 22px; height: 22px; border-radius: 50%; background: linear-gradient(135deg, var(--p-accent) 50%, var(--p-fg) 50%); }
 
-/* Annuaire : serveurs proposés sous l'adresse du serveur */
-.server-suggestions { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
-.server-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.server-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--border-subtle); background: var(--bg-tertiary); color: var(--text-primary); font-size: 12px; cursor: pointer; }
-.server-chip span { color: var(--text-secondary); }
-.server-chip[aria-pressed="true"] { border-color: var(--accent); }
-.server-chip .server-chip-badge { color: var(--accent); font-weight: 600; }
+/* Choix du serveur : liste déroulante sous l'adresse, par région, avec le temps de réponse */
+[data-server-field] { position: relative; }
+.server-picker.open .form-input { border-color: var(--accent); }
+.server-toggle svg { transition: transform .2s; }
+.server-picker.open .server-toggle svg { transform: rotate(180deg); }
+.server-suggestions { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 30; display: flex; flex-direction: column; gap: 2px;
+  max-height: min(380px, 60vh); overflow-y: auto; padding: 6px; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
+  background: var(--bg-secondary); box-shadow: var(--shadow-modal); animation: server-menu .16s ease-out; }
+@keyframes server-menu { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.server-option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 8px 10px; border: 0; border-radius: var(--radius-md);
+  background: none; color: var(--text-primary); text-align: left; font: inherit; cursor: pointer; }
+.server-option:hover, .server-option:focus-visible { background: var(--bg-tertiary); outline: none; }
+.server-option[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.server-option-text { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.server-option-text strong { font-size: 13.5px; }
+.server-option-text small { color: var(--text-secondary); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.server-auto { border-bottom: 1px solid var(--border-subtle); border-radius: var(--radius-md) var(--radius-md) 0 0; margin-bottom: 4px; }
+.server-auto small { white-space: normal; }
+.server-auto-icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; flex: 0 0 auto;
+  background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.server-auto:disabled { cursor: progress; opacity: .75; }
+.server-group { display: flex; flex-direction: column; gap: 2px; }
+.server-group-label { padding: 8px 10px 2px; color: var(--text-secondary); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.server-chip-badge { color: var(--accent); font-size: 11px; font-weight: 700; }
+.server-ping { flex: 0 0 auto; min-width: 56px; padding: 2px 8px; border-radius: 999px; background: var(--bg-tertiary); color: var(--text-secondary);
+  font: 600 11.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center; }
+.server-ping.good { color: #3fb950; background: color-mix(in srgb, #3fb950 14%, transparent); }
+.server-ping.ok { color: #d29922; background: color-mix(in srgb, #d29922 14%, transparent); }
+.server-ping.slow, .server-ping.off { color: #f85149; background: color-mix(in srgb, #f85149 12%, transparent); }
+.server-menu-hint { padding: 8px 10px 4px; }
+.server-note { display: block; margin-top: 6px; color: var(--accent); }
 
 /* ══════════════════════════════════════════════════════════════════════════
    RYTHME ET MARGES
@@ -4203,7 +4227,7 @@ button.shortcut-key:hover { border-color: var(--accent); }
   .modal-close { min-width: var(--tap); min-height: var(--tap); }
   input[type="range"] { height: var(--tap); }
   input[type="checkbox"], .switch { min-width: 22px; min-height: 22px; }
-  .check, .check-row, .switch-row, .theme-preset, .server-chip { min-height: var(--tap); }
+  .check, .check-row, .switch-row, .theme-preset, .server-option { min-height: var(--tap); }
 }
 input[type="range"]::-webkit-slider-thumb { width: 20px; height: 20px; }
 @media (max-width: 900px) {

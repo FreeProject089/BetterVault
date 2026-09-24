@@ -1095,7 +1095,20 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       };
     },
     // Annuaire de serveurs recommandés par cet hébergeur, lu par l'application avant la connexion
-    'GET /api/v1/directory': async () => ({ status: 200, body: publicDirectory(settings.publicPage ?? DEFAULT_PUBLIC_PAGE) }),
+    /*
+     * Serveurs à proposer au moment de choisir un serveur : l'annuaire de
+     * l'hébergeur, et les nœuds actifs de la grappe. Un compte existe dans sa
+     * zone : les nœuds d'une même zone le partagent, pas les autres.
+     */
+    'GET /api/v1/directory': async () => ({
+      status: 200,
+      body: {
+        ...publicDirectory(settings.publicPage ?? DEFAULT_PUBLIC_PAGE),
+        cluster: (trust.snapshot().cluster?.nodes ?? [])
+          .filter(node => node.status === 'active')
+          .map(node => ({ name: node.name, url: node.url, region: node.region, zone: node.zone }))
+      }
+    }),
 
     /** Langues proposées en plus du français et de l'anglais */
     'GET /api/v1/i18n': async () => ({

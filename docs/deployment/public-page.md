@@ -44,7 +44,9 @@ BetterVault US | https://us.exemple.org | Amérique du Nord | officiel
 
 Nom, adresse `https`, région, puis le mot `officiel` si vous voulez le distinguer. Les deux premiers champs sont obligatoires ; une adresse non `https` est écartée.
 
-L'application affiche ces serveurs sous le champ **Adresse du serveur**, au moment de créer un compte ou de se connecter : un clic remplit le champ.
+Au moment de créer un compte ou de se connecter, le champ **Adresse du serveur** s'ouvre sur une liste déroulante : les nœuds de la grappe, puis ces serveurs, rangés par région, chacun avec son temps de réponse. Un clic remplit le champ.
+
+**Auto — le plus rapide** mesure chaque serveur et prend celui qui répond le plus vite. Un compte n'existe que dans sa zone : pour se connecter, Auto ne choisit que parmi les nœuds de la même zone que le serveur saisi, qui ont donc déjà le compte ; pour créer un compte, parmi tous.
 
 !!! warning "Un compte n'existe que sur son serveur"
     L'annuaire ne partage aucune donnée entre serveurs : il ne fait que proposer des adresses. Pour déplacer un compte, voir [Changer de compte ou de serveur](../guide/switching-server.md).

@@ -478,7 +478,7 @@ export function mountAuthScreen(
   const render = (screen: Screen) => {
     root.innerHTML = `<div class="auth-card">${templates[screen]()}</div>`;
     const card = root.firstElementChild as HTMLElement;
-    if (!card.querySelector('[data-server-field][hidden]')) wireServerSuggestions(card, tr);
+    if (!card.querySelector('[data-server-field][hidden]')) wireServerSuggestions(card, tr, screen === 'create' ? 'create' : 'signin');
     // L'écran précédent est parti avec son parcours et son état
     recoverStepper = null;
     codeDemande = false;
