@@ -89,6 +89,7 @@ const EXACT: Record<string, string> = {
   'Nom de nœud invalide (40 caractères au plus)': 'Invalid node name (40 characters at most)',
   'Zone invalide : lettres majuscules, ex. EU, US, CH': 'Invalid zone: capital letters, e.g. EU, US, CH',
   'Région invalide : ex. eu-west, us-east': 'Invalid region: e.g. eu-west, us-east',
+  'Emplacement invalide : latitude entre -90 et 90, longitude entre -180 et 180': 'Invalid location: latitude between -90 and 90, longitude between -180 and 180',
   'Seul le nœud qui détient la clé racine peut modifier la grappe': 'Only the node holding the root key can change the cluster',
   'Invitation inconnue, expirée ou déjà utilisée': 'Unknown, expired or already used invitation',
   'Identité de nœud invalide': 'Invalid node identity',
