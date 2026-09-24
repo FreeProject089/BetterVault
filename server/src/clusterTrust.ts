@@ -6,6 +6,7 @@ import type { IncomingMessage } from 'node:http';
 import type { DatabaseSync } from 'node:sqlite';
 import { HttpError, readJson, type Reply } from './http.ts';
 import { route, type PatternRoute } from './context.ts';
+import { parsePlace, type Place } from './serverPlace.ts';
 
 /**
  * Identité et confiance d'une grappe de serveurs.
@@ -44,6 +45,8 @@ export interface ManifestNode {
   status: NodeStatus;
   addedAt: number;
   replacedBy?: string;
+  /** Emplacement réglé par l'opérateur, pour la carte (sinon : géolocalisation de l'adresse) */
+  place?: Place;
 }
 
 export interface Manifest {
@@ -573,6 +576,12 @@ export function createClusterTrust(options: {
         // Changer la zone d'un nœud qui porte des comptes les ferait passer d'une zone à l'autre
         if (fields.zone !== target.zone && nodeId === selfId) throw new HttpError(409, 'zone_locked', 'La zone du nœud racine ne se change pas');
         Object.assign(patch, fields);
+      }
+      // Emplacement pour la carte : null ou vide l'efface, et la position redevient celle de l'adresse IP
+      if (body.place !== undefined) {
+        const place = parsePlace(body.place);
+        if (body.place !== null && !place) throw new HttpError(400, 'invalid_place', 'Emplacement invalide : latitude entre -90 et 90, longitude entre -180 et 180');
+        patch.place = place ?? undefined;
       }
       await publish(nodes => nodes.map(n => (n.id === nodeId ? { ...n, ...patch } : n)));
       event('info', `${target.name} modifié${patch.status ? ` (${patch.status === 'active' ? 'activé' : 'désactivé'})` : ''}`, nodeId);

@@ -2,6 +2,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
+import { addressKind, parsePlace, type Place } from './serverPlace.ts';
 import { avatarInfo, avatarRoutes, DEFAULT_AVATARS } from './avatars.ts';
 import { localizeMessage, requestLocale } from './messages.ts';
 import {
@@ -1512,15 +1514,52 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
    * laisse simplement l'adresse vide.
    */
   const ipCache = new Map<string, { ip: string | null; at: number }>();
+  const resolving = new Map<string, Promise<void>>();
+  const refreshIp = (host: string): Promise<void> => {
+    let pending = resolving.get(host);
+    if (!pending) {
+      pending = lookup(host, { family: 0 }).then(
+        result => { ipCache.set(host, { ip: result.address, at: now() }); },
+        () => { ipCache.set(host, { ip: null, at: now() }); }
+      ).finally(() => { resolving.delete(host); });
+      resolving.set(host, pending);
+    }
+    return pending;
+  };
   const hostIp = (host: string): string | null => {
+    if (isIP(host)) return host;
     const known = ipCache.get(host);
-    if (known && now() - known.at < 3_600_000) return known.ip;
-    ipCache.set(host, { ip: known?.ip ?? null, at: now() });
-    void lookup(host, { family: 0 }).then(
-      result => ipCache.set(host, { ip: result.address, at: now() }),
-      () => ipCache.set(host, { ip: null, at: now() })
-    );
+    if (!known || now() - known.at >= 3_600_000) void refreshIp(host);
     return known?.ip ?? null;
+  };
+  /** Attend un court instant les adresses jamais résolues : la carte est juste dès sa première ouverture */
+  const warmHosts = async (hosts: string[]) => {
+    const missing = [...new Set(hosts)].filter(h => h && !isIP(h) && !ipCache.has(h));
+    if (missing.length) await Promise.race([Promise.all(missing.map(refreshIp)), new Promise(r => setTimeout(r, 1500))]);
+  };
+
+  /** Emplacement de ce serveur, réglé dans l'administration (prioritaire sur l'adresse IP) */
+  const storedPlace = (): Place | null => {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'server_place'").get() as { value: string } | undefined;
+    try { return row ? parsePlace(JSON.parse(row.value)) : null; } catch { return null; }
+  };
+  /*
+   * Position d'un serveur sur la carte : celle réglée à la main d'abord, puis
+   * celle de son adresse IP. Sans position, la raison est donnée : adresse d'un
+   * relais (Cloudflare…), adresse locale, nom non résolu, ou base GeoIP absente.
+   */
+  const locate = (host: string, manual: Place | null | undefined) => {
+    if (manual) return { place: { lat: manual.lat, lon: manual.lon, city: manual.label, country: '', source: 'manual' as const }, why: null, ip: host ? hostIp(host) : null };
+    const ip = host ? hostIp(host) : null;
+    if (!ip) return { place: null, why: host ? 'unresolved' : 'no-url', ip };
+    const kind = addressKind(ip);
+    if (kind) return { place: null, why: kind, ip };
+    const geo = options.geo?.lookup(ip) ?? null;
+    if (!geo || typeof geo.lat !== 'number' || typeof geo.lon !== 'number') return { place: null, why: 'no-geo', ip };
+    return { place: { lat: Math.round(geo.lat * 10) / 10, lon: Math.round(geo.lon * 10) / 10, country: geo.country, city: geo.city, source: 'ip' as const }, why: null, ip };
+  };
+  const publicHost = () => {
+    try { return settings.publicUrl ? new URL(settings.publicUrl).hostname : ''; } catch { return ''; }
   };
 
   /** `detailed` : adresse IP et message d'erreur brut ne sortent que pour qui opère la grappe */
@@ -1548,14 +1587,10 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
               return node.url;
             }
           })();
-          // Position approximative, pour la carte : la ville de l'adresse IP du nœud
-          const ip = hostIp(host.split(':')[0]);
-          const geo = ip ? options.geo?.lookup(ip) ?? null : null;
-          const place = geo && typeof geo.lat === 'number' && typeof geo.lon === 'number'
-            ? { lat: Math.round(geo.lat * 10) / 10, lon: Math.round(geo.lon * 10) / 10, country: geo.country, city: geo.city }
-            : null;
+          // Position pour la carte : réglée à la main, sinon la ville de l'adresse IP du nœud
+          const { place, why, ip } = locate(host.split(':')[0].replace(/^\[|\]$/g, ''), node.place ?? (node.self ? storedPlace() : null));
           return {
-            ...node, health, lag, host, place,
+            ...node, health, lag, host, place, placeWhy: why,
             ip: detailed ? ip : null,
             lastOkAt: peer?.lastOkAt ?? null,
             lastError: detailed ? peer?.lastError ?? null : peer?.lastError ? 'error' : null,
@@ -1564,18 +1599,18 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
         })
       } : null,
       pendingConflicts: clusterReady() ? (db.prepare('SELECT COUNT(*) AS n FROM vault_conflicts').get() as { n: number }).n : 0,
-      // Ce serveur, même seul : sa position vient de son adresse publique
-      selfPlace: (() => {
-        let host = '';
-        try { host = settings.publicUrl ? new URL(settings.publicUrl).hostname : ''; } catch { host = ''; }
-        const ip = host ? hostIp(host) : null;
-        const geo = ip ? options.geo?.lookup(ip) ?? null : null;
-        return geo && typeof geo.lat === 'number' && typeof geo.lon === 'number'
-          ? { lat: Math.round(geo.lat * 10) / 10, lon: Math.round(geo.lon * 10) / 10, country: geo.country, city: geo.city, host }
-          : null;
+      // Ce serveur, même seul : l'emplacement réglé, sinon celui de son adresse publique
+      ...(() => {
+        const host = publicHost().replace(/^\[|\]$/g, '');
+        const { place, why } = locate(host, storedPlace());
+        return { selfPlace: place ? { ...place, host } : null, selfPlaceWhy: why, selfPlaceManual: storedPlace() };
       })()
     };
   };
+  /** Adresses à résoudre pour la carte : ce serveur et les nœuds du manifeste */
+  const mapHosts = () => [publicHost(), ...(trust.snapshot().cluster?.nodes ?? []).map(n => {
+    try { return new URL(n.url).hostname; } catch { return ''; }
+  })].map(h => h.replace(/^\[|\]$/g, ''));
 
   function clusterAdminRoutes(): PatternRoute[] {
     const act = (method: string, path: string, run: (req: IncomingMessage, params: Record<string, string>, body: Record<string, unknown>) => Promise<unknown> | unknown, type: string) =>
@@ -1589,8 +1624,28 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     return [
       route('GET', '/api/v1/admin/cluster', async req => {
         const admin = requireAdmin(req, 'view');
+        await warmHosts(mapHosts());
         // Un rôle en lecture seule voit l'état, pas la topologie réseau détaillée
         return { status: 200, body: clusterView(admin.role !== 'viewer') };
+      }),
+      /*
+       * Emplacement de ce serveur pour la carte, réglé à la main : la
+       * géolocalisation de l'adresse IP se trompe derrière un relais
+       * (Cloudflare, tunnel). null l'efface.
+       */
+      route('PUT', '/api/v1/admin/place', async req => {
+        const admin = requireAdmin(req, 'manage', true);
+        const body = await readJson(req, 4096);
+        if (body.place === null) {
+          db.prepare("DELETE FROM settings WHERE key = 'server_place'").run();
+        } else {
+          const place = parsePlace(body.place);
+          if (!place) throw new HttpError(400, 'invalid_place', 'Emplacement invalide : latitude entre -90 et 90, longitude entre -180 et 180');
+          db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('server_place', ?)").run(JSON.stringify(place));
+        }
+        audit('admin.place_updated', { admin: admin.id, cleared: body.place === null });
+        await warmHosts(mapHosts());
+        return { status: 200, body: clusterView() };
       }),
       act('POST', '/api/v1/admin/cluster', async (_r, _p, body) => { await trust.actions.create(body); }, 'cluster.created'),
       act('POST', '/api/v1/admin/cluster/invites', () => trust.actions.invite(), 'cluster.invite_created'),

@@ -1217,7 +1217,7 @@ const placeXY = place => [place.lon + 180, WORLD_VIEW.top - place.lat];
 function clusterMap(view, { title = fr ? 'Carte des serveurs' : 'Server map', compact = false } = {}) {
   const nodes = view.cluster
     ? view.cluster.nodes
-    : [{ id: 'self', self: true, name: fr ? 'Ce serveur' : 'This server', zone: view.self?.zone ?? '', region: '', status: 'active', health: 'self', place: view.selfPlace, host: view.selfPlace?.host }];
+    : [{ id: 'self', self: true, name: fr ? 'Ce serveur' : 'This server', zone: view.self?.zone ?? '', region: '', status: 'active', health: 'self', place: view.selfPlace, placeWhy: view.selfPlaceWhy, host: view.selfPlace?.host }];
   const placed = nodes.filter(n => n.place).map(n => ({ node: n, xy: placeXY(n.place) }));
   const lost = nodes.filter(n => !n.place);
 
@@ -1268,9 +1268,18 @@ function clusterMap(view, { title = fr ? 'Carte des serveurs' : 'Server map', co
     ['disabled', fr ? 'désactivé' : 'disabled']
   ].map(([key, label]) => `<span class="map-key"><span class="map-dot" style="border-color:${MAP_TONE[key]}"></span>${label}</span>`).join('');
 
-  const sansPosition = lost.length ? `<p class="hint map-lost">${fr ? 'Sans position connue' : 'No known position'} : ${lost.map(n => escapeHtml(n.name)).join(', ')} — ${fr
-    ? 'adresse locale, ou base de localisation absente (GeoIP).'
-    : 'local address, or no location database (GeoIP).'}</p>` : '';
+  // Pourquoi un serveur n'a pas de position : la raison exacte, et comment la régler
+  const RAISON = {
+    proxy: fr ? 'derrière un relais (Cloudflare, tunnel) : son adresse est celle du relais, pas la sienne' : 'behind a relay (Cloudflare, tunnel): its address is the relay’s, not its own',
+    local: fr ? 'adresse locale, sans position sur la carte' : 'local address, with no position on the map',
+    unresolved: fr ? 'nom de domaine non résolu' : 'domain name not resolved',
+    'no-geo': fr ? 'base de localisation (GeoIP) absente' : 'no location database (GeoIP)',
+    'no-url': fr ? 'adresse publique (PUBLIC_URL) non définie' : 'public address (PUBLIC_URL) not set'
+  };
+  const sansPosition = lost.length ? `<ul class="hint map-lost">${lost.map(n => `<li><strong>${escapeHtml(n.name)}</strong> — ${RAISON[n.placeWhy] ?? (fr ? 'position inconnue' : 'unknown position')}.</li>`).join('')}</ul>
+    <p class="hint">${fr ? 'Réglez son emplacement : il s’affiche alors exactement où il est.' : 'Set its location: it then shows exactly where it is.'}</p>` : '';
+  const regler = can('manage') ? `<button type="button" class="btn" data-place-edit>${fr ? 'Régler l’emplacement' : 'Set location'}</button>` : '';
+  lastMapView = view;
 
   return `
     <section class="card map-card">
@@ -1279,6 +1288,7 @@ function clusterMap(view, { title = fr ? 'Carte des serveurs' : 'Server map', co
         <span class="hint">${view.cluster
           ? `${nodes.length} ${fr ? (nodes.length > 1 ? 'serveurs' : 'serveur') : (nodes.length > 1 ? 'servers' : 'server')} · ${fr ? 'la réplication reste dans une zone' : 'replication stays inside a zone'}`
           : (fr ? 'Ce serveur fonctionne seul' : 'This server runs alone')}</span>
+        ${regler}
       </div>
       <div class="map-wrap">
         <svg viewBox="${x0} ${y0} ${w} ${h}" class="world-map" role="group" aria-label="${title}" preserveAspectRatio="xMidYMid meet">
@@ -1290,6 +1300,133 @@ function clusterMap(view, { title = fr ? 'Carte des serveurs' : 'Server map', co
       ${sansPosition}
     </section>`;
 }
+
+/*
+ * Réglage de l'emplacement d'un serveur. Une ville de la liste remplit les
+ * coordonnées ; on peut aussi les saisir. Pour un serveur seul, l'emplacement
+ * est gardé sur ce serveur ; dans une grappe, il va dans le manifeste (le
+ * nœud racine le publie à tous), et ce serveur le garde aussi pour lui.
+ */
+let lastMapView = null;
+
+/* Villes où l'on trouve des centres de données : [nom, pays, latitude, longitude] */
+const MAP_CITIES = [
+  ['Paris', 'FR', 48.86, 2.35], ['Roubaix', 'FR', 50.69, 3.18], ['Gravelines', 'FR', 50.99, 2.13], ['Strasbourg', 'FR', 48.57, 7.75],
+  ['Lyon', 'FR', 45.76, 4.84], ['Marseille', 'FR', 43.30, 5.37], ['Lille', 'FR', 50.63, 3.06], ['Bordeaux', 'FR', 44.84, -0.58],
+  ['Toulouse', 'FR', 43.60, 1.44], ['Nantes', 'FR', 47.22, -1.55], ['Nice', 'FR', 43.70, 7.27], ['Rennes', 'FR', 48.11, -1.68],
+  ['Genève', 'CH', 46.20, 6.14], ['Lausanne', 'CH', 46.52, 6.63], ['Zurich', 'CH', 47.38, 8.54], ['Berne', 'CH', 46.95, 7.45],
+  ['Bâle', 'CH', 47.56, 7.59], ['Lugano', 'CH', 46.00, 8.95], ['Bruxelles', 'BE', 50.85, 4.35], ['Luxembourg', 'LU', 49.61, 6.13],
+  ['Monaco', 'MC', 43.74, 7.42], ['Francfort', 'DE', 50.11, 8.68], ['Nuremberg', 'DE', 49.45, 11.08], ['Falkenstein', 'DE', 50.48, 12.37],
+  ['Berlin', 'DE', 52.52, 13.40], ['Munich', 'DE', 48.14, 11.58], ['Hambourg', 'DE', 53.55, 9.99], ['Düsseldorf', 'DE', 51.23, 6.78],
+  ['Amsterdam', 'NL', 52.37, 4.90], ['Rotterdam', 'NL', 51.92, 4.48], ['Londres', 'GB', 51.51, -0.13], ['Manchester', 'GB', 53.48, -2.24],
+  ['Dublin', 'IE', 53.35, -6.26], ['Madrid', 'ES', 40.42, -3.70], ['Barcelone', 'ES', 41.39, 2.17], ['Lisbonne', 'PT', 38.72, -9.14],
+  ['Milan', 'IT', 45.46, 9.19], ['Rome', 'IT', 41.90, 12.50], ['Vienne', 'AT', 48.21, 16.37], ['Prague', 'CZ', 50.08, 14.44],
+  ['Varsovie', 'PL', 52.23, 21.01], ['Stockholm', 'SE', 59.33, 18.07], ['Oslo', 'NO', 59.91, 10.75], ['Copenhague', 'DK', 55.68, 12.57],
+  ['Helsinki', 'FI', 60.17, 24.94], ['Tallinn', 'EE', 59.44, 24.75], ['Riga', 'LV', 56.95, 24.11], ['Vilnius', 'LT', 54.69, 25.28],
+  ['Budapest', 'HU', 47.50, 19.04], ['Bucarest', 'RO', 44.43, 26.10], ['Sofia', 'BG', 42.70, 23.32], ['Athènes', 'GR', 37.98, 23.73],
+  ['Istanbul', 'TR', 41.01, 28.98], ['Kyiv', 'UA', 50.45, 30.52], ['Zagreb', 'HR', 45.81, 15.98], ['Belgrade', 'RS', 44.79, 20.45],
+  ['Ljubljana', 'SI', 46.06, 14.51], ['Reykjavik', 'IS', 64.15, -21.94], ['New York', 'US', 40.71, -74.01], ['Ashburn', 'US', 39.04, -77.49],
+  ['Washington', 'US', 38.91, -77.04], ['Boston', 'US', 42.36, -71.06], ['Chicago', 'US', 41.88, -87.63], ['Dallas', 'US', 32.78, -96.80],
+  ['Houston', 'US', 29.76, -95.37], ['Atlanta', 'US', 33.75, -84.39], ['Miami', 'US', 25.76, -80.19], ['Denver', 'US', 39.74, -104.99],
+  ['Phoenix', 'US', 33.45, -112.07], ['Los Angeles', 'US', 34.05, -118.24], ['San José', 'US', 37.34, -121.89], ['San Francisco', 'US', 37.77, -122.42],
+  ['Seattle', 'US', 47.61, -122.33], ['Portland', 'US', 45.52, -122.68], ['Salt Lake City', 'US', 40.76, -111.89], ['Kansas City', 'US', 39.10, -94.58],
+  ['Toronto', 'CA', 43.65, -79.38], ['Montréal', 'CA', 45.50, -73.57], ['Beauharnois', 'CA', 45.31, -73.87], ['Québec', 'CA', 46.81, -71.21],
+  ['Vancouver', 'CA', 49.28, -123.12], ['Mexico', 'MX', 19.43, -99.13], ['São Paulo', 'BR', -23.55, -46.63], ['Rio de Janeiro', 'BR', -22.91, -43.17],
+  ['Buenos Aires', 'AR', -34.60, -58.38], ['Santiago', 'CL', -33.45, -70.67], ['Bogotá', 'CO', 4.71, -74.07], ['Lima', 'PE', -12.05, -77.04],
+  ['Tokyo', 'JP', 35.68, 139.69], ['Osaka', 'JP', 34.69, 135.50], ['Séoul', 'KR', 37.57, 126.98], ['Singapour', 'SG', 1.35, 103.82],
+  ['Hong Kong', 'HK', 22.32, 114.17], ['Taipei', 'TW', 25.03, 121.57], ['Mumbai', 'IN', 19.08, 72.88], ['Bangalore', 'IN', 12.97, 77.59],
+  ['Delhi', 'IN', 28.61, 77.21], ['Chennai', 'IN', 13.08, 80.27], ['Jakarta', 'ID', -6.21, 106.85], ['Bangkok', 'TH', 13.76, 100.50],
+  ['Kuala Lumpur', 'MY', 3.14, 101.69], ['Manille', 'PH', 14.60, 120.98], ['Hanoï', 'VN', 21.03, 105.85], ['Shanghai', 'CN', 31.23, 121.47],
+  ['Pékin', 'CN', 39.90, 116.41], ['Dubaï', 'AE', 25.20, 55.27], ['Tel Aviv', 'IL', 32.09, 34.78], ['Riyad', 'SA', 24.71, 46.68],
+  ['Doha', 'QA', 25.29, 51.53], ['Sydney', 'AU', -33.87, 151.21], ['Melbourne', 'AU', -37.81, 144.96], ['Brisbane', 'AU', -27.47, 153.03],
+  ['Perth', 'AU', -31.95, 115.86], ['Auckland', 'NZ', -36.85, 174.76], ['Johannesburg', 'ZA', -26.20, 28.05], ['Le Cap', 'ZA', -33.92, 18.42],
+  ['Lagos', 'NG', 6.52, 3.38], ['Nairobi', 'KE', -1.29, 36.82], ['Le Caire', 'EG', 30.04, 31.24], ['Casablanca', 'MA', 33.57, -7.59],
+  ['Tunis', 'TN', 36.81, 10.18], ['Alger', 'DZ', 36.75, 3.06], ['Dakar', 'SN', 14.72, -17.47], ['Abidjan', 'CI', 5.36, -4.01]
+];
+
+function openPlaceDialog(view) {
+  const cluster = view.cluster;
+  const targets = cluster
+    ? cluster.nodes.filter(n => n.status !== 'revoked').map(n => ({ id: n.id, name: n.name, self: n.self, place: n.place && n.place.source === 'manual' ? n.place : null }))
+    : [{ id: 'self', name: fr ? 'Ce serveur' : 'This server', self: true, place: view.selfPlaceManual ? { lat: view.selfPlaceManual.lat, lon: view.selfPlaceManual.lon, city: view.selfPlaceManual.label } : null }];
+  const dialog = document.createElement('dialog');
+  dialog.className = 'card place-dialog';
+  dialog.innerHTML = `
+    <form method="dialog" class="stack">
+      <h2>${fr ? 'Emplacement sur la carte' : 'Location on the map'}</h2>
+      <p class="hint">${fr
+        ? 'Derrière Cloudflare ou un tunnel, l’adresse IP donne l’emplacement du relais. Indiquez ici où se trouve vraiment le serveur.'
+        : 'Behind Cloudflare or a tunnel, the IP address gives the relay’s location. Say here where the server really is.'}</p>
+      ${targets.length > 1 ? `<label>${fr ? 'Serveur' : 'Server'}<select name="target">${targets.map(n => `<option value="${escapeHtml(n.id)}">${escapeHtml(n.name)}${n.self ? (fr ? ' (ce serveur)' : ' (this server)') : ''}</option>`).join('')}</select></label>` : ''}
+      <label>${fr ? 'Ville' : 'City'}<input name="city" list="place-cities" autocomplete="off" placeholder="${fr ? 'Genève, Francfort, Ashburn…' : 'Geneva, Frankfurt, Ashburn…'}"></label>
+      <datalist id="place-cities">${MAP_CITIES.map(([name, cc]) => `<option value="${escapeHtml(`${name} (${cc})`)}"></option>`).join('')}</datalist>
+      <div class="place-coords">
+        <label>${fr ? 'Latitude' : 'Latitude'}<input name="lat" type="number" step="0.001" min="-90" max="90" required></label>
+        <label>${fr ? 'Longitude' : 'Longitude'}<input name="lon" type="number" step="0.001" min="-180" max="180" required></label>
+      </div>
+      <p class="error" hidden></p>
+      <div class="row-end">
+        <button class="btn ghost" type="button" data-clear>${fr ? 'Revenir à l’adresse IP' : 'Back to IP address'}</button>
+        <button class="btn ghost" type="button" data-cancel>${fr ? 'Annuler' : 'Cancel'}</button>
+        <button class="btn primary" type="submit">${fr ? 'Enregistrer' : 'Save'}</button>
+      </div>
+    </form>`;
+  document.body.append(dialog);
+  const form = dialog.querySelector('form');
+  const error = dialog.querySelector('.error');
+  const pick = id => targets.find(n => n.id === id) ?? targets[0];
+  const fill = target => {
+    form.city.value = target.place?.city ?? '';
+    form.lat.value = target.place ? target.place.lat : '';
+    form.lon.value = target.place ? target.place.lon : '';
+  };
+  fill(targets.find(n => n.self) ?? targets[0]);
+  if (form.target) { form.target.value = (targets.find(n => n.self) ?? targets[0]).id; form.target.addEventListener('change', () => fill(pick(form.target.value))); }
+  form.city.addEventListener('input', () => {
+    const name = form.city.value.replace(/\s*\([A-Z]{2}\)$/, '').trim().toLowerCase();
+    const city = MAP_CITIES.find(([n]) => n.toLowerCase() === name);
+    if (city) { form.lat.value = city[2]; form.lon.value = city[3]; }
+  });
+  const close = () => { dialog.close(); dialog.remove(); };
+  const save = async place => {
+    error.hidden = true;
+    const target = pick(form.target ? form.target.value : targets[0].id);
+    try {
+      let next;
+      // Ce serveur garde son emplacement ; dans une grappe, le manifeste le transmet aux autres
+      if (target.self) next = await api('PUT', 'place', { place });
+      if (cluster) {
+        try {
+          next = await api('PATCH', `cluster/nodes/${encodeURIComponent(target.id)}`, { place });
+        } catch (err) {
+          // Seul le nœud racine publie le manifeste : ailleurs, l'emplacement reste local
+          if (!target.self) throw err;
+        }
+      }
+      if (next) {
+        $('overview-map').innerHTML = clusterMap(next);
+        if ($('cluster-panel')?.childElementCount) renderClusterPanel(next);
+      }
+      close();
+    } catch (err) {
+      error.textContent = err.message;
+      error.hidden = false;
+    }
+  };
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    const label = form.city.value.replace(/\s*\([A-Z]{2}\)$/, '').trim();
+    save({ lat: Number(form.lat.value), lon: Number(form.lon.value), label });
+  });
+  dialog.querySelector('[data-clear]').addEventListener('click', () => save(null));
+  dialog.querySelector('[data-cancel]').addEventListener('click', close);
+  dialog.addEventListener('close', () => dialog.remove());
+  dialog.showModal();
+  form.city.focus();
+}
+document.addEventListener('click', event => {
+  if (event.target.closest?.('[data-place-edit]') && lastMapView) openPlaceDialog(lastMapView);
+});
 
 function renderClusterPanel(view) {
   const host = $('cluster-panel');

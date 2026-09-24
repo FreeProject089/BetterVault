@@ -44,6 +44,16 @@ Les actions sensibles (restaurer une sauvegarde, retirer un nœud, changer un se
 | | Grappe | Nœuds et réplication — voir [Grappe](cluster.md) |
 | Accès | Administrateurs | Comptes d'administration, son propre mot de passe et sa 2FA |
 
+## Carte des serveurs
+
+En tête du tableau de bord, la carte montre où se trouve ce serveur, et chaque nœud de la grappe avec ses liaisons de réplication.
+
+Par défaut, la position vient de l'adresse IP de l'adresse publique (`PUBLIC_URL`), grâce à la base de localisation (GeoIP). Elle est fausse dès que le serveur est derrière un relais : avec Cloudflare ou un tunnel, l'adresse est celle du relais. Ces adresses, comme les adresses locales, ne sont donc jamais géolocalisées ; la carte dit pourquoi le serveur n'a pas de position.
+
+**Régler l'emplacement** : choisissez une ville (les villes des grands centres de données sont proposées) ou saisissez latitude et longitude. L'emplacement réglé passe avant l'adresse IP ; **Revenir à l'adresse IP** l'efface.
+
+Dans une grappe, l'emplacement de chaque nœud se règle depuis le nœud racine : il est publié dans le manifeste signé, et tous les nœuds affichent la même carte.
+
 ## Thème
 
 Par défaut, l'administration **reprend le thème de l'application** ouverte dans le même navigateur : mode clair ou sombre, et couleurs d'un thème personnalisé. Si l'application change de thème dans un autre onglet, l'administration suit.

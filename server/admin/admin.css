@@ -582,7 +582,14 @@ a.brand:hover { background: color-mix(in srgb, var(--muted) 12%, transparent); }
 .map-pulse { opacity: .35; transform-box: fill-box; transform-origin: center; animation: map-pulse 2.4s ease-out infinite; }
 @keyframes map-pulse { from { transform: scale(.6); opacity: .45; } to { transform: scale(2.2); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .map-pulse { animation: none; } }
-.map-lost { margin-top: 8px; }
+.map-lost { margin: 10px 0 4px; padding-left: 18px; }
+.map-lost li { margin: 2px 0; }
+.map-card .panel-head { flex-wrap: wrap; }
+.map-card .panel-head .hint { margin-right: auto; }
+dialog.place-dialog { max-width: min(480px, calc(100vw - 32px)); }
+.place-dialog label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.place-coords { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.place-dialog .row-end { flex-wrap: wrap; }
 
 /* ── Choix du thème ─────────────────────────────────────────────────── */
 .top-actions { position: relative; }
