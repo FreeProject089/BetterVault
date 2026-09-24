@@ -102,17 +102,84 @@ export function parseFlowchart(source: string): { dir: 'TD' | 'LR' | 'BT' | 'RL'
 /* Mesure approchée du texte (police système, 13 px) */
 const textWidth = (s: string) => [...s].reduce((w, c) => w + (/[A-Z0-9@#%&MWmw]/.test(c) ? 8.4 : /[il.,:;'|! ]/.test(c) ? 4 : 7), 0);
 
+/* Largeur maximale d'une ligne : au-delà, le texte passe à la ligne */
+const NODE_TEXT = 176, LABEL_TEXT = 150;
+
+/**
+ * Coupe un texte en lignes d'au plus `max` pixels, entre les mots. Un mot
+ * trop long (une adresse, un chemin) se coupe après / . - _ ou, à défaut,
+ * n'importe où. Les retours à la ligne voulus (<br>, \n) sont gardés.
+ */
+export function wrapText(text: string, max: number, scale = 1): string[] {
+  const width = (t: string) => textWidth(t) * scale;
+  const pieces = (word: string): string[] => {
+    if (width(word) <= max) return [word];
+    const out: string[] = [];
+    let cur = '';
+    for (const part of word.split(/(?<=[/.\-_?&=])/)) {
+      if (width(part) > max) {
+        for (const ch of part) { if (cur && width(cur + ch) > max) { out.push(cur); cur = ''; } cur += ch; }
+      } else if (cur && width(cur + part) > max) { out.push(cur); cur = part; } else cur += part;
+    }
+    if (cur) out.push(cur);
+    return out;
+  };
+  const greedy = (words: string[], limit: number) => {
+    const lines: string[] = [];
+    let cur = '';
+    for (const word of words) {
+      if (cur && width(`${cur} ${word}`) > limit) { lines.push(cur); cur = word; } else cur = cur ? `${cur} ${word}` : word;
+    }
+    lines.push(cur);
+    return lines;
+  };
+  return text.split('\n').flatMap(line => {
+    const words = line.split(/\s+/).filter(Boolean).flatMap(pieces);
+    let lines = greedy(words, max);
+    // Lignes équilibrées : pas un mot seul sur la dernière ligne
+    for (let limit = max - 6; lines.length > 1 && limit > max / 3; limit -= 6) {
+      const tighter = greedy(words, limit);
+      if (tighter.length > lines.length || tighter.some(l => width(l) > limit && !l.includes(' '))) break;
+      lines = tighter;
+    }
+    return lines;
+  });
+}
+
 let serial = 0;
 
 export function renderDiagram(source: string, caption = ''): string | null {
   const graph = parseFlowchart(source);
   if (!graph) return null;
+  const wide = layout(graph, caption);
+  /*
+   * Sur un écran étroit, un diagramme de gauche à droite devient minuscule ou
+   * déborde : on en dessine aussi une version de haut en bas, que la feuille
+   * de style montre à la place sur téléphone.
+   */
+  const horizontal = graph.dir === 'LR' || graph.dir === 'RL';
+  const narrow = horizontal && wide.width > 400 ? layout({ ...parseFlowchart(source)!, dir: graph.dir === 'RL' ? 'BT' : 'TD' }, caption) : null;
+  const body = narrow ? wide.svg.replace('<svg class="dg"', '<svg class="dg dg-wide"') + narrow.svg.replace('<svg class="dg"', '<svg class="dg dg-narrow"') : wide.svg;
+  return `<figure class="diagram${narrow ? ' has-narrow' : ''}">${body}${caption ? `<figcaption>${escapeXml(caption)}</figcaption>` : ''}</figure>`;
+}
+
+function layout(graph: NonNullable<ReturnType<typeof parseFlowchart>>, caption: string): { svg: string; width: number } {
   const { dir, nodes, edges, groups } = graph;
   const vertical = dir === 'TD' || dir === 'BT';
   const id = ++serial;
 
-  // Taille de chaque nœud d'après son texte
+  // Libellés des liens découpés en lignes, et la place qu'ils prennent
+  const LINE = 15;
+  const labelLines = new Map<Edge, string[]>();
+  for (const e of edges) if (e.label) labelLines.set(e, wrapText(e.label, LABEL_TEXT, 12 / 13));
+  const labelSize = (e: Edge): [number, number] => {
+    const lines = labelLines.get(e);
+    return lines ? [Math.max(...lines.map(l => textWidth(l) * 12 / 13)) + 18, lines.length * LINE + 9] : [0, 0];
+  };
+
+  // Taille de chaque nœud d'après son texte, découpé s'il est long
   for (const n of nodes.values()) {
+    n.label = wrapText(n.label, n.shape === 'diamond' ? NODE_TEXT - 24 : NODE_TEXT).join('\n');
     const lines = n.label.split('\n');
     const tw = Math.max(...lines.map(textWidth));
     n.w = Math.max(n.shape === 'circle' ? 64 : 96, tw + (n.shape === 'diamond' ? 56 : n.shape === 'circle' ? 28 : 32));
@@ -186,6 +253,10 @@ export function renderDiagram(source: string, caption = ''): string | null {
   const between = (a: Node, b: Node) => GAP + (a.group !== b.group && (a.group || b.group) ? 52 : 0);
   const rankSpan = ranks.map(r => r.reduce((s, n, i) => s + cross(n) + (i ? between(r[i - 1], n) : 0), 0));
   const width = Math.max(...rankSpan);
+  // Entre deux rangs, assez de place pour le plus grand libellé des liens qui les relient
+  const gapAfter = ranks.map((_, r) => Math.max(RANK_GAP, ...forward
+    .filter(e => nodes.get(e.from)!.rank === r && nodes.get(e.to)!.rank === r + 1)
+    .map(e => { const [w, h] = labelSize(e); return (vertical ? h : w) + 30; })));
   // Un sous-graphe qui commence ou finit entre deux rangs : un écart plus grand
   const groupsOf = (r: Node[]) => [...new Set(r.map(n => n.group ?? ''))].sort().join('|');
   let pos = 0;
@@ -197,17 +268,23 @@ export function renderDiagram(source: string, caption = ''): string | null {
       if (vertical) { n.x = c + n.w / 2; n.y = mid; } else { n.x = mid; n.y = c + n.h / 2; }
       c += cross(n);
     });
-    pos += rankSize[r] + RANK_GAP + (ranks[r + 1] && groupsOf(rank) !== groupsOf(ranks[r + 1]) ? 36 : 0);
+    pos += rankSize[r] + gapAfter[r] + (ranks[r + 1] && groupsOf(rank) !== groupsOf(ranks[r + 1]) ? 36 : 0);
   });
-  const length = pos - RANK_GAP;
+  const length = pos - gapAfter[ranks.length - 1];
   if (dir === 'BT' || dir === 'RL') for (const n of nodes.values()) { if (dir === 'BT') n.y = length - n.y; else n.x = length - n.x; }
 
   // Sous-graphes : un cadre autour de leurs nœuds, avec leur titre
+  const TITLE_SCALE = 0.92, TITLE_LINE = 14;
   const frames = groups.filter(g => g.nodes.length).map(g => {
     const list = g.nodes.map(id => nodes.get(id)!).filter(Boolean);
     const x0 = Math.min(...list.map(n => n.x - n.w / 2)) - 16, x1 = Math.max(...list.map(n => n.x + n.w / 2)) + 16;
-    const y0 = Math.min(...list.map(n => n.y - n.h / 2)) - (g.title ? 34 : 16), y1 = Math.max(...list.map(n => n.y + n.h / 2)) + 16;
-    return { g, x0, x1, y0, y1 };
+    // Le titre tient dans le cadre : sur deux lignes au plus, puis coupé par « … »
+    let title = g.title ? wrapText(g.title.toUpperCase(), Math.max(80, x1 - x0 - 34), TITLE_SCALE) : [];
+    if (title.length > 2) title = [title[0], `${title[1].replace(/\s*\S*$/, '') || title[1]}…`];
+    const top = title.length ? 20 + title.length * TITLE_LINE : 16;
+    const y0 = Math.min(...list.map(n => n.y - n.h / 2)) - top, y1 = Math.max(...list.map(n => n.y + n.h / 2)) + 16;
+    const tw = title.length ? Math.max(...title.map(l => textWidth(l) * TITLE_SCALE)) + 18 : 0;
+    return { g, x0, x1, y0, y1, title, tw };
   });
 
   const all = [...nodes.values()];
@@ -251,23 +328,35 @@ export function renderDiagram(source: string, caption = ''): string | null {
   type Box = [number, number, number, number];
   const taken: Box[] = [
     ...all.map((n): Box => [n.x - n.w / 2 - 4, n.y - n.h / 2 - 4, n.x + n.w / 2 + 4, n.y + n.h / 2 + 4]),
-    ...frames.filter(f => f.g.title).map((f): Box => [f.x0, f.y0, f.x0 + textWidth(f.g.title) * 1.05 + 28, f.y0 + 30])
+    ...frames.filter(f => f.title.length).map((f): Box => [f.x0, f.y0, f.x0 + f.tw + 12, f.y0 + f.title.length * TITLE_LINE + 12])
   ];
+  const labelBoxes: Box[] = [];
   const hits = (b: Box) => taken.some(o => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]);
   const bezier = (p: number[], t: number): [number, number] => {
     const u = 1 - t;
     return [u * u * u * p[0] + 3 * u * u * t * p[2] + 3 * u * t * t * p[4] + t * t * t * p[6], u * u * u * p[1] + 3 * u * u * t * p[3] + 3 * u * t * t * p[5] + t * t * t * p[7]];
   };
-  const placeLabel = (curve: number[], text: string) => {
-    const lw = textWidth(text) + 14;
+  const placeLabel = (curve: number[], e: Edge) => {
+    const lines = labelLines.get(e)!;
+    const [lw, lh] = labelSize(e);
     let best: [number, number] | null = null;
-    for (const t of [0.5, 0.38, 0.62, 0.28, 0.72, 0.2, 0.8]) {
-      const [x, y] = bezier(curve, t);
-      const box: Box = [x - lw / 2, y - 11, x + lw / 2, y + 11];
-      if (!hits(box)) { best = [x, y]; taken.push(box); break; }
+    /*
+     * Deux liens qui partent du même nœud ont leurs milieux proches : si la
+     * courbe n'offre aucune place, le libellé glisse du côté où va le lien.
+     */
+    const toward = Math.sign(vertical ? curve[6] - curve[0] : curve[7] - curve[1]);
+    search: for (const shift of toward ? [0, 0.3, 0.6] : [0]) {
+      for (const t of [0.5, 0.4, 0.6, 0.32, 0.68, 0.25, 0.75, 0.18, 0.82]) {
+        const [bx, by] = bezier(curve, t);
+        const [x, y] = vertical ? [bx + toward * shift * lw, by] : [bx, by + toward * shift * lh * 1.5];
+        const box: Box = [x - lw / 2 - 3, y - lh / 2 - 3, x + lw / 2 + 3, y + lh / 2 + 3];
+        if (!hits(box)) { best = [x, y]; taken.push(box); break search; }
+      }
     }
     const [mx, my] = best ?? bezier(curve, 0.5);
-    return `<g class="dg-label"><rect x="${mx - lw / 2}" y="${my - 11}" width="${lw}" height="22" rx="11"/><text x="${mx}" y="${my}">${escapeXml(text)}</text></g>`;
+    labelBoxes.push([mx - lw / 2, my - lh / 2, mx + lw / 2, my + lh / 2]);
+    const first = my - ((lines.length - 1) * LINE) / 2;
+    return `<g class="dg-label"><rect x="${mx - lw / 2}" y="${my - lh / 2}" width="${lw}" height="${lh}" rx="${Math.min(11, lh / 2)}"/><text x="${mx}" y="${first}">${lines.map((l, i) => `<tspan x="${mx}" ${i ? `dy="${LINE}"` : ''}>${escapeXml(l)}</tspan>`).join('')}</text></g>`;
   };
 
   // Point le plus éloigné atteint par un lien qui contourne : le cadre du dessin s'élargit d'autant
@@ -319,24 +408,29 @@ export function renderDiagram(source: string, caption = ''): string | null {
     }
     const c = curve.map(v => Math.round(v * 10) / 10);
     const d = `M${c[0]},${c[1]} C${c[2]},${c[3]} ${c[4]},${c[5]} ${c[6]},${c[7]}`;
-    const label = e.label ? placeLabel(curve, e.label) : '';
+    const label = e.label ? placeLabel(curve, e) : '';
     return { path: `<path d="${d}" class="dg-edge dg-${e.style}"${e.arrow ? ` marker-end="url(#dg-arrow-${id})"` : ''}${e.both ? ` marker-start="url(#dg-arrow-${id})"` : ''}/>`, label };
   });
 
   const round = (v: number) => Math.round(v * 10) / 10;
-  const [fullX, fullY] = vertical ? [Math.max(maxX, reach + PAD), maxY] : [maxX, Math.max(maxY, reach + PAD)];
-  const [startX, startY] = vertical ? [Math.min(minX, reachMin - PAD), minY] : [minX, Math.min(minY, reachMin - PAD)];
+  // Le cadre englobe aussi les libellés, même posés sur un lien qui contourne
+  let [fullX, fullY] = vertical ? [Math.max(maxX, reach + PAD), maxY] : [maxX, Math.max(maxY, reach + PAD)];
+  let [startX, startY] = vertical ? [Math.min(minX, reachMin - PAD), minY] : [minX, Math.min(minY, reachMin - PAD)];
+  for (const b of labelBoxes) {
+    startX = Math.min(startX, b[0] - 8); startY = Math.min(startY, b[1] - 8);
+    fullX = Math.max(fullX, b[2] + 8); fullY = Math.max(fullY, b[3] + 8);
+  }
   const svg = `<svg class="dg" viewBox="${round(startX)} ${round(startY)} ${round(fullX - startX)} ${round(fullY - startY)}" width="${round(fullX - startX)}" style="--dgw:${round(fullX - startX)}px" role="img" aria-label="${escapeXml(caption || 'Diagramme')}">
 <defs><marker id="dg-arrow-${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="dg-head"/></marker></defs>
 ${frames.map(f => `<g class="dg-group"><rect x="${f.x0}" y="${f.y0}" width="${f.x1 - f.x0}" height="${f.y1 - f.y0}" rx="10"/></g>`).join('')}
 ${links.map(l => l.path).join('')}
-${frames.filter(f => f.g.title).map(f => {
+${frames.filter(f => f.title.length).map(f => {
     // Le titre passe par-dessus les liens qui entrent dans le cadre, sur une pastille opaque
-    const tw = textWidth(f.g.title.toUpperCase()) * 0.92 + 18;
-    return `<g class="dg-gtitle"><rect x="${f.x0 + 8}" y="${f.y0 + 7}" width="${tw}" height="20" rx="10"/><text x="${f.x0 + 17}" y="${f.y0 + 17}">${escapeXml(f.g.title)}</text></g>`;
+    const h = f.title.length * TITLE_LINE + 6;
+    return `<g class="dg-gtitle"><rect x="${f.x0 + 8}" y="${f.y0 + 7}" width="${f.tw}" height="${h}" rx="10"/><text x="${f.x0 + 17}" y="${f.y0 + 17}">${f.title.map((l, i) => `<tspan x="${f.x0 + 17}" ${i ? `dy="${TITLE_LINE}"` : ''}>${escapeXml(l)}</tspan>`).join('')}</text></g>`;
   }).join('')}
 ${all.map(n => `<g class="dg-n">${shape(n)}${text(n)}</g>`).join('')}
 ${links.map(l => l.label).join('')}
 </svg>`;
-  return `<figure class="diagram">${svg.replace(/\n/g, '')}${caption ? `<figcaption>${escapeXml(caption)}</figcaption>` : ''}</figure>`;
+  return { svg: svg.replace(/\n/g, ''), width: fullX - startX };
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFlowchart, renderDiagram } from '../server/src/diagram.ts';
+import { parseFlowchart, renderDiagram, wrapText } from '../server/src/diagram.ts';
 import { renderMarkdown } from '../server/src/docs.ts';
 
 /**
@@ -47,6 +47,34 @@ describe('Organigrammes', () => {
     expect(svg).toContain('&lt;img');
     expect(renderDiagram('sequenceDiagram\n A->>B: salut')).toBeNull();
     expect(renderDiagram('graph TD\n A[ouvert --> B')).toBeNull();
+  });
+});
+
+describe('Textes longs', () => {
+  it('passe à la ligne entre les mots, sans laisser un mot seul', () => {
+    const lignes = wrapText('Argon2id avec 64 Mio de mémoire et 3 itérations', 150);
+    expect(lignes.length).toBe(2);
+    expect(lignes.join(' ')).toBe('Argon2id avec 64 Mio de mémoire et 3 itérations');
+    expect(lignes.every(l => l.split(' ').length > 1)).toBe(true);
+    // Un mot trop long (une adresse) se coupe après un séparateur
+    expect(wrapText('https://vault.exemple.fr/api/v1/vault/attachments', 120).length).toBeGreaterThan(1);
+    // Les retours voulus sont gardés
+    expect(wrapText('main.ts\nécrans', 200)).toEqual(['main.ts', 'écrans']);
+  });
+
+  it('découpe les nœuds et les libellés longs en plusieurs lignes', () => {
+    const svg = renderDiagram('graph TD\n  A[L’utilisateur saisit son mot de passe principal sur l’appareil de confiance] -->|Argon2id avec 64 Mio de mémoire et 3 itérations| B[Clé]')!;
+    const largeur = Number(/viewBox="[-\d.]+ [-\d.]+ ([\d.]+)/.exec(svg)![1]);
+    expect(largeur).toBeLessThan(320);
+    expect(svg.match(/<tspan/g)!.length).toBeGreaterThan(4);
+  });
+
+  it('ajoute une version verticale d’un diagramme large pour les téléphones', () => {
+    const large = renderDiagram('flowchart LR\n  a[Interface utilisateur] --> b[Magasin local chiffré] --> c[API de synchronisation] --> d[(Base de données)]')!;
+    expect(large).toContain('<figure class="diagram has-narrow">');
+    expect(large).toContain('<svg class="dg dg-wide"');
+    expect(large).toContain('<svg class="dg dg-narrow"');
+    expect(renderDiagram('graph LR\n  a --> b')).not.toContain('dg-narrow');
   });
 });
 
