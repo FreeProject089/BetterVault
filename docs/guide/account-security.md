@@ -51,7 +51,7 @@ Le choix n'apparaît que si l'appareil répond qu'il en a une : mieux vaut pas d
 | Application Android, iOS | Non dans la vue web native | Non |
 | Serveur en `http` simple | Non : le navigateur refuse hors contexte sécurisé | Non |
 
-Là où ce n'est pas possible, le bouton **Ajouter une clé** reste grisé avec l'explication, et le code de l'application d'authentification prend le relais. Sur bureau et mobile, l'ouverture rapide passe par Windows Hello, Touch ID, l'empreinte Android ou le trousseau de session sous Linux — voir [Biométrie et remplissage automatique](../applications/biometrie-autofill.md).
+Là où ce n'est pas possible, le bouton **Ajouter une clé** reste grisé avec l'explication, et le code de l'application d'authentification prend le relais. Sur bureau et mobile, l'ouverture rapide passe par Windows Hello, Touch ID, l'empreinte Android ou le trousseau de session sous Linux — voir [Biométrie et remplissage automatique](../apps/biometrics-autofill.md).
 
 **Se connecter** : saisissez le mot de passe, la demande de clé apparaît d'elle-même. Si vous l'écartez et que la double authentification par code est aussi active, le champ du code prend le relais.
 
@@ -95,4 +95,4 @@ Si le serveur envoie des emails, vous êtes prévenu :
 
 Fermer une session (ou toutes les autres) demande le mot de passe principal, et le code de l'application d'authentification si la double authentification est activée. L'appareil concerné est déconnecté dès son prochain échange avec le serveur.
 
-Le lieu est calculé par votre serveur à partir d'une base locale, sans appel à un service tiers, et l'adresse IP complète n'est jamais conservée. Voir [Sessions et lieu](../deploiement/sessions-lieu.md) pour l'installer.
+Le lieu est calculé par votre serveur à partir d'une base locale, sans appel à un service tiers, et l'adresse IP complète n'est jamais conservée. Voir [Sessions et lieu](../deployment/sessions-location.md) pour l'installer.

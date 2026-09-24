@@ -47,45 +47,45 @@ markdown_extensions:
 nav:
   - Accueil: index.md
   - Guide:
-      - Premiers pas: guide/premiers-pas.md
-      - Identifiants et 2FA: guide/identifiants.md
-      - Tâches: guide/taches.md
-      - Coffres et tags: guide/coffres-tags.md
-      - Historique et corbeille: guide/historique-corbeille.md
-      - Apparence: guide/apparence.md
+      - Premiers pas: guide/getting-started.md
+      - Identifiants et 2FA: guide/credentials.md
+      - Tâches: guide/tasks.md
+      - Coffres et tags: guide/vaults-tags.md
+      - Historique et corbeille: guide/history-trash.md
+      - Apparence: guide/appearance.md
       - Import et export: guide/import-export.md
-      - Compte et synchronisation: guide/synchronisation.md
-      - Sécurité du compte: guide/securite-compte.md
-      - Coffres partagés: guide/partage.md
-      - Pièces jointes: guide/pieces-jointes.md
+      - Compte et synchronisation: guide/sync.md
+      - Sécurité du compte: guide/account-security.md
+      - Coffres partagés: guide/sharing.md
+      - Pièces jointes: guide/attachments.md
       - Extension navigateur: guide/extension.md
-      - Raccourcis clavier: guide/raccourcis.md
+      - Raccourcis clavier: guide/shortcuts.md
   - Déploiement:
-      - Installation rapide: deploiement/installation.md
-      - Docker: deploiement/docker.md
-      - Sans Docker: deploiement/sans-docker.md
-      - Configuration et sauvegardes: deploiement/configuration.md
-      - Sauvegardes S3 et RGPD: deploiement/sauvegardes.md
-      - Sessions et lieu: deploiement/sessions-lieu.md
-      - Plusieurs serveurs (grappe): deploiement/grappe.md
-      - Supervision: deploiement/supervision.md
-      - Page publique et annuaire: deploiement/page-publique.md
-      - Documents légaux: deploiement/documents-legaux.md
-      - Emails et langues: deploiement/emails-langues.md
-      - Espace payant (Stripe): deploiement/offres-stripe.md
-      - Page d'administration: deploiement/administration.md
-      - Dépannage: deploiement/depannage.md
+      - Installation rapide: deployment/installation.md
+      - Docker: deployment/docker.md
+      - Sans Docker: deployment/without-docker.md
+      - Configuration et sauvegardes: deployment/configuration.md
+      - Sauvegardes S3 et RGPD: deployment/backups.md
+      - Sessions et lieu: deployment/sessions-location.md
+      - Plusieurs serveurs (grappe): deployment/cluster.md
+      - Supervision: deployment/monitoring.md
+      - Page publique et annuaire: deployment/public-page.md
+      - Documents légaux: deployment/legal-documents.md
+      - Emails et langues: deployment/emails-languages.md
+      - Espace payant (Stripe): deployment/stripe-plans.md
+      - Page d'administration: deployment/administration.md
+      - Dépannage: deployment/troubleshooting.md
   - Applications:
-      - Bureau et mobile: applications/bureau-mobile.md
-      - Biométrie et remplissage automatique: applications/biometrie-autofill.md
-      - macOS et iOS (à venir): applications/apple.md
-  - Sécurité: securite.md
-  - Zero-knowledge et conformité: conformite.md
+      - Bureau et mobile: apps/desktop-mobile.md
+      - Biométrie et remplissage automatique: apps/biometrics-autofill.md
+      - macOS et iOS (à venir): apps/apple.md
+  - Sécurité: security.md
+  - Zero-knowledge et conformité: compliance.md
   - Développement:
-      - Architecture: developpement/architecture.md
-      - Choix techniques: developpement/technique.md
-      - Construire pas à pas: developpement/guide-construire.md
-      - Construire l'application: developpement/build.md
-      - Publier une version: developpement/publier.md
-      - API du serveur: developpement/api.md
-      - Contribuer: developpement/contribuer.md
+      - Architecture: development/architecture.md
+      - Choix techniques: development/technical.md
+      - Construire pas à pas: development/build-guide.md
+      - Construire l'application: development/build.md
+      - Publier une version: development/releasing.md
+      - API du serveur: development/api.md
+      - Contribuer: development/contributing.md

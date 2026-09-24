@@ -161,7 +161,7 @@ npm run tauri android dev
 npm run tauri ios init
 ```
 
-Sur Windows, si Gradle affiche « Unable to establish loopback connection », voir `docs/applications/bureau-mobile.md`.
+Sur Windows, si Gradle affiche « Unable to establish loopback connection », voir `docs/apps/desktop-mobile.md`.
 
 ## Extension navigateur (Chrome, Edge, Firefox)
 

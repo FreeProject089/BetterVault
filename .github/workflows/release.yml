@@ -174,7 +174,7 @@ jobs:
         if: env.HAS_KEYSTORE != 'true'
         run: |
           cp "$(find src-tauri/gen/android -name '*release-unsigned.apk' | head -1)" bettervault-android-unsigned.apk
-          echo "::warning title=APK non signé::Secret ANDROID_KEYSTORE absent : aucun APK n'est joint à la version (voir docs/developpement/build.md)."
+          echo "::warning title=APK non signé::Secret ANDROID_KEYSTORE absent : aucun APK n'est joint à la version (voir docs/development/build.md)."
       - uses: softprops/action-gh-release@v2
         if: ${{ env.HAS_KEYSTORE == 'true' && (github.event_name == 'push' || inputs.publier) }}
         with:

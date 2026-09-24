@@ -126,4 +126,4 @@ Le projet Xcode est généré, pas versionné : ces deux réglages sont à refai
 
 Le reste — chiffrement, synchronisation, coffres partagés, pièces jointes — est
 le même code que sur les autres systèmes. [Biométrie et remplissage
-automatique](biometrie-autofill.md) détaille ce qui se passe sous le capot.
+automatique](biometrics-autofill.md) détaille ce qui se passe sous le capot.

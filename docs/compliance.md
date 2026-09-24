@@ -55,4 +55,4 @@ Restent à la charge de l'hébergeur : politique de sécurité, gestion des risq
 - `GET /api/v1/vault` renvoie un blob chiffré ; aucune route ne renvoie de contenu en clair.
 - Un export de la base (onglet Tableau de bord) montre ce que contient réellement le stockage.
 
-Voir aussi [Sécurité](securite.md) pour le détail des clés et des formats.
+Voir aussi [Sécurité](security.md) pour le détail des clés et des formats.

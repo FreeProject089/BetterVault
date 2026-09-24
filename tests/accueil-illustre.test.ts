@@ -50,12 +50,22 @@ describe('Page d’accueil', () => {
   });
 
   it('sert le logo adapté au thème clair', () => {
-    expect(renderLanding(base)).toContain('<source srcset="/admin/logo-on-light.svg" media="(prefers-color-scheme: light)">');
+    expect(renderLanding(base)).toContain('<img class="logo-l" src="/admin/logo-on-light.svg"');
+  });
+
+  it('propose un bouton de thème, et applique le thème choisi dès le rendu', () => {
+    const html = renderLanding({ ...base, path: '/download' });
+    expect(html).toContain('href="/theme?set=light&amp;back=%2Fdownload"');
+    expect(html).toContain('<html lang="fr">');
+    // Le choix l'emporte sur le système, dans les deux sens
+    expect(renderLanding({ ...base, theme: 'light' })).toContain('<html lang="fr" data-theme="light">');
+    expect(html).toMatch(/@media \(prefers-color-scheme:light\)\{:root:not\(\[data-theme=dark\]\)\{--bg:#f6f8fa/);
+    expect(html).toContain(':root[data-theme=light]{--bg:#f6f8fa');
   });
 
   it('ne propose le lien vers les serveurs que si l’annuaire en contient', () => {
-    expect(renderLanding(base)).not.toContain('href="/serveurs"');
-    expect(renderLanding({ ...base, page: annuaire })).toContain('href="/serveurs"');
+    expect(renderLanding(base)).not.toContain('href="/servers"');
+    expect(renderLanding({ ...base, page: annuaire })).toContain('href="/servers"');
   });
 });
 
@@ -155,6 +165,6 @@ describe('Page des téléchargements', () => {
   });
 
   it('apparaît dans la barre du haut', () => {
-    expect(renderLanding(base)).toContain('href="/telecharger"');
+    expect(renderLanding(base)).toContain('href="/download"');
   });
 });

@@ -33,15 +33,15 @@ Les actions sensibles (restaurer une sauvegarde, retirer un nœud, changer un se
 
 | Groupe | Écran | Rôle |
 | --- | --- | --- |
-| Aperçu | Tableau de bord | Activité, stockage, performances, contrôles de sécurité — voir [Supervision](supervision.md) |
+| Aperçu | Tableau de bord | Activité, stockage, performances, contrôles de sécurité — voir [Supervision](monitoring.md) |
 | | Journal | Événements sensibles, comptes pseudonymisés |
 | Configuration | Réglages | Adresse publique, inscriptions, pièces jointes, page d'accueil, annuaire, SMTP, thème par défaut |
-| | Offres | Espace payant — voir [Stripe](offres-stripe.md) |
-| | Documents légaux | Informations de l'hébergeur — voir [Documents légaux](documents-legaux.md) |
-| | Emails | Aperçu et personnalisation des messages — voir [Emails et langues](emails-langues.md) |
+| | Offres | Espace payant — voir [Stripe](stripe-plans.md) |
+| | Documents légaux | Informations de l'hébergeur — voir [Documents légaux](legal-documents.md) |
+| | Emails | Aperçu et personnalisation des messages — voir [Emails et langues](emails-languages.md) |
 | | Langues | Packs de traduction |
-| Infrastructure | Sauvegardes | Destinations S3, historique, restauration — voir [Sauvegardes](sauvegardes.md) |
-| | Grappe | Nœuds et réplication — voir [Grappe](grappe.md) |
+| Infrastructure | Sauvegardes | Destinations S3, historique, restauration — voir [Sauvegardes](backups.md) |
+| | Grappe | Nœuds et réplication — voir [Grappe](cluster.md) |
 | Accès | Administrateurs | Comptes d'administration, son propre mot de passe et sa 2FA |
 
 ## Thème

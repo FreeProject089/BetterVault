@@ -2,7 +2,7 @@
 
 Une version, c'est un **tag Git** (`v1.2.0`). Le pousser sur GitHub lance le workflow **Release**, qui construit tout sur les machines de GitHub et prépare une release **en brouillon**. Rien n'est visible du public tant que vous ne publiez pas ce brouillon vous-même.
 
-Ce guide suppose que le code est déjà sur GitHub et que la CI est verte. Pour construire à la main sur votre machine, voir [Construire pas à pas](guide-construire.md).
+Ce guide suppose que le code est déjà sur GitHub et que la CI est verte. Pour construire à la main sur votre machine, voir [Construire pas à pas](build-guide.md).
 
 ## En bref
 
@@ -82,7 +82,7 @@ Les travaux sont indépendants : si macOS échoue, les autres fichiers sont quan
 
 Ensuite, sans rien faire d'autre :
 
-- la page **Télécharger** de chaque serveur relie ses boutons aux nouveaux fichiers, au plus tard une heure après (voir [Page Télécharger](../deploiement/page-publique.md#page-telecharger)) ;
+- la page **Télécharger** de chaque serveur relie ses boutons aux nouveaux fichiers, au plus tard une heure après (voir [Page Télécharger](../deployment/public-page.md#page-telecharger)) ;
 - les serveurs qui suivent l'image `:latest` peuvent se mettre à jour (`docker compose pull && docker compose up -d`).
 
 !!! note "Première publication de l'image Docker"
@@ -94,7 +94,7 @@ Ensuite, sans rien faire d'autre :
 | --- | --- | --- |
 | Extension Chrome, Edge | [Chrome Web Store](https://chrome.google.com/webstore/devconsole), [Edge Add-ons](https://partner.microsoft.com/dashboard/microsoftedge) | `bettervault-extension-v1.2.0.zip` |
 | Extension Firefox | [addons.mozilla.org](https://addons.mozilla.org/developers/) | le même `.zip` |
-| iOS | Xcode, TestFlight | voir [macOS et iOS](../applications/apple.md) |
+| iOS | Xcode, TestFlight | voir [macOS et iOS](../apps/apple.md) |
 
 ## Les secrets de signature
 
@@ -106,7 +106,7 @@ Ils se règlent dans **GitHub → Settings → Secrets and variables → Actions
 | macOS | `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` | Le `.dmg` s'installe, mais macOS l'arrête au premier lancement (clic droit → Ouvrir pour passer outre). |
 | Windows | aucun prévu | SmartScreen affiche « Windows a protégé votre ordinateur » tant que le fichier n'a pas de réputation. |
 
-La création de la clé Android est expliquée dans [Construire l'application](build.md#application-android), celle des certificats Apple dans [macOS et iOS](../applications/apple.md).
+La création de la clé Android est expliquée dans [Construire l'application](build.md#application-android), celle des certificats Apple dans [macOS et iOS](../apps/apple.md).
 
 !!! danger "Une clé de signature ne se remplace pas"
     Android et macOS reconnaissent une application à sa signature. Changer de clé Android oblige chaque utilisateur à désinstaller puis réinstaller l'application. Gardez une sauvegarde de la clé et de son mot de passe hors du dépôt.

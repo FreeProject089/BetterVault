@@ -45,7 +45,7 @@ import { createLanguages, LanguageError } from './languages.ts';
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.ts';
 import { createWebauthn, parseRpId, type AssertionInput } from './webauthn.ts';
 import { DEFAULT_PUBLIC_PAGE, publicDirectory, renderDownloadsPage, renderLanding, renderPlansPage, renderServersPage, type PublicPlan } from './directory.ts';
-import { renderDocPage } from './docs.ts';
+import { legacyDocPath, renderDocPage } from './docs.ts';
 import { SITE_JS } from './siteScript.ts';
 import { createSiteLinks } from './siteLinks.ts';
 import { createReleases } from './releases.ts';
@@ -1176,6 +1176,9 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
     return { locale: 'en', lang: code, strings: languages.get(code)?.strings ?? {}, langs, cookie };
   };
   const withCookie = (reply: Reply, cookie?: string): Reply => (cookie ? { ...reply, headers: { ...(reply.headers ?? {}), 'Set-Cookie': cookie } } : reply);
+  /** Thème choisi avec le bouton de la barre (cookie bv_theme) ; sans lui, la page suit le système */
+  const pageTheme = (req: IncomingMessage): 'light' | 'dark' | undefined =>
+    /(?:^|;\s*)bv_theme=(light|dark)(?:;|$)/.exec(String(req.headers.cookie ?? ''))?.[1] as 'light' | 'dark' | undefined;
 
   /** Offres affichées sur la page des tarifs : sans identifiants Stripe */
   const publicPlans = (): PublicPlan[] => settings.billing.enabled
@@ -1204,6 +1207,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       cookie,
       ctx: {
         lang, strings, langs,
+        theme: pageTheme(req),
         page: settings.publicPage ?? DEFAULT_PUBLIC_PAGE,
         operatorName: settings.legal.operatorName ?? '',
         registrationOpen: settings.registrationOpen,
@@ -1233,7 +1237,8 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       operatorName: settings.legal.operatorName ?? '',
       plansOn: publicPlans().length > 0,
       links: await siteLinks(),
-      path: url.pathname
+      path: url.pathname,
+      theme: pageTheme(req)
     };
   };
   const legalPage = async (slug: string, req: IncomingMessage): Promise<Reply> => {
@@ -1270,6 +1275,12 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
    * faille d'échappement ne suffirait ni à exécuter du code ni à sortir une donnée.
    */
   const PAGE_CSP = "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+  /** Paramètres de l'adresse (« ?lang=en »), à garder lors d'un renvoi vers une page renommée */
+  const queryOf = (req: IncomingMessage) => {
+    const url = req.url ?? '';
+    const at = url.indexOf('?');
+    return at >= 0 && url.length - at <= 300 ? url.slice(at) : '';
+  };
   const htmlReply = (html: string, status = 200): Reply => ({
     status,
     raw: Buffer.from(html),
@@ -1699,6 +1710,9 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       keys: ['page'],
       handler: async (req: IncomingMessage, params: Record<string, string>): Promise<Reply> => {
         const page = (params.page ?? '').replace(/\/$/, '');
+        // Anciennes adresses françaises : renvoi permanent vers la page renommée
+        const moved = legacyDocPath(page);
+        if (moved) return { status: 301, headers: { Location: `/docs/${moved}${queryOf(req)}` } };
         const { locale, cookie } = pageLocale(req);
         const html = renderDocPage(page, {
           root: docsDir,
@@ -1721,25 +1735,41 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       return withCookie(htmlReply(renderLanding(ctx)), cookie);
     }),
     route('GET', '/about', async () => ({ status: 301, headers: { Location: '/' } })),
+    /*
+     * Bouton de thème sans script : retient le choix un an et ramène à la page.
+     * Le retour n'accepte qu'un chemin de ce serveur (pas « //ailleurs »).
+     */
+    route('GET', '/theme', async req => {
+      const url = new URL(req.url ?? '/', 'http://localhost');
+      const set = url.searchParams.get('set');
+      const asked = String(url.searchParams.get('back') ?? '/');
+      const back = /^\/(?![/\\])[^\s]{0,300}$/.test(asked) ? asked : '/';
+      const cookie = set === 'light' || set === 'dark'
+        ? `bv_theme=${set}; Path=/; Max-Age=31536000; SameSite=Lax`
+        : 'bv_theme=; Path=/; Max-Age=0; SameSite=Lax';
+      return { status: 303, headers: { Location: back, 'Set-Cookie': cookie, 'Cache-Control': 'no-store' } };
+    }),
+    // Anciennes adresses françaises des pages publiques, gardées pour les liens partagés
+    ...([['/serveurs', '/servers'], ['/tarifs', '/pricing'], ['/telecharger', '/download']] as const).map(([from, to]) =>
+      route('GET', from, async req => ({ status: 301, headers: { Location: to + queryOf(req) } }))),
     // Serveurs recommandés par l'hébergeur (annuaire) ; absente si l'annuaire est coupé
-    route('GET', '/serveurs', async req => {
+    route('GET', '/servers', async req => {
       const { ctx, cookie } = await landingContext(req);
       const html = renderServersPage(ctx);
       return withCookie(html ? htmlReply(html) : htmlReply('<!DOCTYPE html><title>404</title><p>Not found</p>', 404), cookie);
     }),
     // Offres payantes ; absente tant qu'aucune n'est publiée
-    route('GET', '/tarifs', async req => {
+    route('GET', '/pricing', async req => {
       const { ctx, cookie } = await landingContext(req);
       const html = renderPlansPage(ctx);
       return withCookie(html ? htmlReply(html) : htmlReply('<!DOCTYPE html><title>404</title><p>Not found</p>', 404), cookie);
     }),
     // Où télécharger ou installer BetterVault, plateforme par plateforme
-    route('GET', '/telecharger', async req => {
+    route('GET', '/download', async req => {
       const { ctx, cookie } = await landingContext(req);
       githubRepo = ctx.links?.github ?? '';
       return withCookie(htmlReply(renderDownloadsPage({ ...ctx, release: await latestRelease() })), cookie);
     }),
-    route('GET', '/download', async () => ({ status: 301, headers: { Location: '/telecharger' } })),
     // Script des pages publiques : du confort (apparitions, démonstrations), jamais indispensable
     route('GET', '/site.js', async () => ({
       status: 200, raw: Buffer.from(SITE_JS), contentType: 'text/javascript; charset=utf-8',

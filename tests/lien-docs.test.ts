@@ -21,7 +21,7 @@ afterEach(() => { vi.unstubAllGlobals(); });
 describe('Lien vers la documentation', () => {
   it('pointe vers la documentation du serveur du compte', () => {
     compte!.serverUrl = 'https://coffre.exemple.fr';
-    expect(docsUrl('guide/premiers-pas')).toBe('https://coffre.exemple.fr/docs/guide/premiers-pas');
+    expect(docsUrl('guide/getting-started')).toBe('https://coffre.exemple.fr/docs/guide/getting-started');
     compte!.serverUrl = 'https://coffre.exemple.fr/';
     expect(docsUrl('index')).toBe('https://coffre.exemple.fr/docs/index');
   });
@@ -45,7 +45,7 @@ describe('Lien vers la documentation', () => {
 
   it('utilise le chemin relatif quand l’application est servie par un serveur', () => {
     vi.stubGlobal('location', { protocol: 'https:', hostname: 'coffre.exemple.fr' });
-    expect(docsUrl('guide/apparence')).toBe('/docs/guide/apparence');
+    expect(docsUrl('guide/appearance')).toBe('/docs/guide/appearance');
   });
 
   it('produit un lien sûr, ouvert sans referrer', () => {

@@ -2,7 +2,7 @@ import { SITE_JS_TAG } from './siteScript.ts';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, normalize, sep } from 'node:path';
 import { markdownToHtml } from './legal.ts';
-import { CHROME_CSS, pageLangCode, siteFooter, siteHeader, translator, type ChromeContext } from './siteChrome.ts';
+import { CHROME_CSS, pageLangCode, siteFooter, siteHeader, themeAttr, themeVars, translator, type ChromeContext } from './siteChrome.ts';
 
 /**
  * Documentation servie par le serveur, directement depuis les fichiers Markdown
@@ -16,12 +16,40 @@ import { CHROME_CSS, pageLangCode, siteFooter, siteHeader, translator, type Chro
 
 const PATH = /^[a-z0-9-]+(?:\/[a-z0-9-]+)?$/;
 
+/**
+ * Anciennes adresses françaises de la documentation, avant le passage des
+ * chemins en anglais : elles renvoient vers la nouvelle page, pour que les
+ * favoris et les liens déjà partagés continuent de marcher.
+ */
+const LEGACY: Record<string, string> = {
+  conformite: 'compliance', securite: 'security',
+  'applications/apple': 'apps/apple', 'applications/biometrie-autofill': 'apps/biometrics-autofill', 'applications/bureau-mobile': 'apps/desktop-mobile',
+  'deploiement/administration': 'deployment/administration', 'deploiement/configuration': 'deployment/configuration',
+  'deploiement/depannage': 'deployment/troubleshooting', 'deploiement/docker': 'deployment/docker',
+  'deploiement/documents-legaux': 'deployment/legal-documents', 'deploiement/emails-langues': 'deployment/emails-languages',
+  'deploiement/grappe': 'deployment/cluster', 'deploiement/installation': 'deployment/installation',
+  'deploiement/offres-stripe': 'deployment/stripe-plans', 'deploiement/page-publique': 'deployment/public-page',
+  'deploiement/sans-docker': 'deployment/without-docker', 'deploiement/sauvegardes': 'deployment/backups',
+  'deploiement/sessions-lieu': 'deployment/sessions-location', 'deploiement/supervision': 'deployment/monitoring',
+  'developpement/api': 'development/api', 'developpement/architecture': 'development/architecture', 'developpement/build': 'development/build',
+  'developpement/contribuer': 'development/contributing', 'developpement/guide-construire': 'development/build-guide',
+  'developpement/publier': 'development/releasing', 'developpement/technique': 'development/technical',
+  'guide/apparence': 'guide/appearance', 'guide/changer-de-serveur': 'guide/switching-server', 'guide/coffres-tags': 'guide/vaults-tags',
+  'guide/historique-corbeille': 'guide/history-trash', 'guide/identifiants': 'guide/credentials', 'guide/partage': 'guide/sharing',
+  'guide/pieces-jointes': 'guide/attachments', 'guide/premiers-pas': 'guide/getting-started', 'guide/raccourcis': 'guide/shortcuts',
+  'guide/securite-compte': 'guide/account-security', 'guide/synchronisation': 'guide/sync', 'guide/taches': 'guide/tasks',
+  deploiement: 'deployment', developpement: 'development', applications: 'apps'
+};
+
+/** Nouvelle adresse d'une ancienne page, sinon rien */
+export const legacyDocPath = (page: string): string | null => LEGACY[page] ?? null;
+
 const SECTIONS: Record<string, [string, string]> = {
   '': ['Général', 'General'],
   guide: ['Guide d’utilisation', 'User guide'],
-  deploiement: ['Installer un serveur', 'Run a server'],
-  applications: ['Applications', 'Apps'],
-  developpement: ['Développement', 'Development']
+  deployment: ['Installer un serveur', 'Run a server'],
+  apps: ['Applications', 'Apps'],
+  development: ['Développement', 'Development']
 };
 
 export interface DocPage {
@@ -71,9 +99,9 @@ export function listDocs(root: string): DocPage[] {
  * cartes, onglets, colonnes — ainsi que quelques éléments en ligne
  * (:badge, :kbd, :button, ==surligné==).
  *
- * `page` est le chemin de la page affichée (« guide/premiers-pas ») : il sert
+ * `page` est le chemin de la page affichée (« guide/getting-started ») : il sert
  * à transformer les liens relatifs vers d'autres fichiers (« docker.md »,
- * « ../securite.md#sessions ») en adresses de la documentation.
+ * « ../security.md#sessions ») en adresses de la documentation.
  */
 export function renderMarkdown(markdown: string, page = ''): string {
   const blocks: string[] = [];
@@ -106,7 +134,7 @@ export function renderMarkdown(markdown: string, page = ''): string {
 
   /*
    * Liens entre pages : écrits comme dans l'éditeur (« docker.md »,
-   * « ../securite.md#sessions »), ils deviennent des adresses de la
+   * « ../security.md#sessions »), ils deviennent des adresses de la
    * documentation. Avant, ils restaient affichés tels quels, crochets compris.
    */
   const dossier = page.includes('/') ? page.slice(0, page.lastIndexOf('/')) : '';
@@ -349,7 +377,7 @@ export function renderDocPage(path: string, ctx: DocsContext): string | null {
     : `<header class="site-bar"><div class="site-bar-in"><a class="site-brand" href="/"><picture><source srcset="/admin/logo-on-light.svg" media="(prefers-color-scheme: light)"><img src="/admin/logo-on-dark.svg" alt="" width="28" height="28"></picture><span>BetterVault</span></a><nav class="site-links"><a href="/docs" aria-current="page">Documentation</a></nav>${ctx.appAvailable ? `<div class="site-actions"><a class="site-cta" href="/app">${t('Premiers pas', 'Get started')}<span aria-hidden="true">→</span></a></div>` : ''}</div></header>`;
 
   return `<!DOCTYPE html>
-<html lang="${escapeHtml(ctx.chrome ? pageLangCode(ctx.chrome) : ctx.locale)}">
+<html lang="${escapeHtml(ctx.chrome ? pageLangCode(ctx.chrome) : ctx.locale)}"${ctx.chrome ? themeAttr(ctx.chrome) : ''}>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -357,8 +385,8 @@ export function renderDocPage(path: string, ctx: DocsContext): string | null {
 <link rel="icon" type="image/svg+xml" href="/admin/logo-on-dark.svg" media="(prefers-color-scheme: dark)">
 <link rel="icon" type="image/svg+xml" href="/admin/logo-on-light.svg" media="(prefers-color-scheme: light)">
 <style>
-:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#7773e8;--code:#0b0f14;color-scheme:dark}
-@media (prefers-color-scheme:light){:root{--bg:#ffffff;--card:#f6f8fa;--border:#d8dee4;--text:#1f2328;--muted:#59636e;--accent:#5754c7;--code:#f6f8fa;color-scheme:light}}
+${themeVars('--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#7773e8;--code:#0b0f14;color-scheme:dark',
+  '--bg:#ffffff;--card:#f6f8fa;--border:#d8dee4;--text:#1f2328;--muted:#59636e;--accent:#5754c7;--code:#f6f8fa;color-scheme:light')}
 *{box-sizing:border-box}
 html{scroll-padding-top:84px;scroll-behavior:smooth}
 body{margin:0;background:var(--bg);color:var(--text);font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}

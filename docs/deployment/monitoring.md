@@ -35,4 +35,4 @@ node server/tools/decrypt-backup.ts bettervault-2026-09-16.db.gz.enc bettervault
 
 La phrase n'est stockée nulle part : sans elle, le fichier est inutilisable. Les coffres qu'il contient restent de toute façon chiffrés par les mots de passe des utilisateurs.
 
-Pour des sauvegardes régulières vers un stockage S3, voir [Sauvegardes S3 et RGPD](sauvegardes.md).
+Pour des sauvegardes régulières vers un stockage S3, voir [Sauvegardes S3 et RGPD](backups.md).

@@ -14,13 +14,13 @@ Au premier lancement, BetterVault affiche l'écran **Créer un compte**.
     | **Cet appareil** | Chiffrées dans le stockage local de l'appareil uniquement | Un seul appareil, aucun serveur |
     | **Synchronisé** | Chiffrées sur l'appareil et sur un serveur BetterVault | Plusieurs appareils |
 
-5. En mode synchronisé, indiquez l'adresse du serveur (voir [Docker](../deploiement/docker.md)).
+5. En mode synchronisé, indiquez l'adresse du serveur (voir [Docker](../deployment/docker.md)).
 6. Cliquez sur **Créer le coffre**.
 
 !!! warning
     Il n'existe aucune procédure de récupération du mot de passe principal. Notez-le dans un endroit sûr.
 
-Un compte local peut être synchronisé plus tard : voir [Compte et synchronisation](synchronisation.md#activer-la-synchronisation).
+Un compte local peut être synchronisé plus tard : voir [Compte et synchronisation](sync.md#activer-la-synchronisation).
 
 ## Se connecter sur un autre appareil
 

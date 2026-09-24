@@ -2,7 +2,7 @@
 
 BetterVault se décline en six paquets, tous construits à partir des mêmes sources : application web, extension de navigateur, image Docker du serveur, application de bureau, application Android et application iOS.
 
-Cette page est la référence : ce qu'il faut et ce que produit chaque paquet. Pour partir d'une machine vierge, étape par étape, voir [Construire pas à pas](guide-construire.md).
+Cette page est la référence : ce qu'il faut et ce que produit chaque paquet. Pour partir d'une machine vierge, étape par étape, voir [Construire pas à pas](build-guide.md).
 
 !!! tip "Tout construire sans rien publier"
     Si vous voulez seulement vérifier que les chaînes de build fonctionnent, lancez le workflow **Release** à la main depuis GitHub en laissant l'option « Publier » décochée : il construit les paquets bureau, l'APK Android et l'archive de l'extension, puis les dépose en artefacts téléchargeables sans créer de release.
@@ -61,7 +61,7 @@ docker compose up -d
 
 Le `Dockerfile` construit d'abord l'application web, puis produit une image finale qui ne contient que `dist/`, les sources du serveur et les pages légales. Elle tourne sous l'utilisateur `node`, expose le port 8787 et déclare un contrôle de santé sur `/api/v1/health`.
 
-Voir [Docker](../deploiement/docker.md) pour la mise en service.
+Voir [Docker](../deployment/docker.md) pour la mise en service.
 
 ## Application de bureau
 
@@ -91,7 +91,7 @@ npx tauri build
     npx tauri build --target aarch64-apple-darwin
     ```
 
-    Produit un `.app` et un `.dmg`. La signature et la notarisation sont facultatives : voir [les secrets de signature](publier.md#les-secrets-de-signature).
+    Produit un `.app` et un `.dmg`. La signature et la notarisation sont facultatives : voir [les secrets de signature](releasing.md#les-secrets-de-signature).
 
 === "Linux"
 
@@ -165,7 +165,7 @@ npx tauri ios init      # une seule fois : génère le projet Xcode
 npx tauri ios build
 ```
 
-L'extension **AutoFill Credential Provider** — celle qui propose les identifiants de BetterVault dans les autres applications — s'ajoute à la main dans Xcode : voir [Biométrie et remplissage automatique](../applications/biometrie-autofill.md). Son contrôleur est dans `src-tauri/ios-extension/`.
+L'extension **AutoFill Credential Provider** — celle qui propose les identifiants de BetterVault dans les autres applications — s'ajoute à la main dans Xcode : voir [Biométrie et remplissage automatique](../apps/biometrics-autofill.md). Son contrôleur est dans `src-tauri/ios-extension/`.
 
 L'intégration continue ne construit pas l'application iOS, mais elle vérifie sur un runner macOS que la partie Rust compile bien pour `aarch64-apple-ios`.
 
@@ -184,4 +184,4 @@ L'intégration continue lance exactement ces contrôles, plus un démarrage rée
 
 ## Publier une version
 
-Le numéro de version, le tag, ce que construit le workflow **Release**, les secrets de signature et la publication du brouillon : voir [Publier une version](publier.md).
+Le numéro de version, le tag, ce que construit le workflow **Release**, les secrets de signature et la publication du brouillon : voir [Publier une version](releasing.md).

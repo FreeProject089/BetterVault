@@ -1,6 +1,6 @@
 # Choix techniques
 
-Cette page explique **comment l'application est faite et pourquoi**. Pour le découpage en dossiers et les flux de données, voir [Architecture](architecture.md) ; pour le modèle de menace et les garanties de chiffrement, voir [Sécurité](../securite.md).
+Cette page explique **comment l'application est faite et pourquoi**. Pour le découpage en dossiers et les flux de données, voir [Architecture](architecture.md) ; pour le modèle de menace et les garanties de chiffrement, voir [Sécurité](../security.md).
 
 ## Pas de framework
 

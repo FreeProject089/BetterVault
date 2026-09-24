@@ -12,7 +12,7 @@ import { listDocs, renderDocPage, renderMarkdown } from '../server/src/docs.ts';
 const root = mkdtempSync(join(tmpdir(), 'bv-docs-'));
 writeFileSync(join(root, 'index.md'), '# Accueil\n\nBonjour.\n');
 mkdirSync(join(root, 'guide'));
-writeFileSync(join(root, 'guide', 'premiers-pas.md'), '# Premiers pas\n\nTexte.\n');
+writeFileSync(join(root, 'guide', 'getting-started.md'), '# Premiers pas\n\nTexte.\n');
 writeFileSync(join(root, 'guide', 'piege.md'), '# <img src=x onerror=alert(1)>\n\n<script>alert(1)</script>\n');
 
 const ctx = { root, locale: 'fr' as const, appAvailable: true };
@@ -21,7 +21,7 @@ describe('Documentation servie par le serveur', () => {
   it('range les pages par section, titre lu dans le fichier', () => {
     const pages = listDocs(root);
     expect(pages[0].path).toBe('index');
-    expect(pages.find(p => p.path === 'guide/premiers-pas')?.title).toBe('Premiers pas');
+    expect(pages.find(p => p.path === 'guide/getting-started')?.title).toBe('Premiers pas');
     expect([...new Set(pages.map(p => p.section))]).toEqual(['', 'guide']);
   });
 
@@ -36,7 +36,7 @@ describe('Documentation servie par le serveur', () => {
 
   it('comprend les blocs B.MD et les liens relatifs entre pages', () => {
     const html = renderMarkdown([
-      'Voir [Docker](docker.md#volumes) et [la sécurité](../securite.md).',
+      'Voir [Docker](docker.md#volumes) et [la sécurité](../security.md).',
       '',
       ':::steps',
       ':::step[Installer]',
@@ -53,9 +53,9 @@ describe('Documentation servie par le serveur', () => {
       ':::warning[Attention]',
       'Texte.',
       ':::'
-    ].join('\n'), 'deploiement/installation');
-    expect(html).toContain('href="/docs/deploiement/docker#volumes"');
-    expect(html).toContain('href="/docs/securite"');
+    ].join('\n'), 'deployment/installation');
+    expect(html).toContain('href="/docs/deployment/docker#volumes"');
+    expect(html).toContain('href="/docs/security"');
     expect(html).toContain('<ol class="doc-steps"><li><strong>Installer</strong>');
     expect(html).toContain('<kbd>Ctrl</kbd>');
     expect(html).toContain('<summary>Une question ?</summary>');
@@ -78,7 +78,7 @@ describe('Documentation servie par le serveur', () => {
   });
 
   it('affiche la page demandée avec son sommaire', () => {
-    const html = renderDocPage('guide/premiers-pas', ctx)!;
+    const html = renderDocPage('guide/getting-started', ctx)!;
     expect(html).toContain('Premiers pas');
     expect(html).toContain('href="/docs/index"');
     expect(html).toContain('aria-current="page"');
@@ -152,7 +152,7 @@ describe('Rendu de chaque page de la documentation', () => {
   });
 
   it('rend les onglets sans script, le premier ouvert', () => {
-    const html = renderDocPage('applications/bureau-mobile', { root, locale: 'fr', appAvailable: true })!;
+    const html = renderDocPage('apps/desktop-mobile', { root, locale: 'fr', appAvailable: true })!;
     expect(html).toMatch(/<div class="tabs"><input type="radio" name="onglets-0" id="onglets-0-0" checked><label for="onglets-0-0">Android<\/label>/);
     // Seul le script du site, servi par le serveur : les onglets, eux, n’en ont pas besoin
     expect(html.match(/<script[^>]*>/gi)).toEqual([expect.stringMatching(/^<script src="\/site\.js\?v=[0-9a-f]{10}" defer>$/)]);

@@ -2,7 +2,7 @@
 
 Ce guide part d'une machine vierge et va jusqu'aux fichiers installables. Chaque étape se termine par une commande qui vérifie qu'elle a marché : si la vérification échoue, pas la peine d'aller plus loin, la section [Dépannage](#depannage) donne la cause la plus fréquente.
 
-Pour la référence (ce que produit chaque paquet, ce que fait la partie Rust), voir [Construire l'application](build.md). Pour mettre une version en ligne, voir [Publier une version](publier.md).
+Pour la référence (ce que produit chaque paquet, ce que fait la partie Rust), voir [Construire l'application](build.md). Pour mettre une version en ligne, voir [Publier une version](releasing.md).
 
 ## Ce que vous voulez obtenir
 
@@ -14,7 +14,7 @@ Pour la référence (ce que produit chaque paquet, ce que fait la partie Rust), 
 | Paquets Linux (AppImage, `.deb`, `.rpm`) | 1, 2, 5 | Linux | 30 min |
 | `.dmg` macOS | 1, 2, 5 | Mac | 30 min |
 | APK Android | 1, 2, 6 | Windows, Mac ou Linux | 45 min |
-| Application iOS | voir [macOS et iOS](../applications/apple.md) | Mac avec Xcode | — |
+| Application iOS | voir [macOS et iOS](../apps/apple.md) | Mac avec Xcode | — |
 | Image Docker du serveur | 1, 7 | N'importe laquelle, avec Docker | 10 min |
 
 La durée tient surtout à la première compilation Rust (5 à 15 minutes selon la machine) ; les suivantes réutilisent le cache et prennent une à deux minutes.
@@ -177,7 +177,7 @@ Sur Mac, précisez la cible : `npx tauri build --target aarch64-apple-darwin` po
 **Vérification** : installez le fichier produit et lancez BetterVault. À la première ouverture, indiquez l'adresse de votre serveur (`http://127.0.0.1:8787` si c'est celui de l'étape 3).
 
 !!! note "Installeurs non signés"
-    Construits chez vous, les installeurs ne sont pas signés. Sur la machine qui les a construits, ils s'ouvrent normalement ; une fois envoyés ailleurs (téléchargement, messagerie), Windows affiche « Windows a protégé votre ordinateur » (**Informations complémentaires** → **Exécuter quand même**) et macOS refuse la première ouverture (clic droit → **Ouvrir**). Les versions publiées se signent avec les secrets décrits dans [Publier une version](publier.md#les-secrets-de-signature).
+    Construits chez vous, les installeurs ne sont pas signés. Sur la machine qui les a construits, ils s'ouvrent normalement ; une fois envoyés ailleurs (téléchargement, messagerie), Windows affiche « Windows a protégé votre ordinateur » (**Informations complémentaires** → **Exécuter quand même**) et macOS refuse la première ouverture (clic droit → **Ouvrir**). Les versions publiées se signent avec les secrets décrits dans [Publier une version](releasing.md#les-secrets-de-signature).
 
 Pour travailler sur l'application de bureau avec rechargement à chaud : `npx tauri dev`.
 
@@ -294,7 +294,7 @@ docker compose up -d
 curl http://127.0.0.1:8787/api/v1/health
 ```
 
-La réponse contient `"ok":true`. La mise en service réelle (domaine, HTTPS, sauvegardes) est décrite dans [Docker](../deploiement/docker.md).
+La réponse contient `"ok":true`. La mise en service réelle (domaine, HTTPS, sauvegardes) est décrite dans [Docker](../deployment/docker.md).
 
 ## 8. Construire la documentation
 

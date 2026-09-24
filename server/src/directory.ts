@@ -10,7 +10,7 @@
 import { SITE_JS_TAG } from './siteScript.ts';
 import type { ReleaseInfo } from './releases.ts';
 import { ART_CSS, artAccount, artCipher, artDevices, artUnlock, circled, faqList, heroArt, highlight, icon, snakeSteps, tile, underline, vaultFeatures, type IconName } from './landingArt.ts';
-import { CHROME_CSS, DEFAULT_LINKS, ICONS, pageLangCode, siteFooter, siteHeader, translator, type ChromeContext, type PageLang, type SiteLinks } from './siteChrome.ts';
+import { CHROME_CSS, DEFAULT_LINKS, ICONS, pageLangCode, siteFooter, siteHeader, themeAttr, themeVars, translator, type ChromeContext, type PageLang, type SiteLinks } from './siteChrome.ts';
 
 export interface DirectoryEntry {
   name: string;
@@ -108,6 +108,8 @@ export interface LandingContext {
   lang?: string;
   strings?: Record<string, string>;
   langs?: PageLang[];
+  /** Thème choisi avec le bouton de la barre ; absent, la page suit le système */
+  theme?: 'light' | 'dark';
   /** Serveurs officiels de la grappe, quand il y en a plusieurs */
   officialServers?: Array<{ name: string; region: string; zone: string; online: boolean }>;
   /** Offres payantes publiées, pour la page des tarifs */
@@ -157,15 +159,15 @@ const FEATURES: Array<[IconName, string, string, string, string]> = [
 
 /** Page de documentation de chaque fonction, dans le même ordre */
 const FEATURE_DOCS = [
-  '/docs/guide/identifiants', '/docs/securite', '/docs/applications/bureau-mobile', '/docs/guide/synchronisation',
-  '/docs/guide/pieces-jointes', '/docs/guide/partage', '/docs/guide/securite-compte', '/docs/guide/import-export'
+  '/docs/guide/credentials', '/docs/security', '/docs/apps/desktop-mobile', '/docs/guide/sync',
+  '/docs/guide/attachments', '/docs/guide/sharing', '/docs/guide/account-security', '/docs/guide/import-export'
 ];
 
 /** Styles communs aux pages publiques : couleurs, typographie, boutons */
 function baseCss(): string {
   return `
-:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#7773e8;color-scheme:dark}
-@media (prefers-color-scheme:light){:root{--bg:#f6f8fa;--card:#fff;--border:#d0d7de;--text:#1f2328;--muted:#59636e;--accent:#5754c7;color-scheme:light}}
+${themeVars('--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#7773e8;color-scheme:dark',
+  '--bg:#f6f8fa;--card:#fff;--border:#d0d7de;--text:#1f2328;--muted:#59636e;--accent:#5754c7;color-scheme:light')}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth;scroll-padding-top:80px}
 body{margin:0;background:var(--bg);color:var(--text);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow-x:hidden}
@@ -216,12 +218,13 @@ const chrome = (ctx: LandingContext): ChromeContext => ({
   path: ctx.path,
   lang: ctx.lang,
   strings: ctx.strings,
-  langs: ctx.langs
+  langs: ctx.langs,
+  theme: ctx.theme
 });
 
 function page(ctx: LandingContext, title: string, description: string, body: string): string {
   return `<!DOCTYPE html>
-<html lang="${escapeHtml(pageLangCode(ctx))}">
+<html lang="${escapeHtml(pageLangCode(ctx))}"${themeAttr(ctx)}>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -257,7 +260,7 @@ export function renderLanding(ctx: LandingContext): string {
     ? escapeHtml(ctx.page.title)
     : t(`Vos secrets, ${highlight('chiffrés chez vous', 'accent')}.`, `Your secrets, ${highlight('encrypted at home', 'accent')}.`);
 
-  const start = ctx.appAvailable ? '/app' : '/docs/guide/premiers-pas';
+  const start = ctx.appAvailable ? '/app' : '/docs/guide/getting-started';
 
   const steps = snakeSteps([
     {
@@ -393,7 +396,7 @@ export function renderLanding(ctx: LandingContext): string {
     </div>
     <div class="actions" style="margin:0">
       ${goButton(start, t('Premiers pas', 'Get started'))}
-      ${chrome(ctx).serversOn ? `<a class="btn" href="/serveurs">${icon('globe', 20)}${t('Choisir un serveur', 'Pick a server')}</a>` : ''}
+      ${chrome(ctx).serversOn ? `<a class="btn" href="/servers">${icon('globe', 20)}${t('Choisir un serveur', 'Pick a server')}</a>` : ''}
     </div>
   </div>
 </main>`;
@@ -545,11 +548,11 @@ export function renderDownloadsPage(ctx: LandingContext): string {
   type Key = 'windows' | 'linux' | 'android' | 'macos' | 'ios' | 'extension';
   type Card = { key: Key; icon: IconName; name: string; detail: string; label: string; doc: string };
   const cards: Card[] = [
-    { key: 'windows', icon: 'monitor', name: 'Windows', detail: t('Windows 10 et 11 · déverrouillage par Windows Hello', 'Windows 10 and 11 · unlock with Windows Hello'), label: t('Télécharger pour Windows', 'Download for Windows'), doc: '/docs/applications/bureau-mobile' },
-    { key: 'linux', icon: 'monitor', name: 'Linux', detail: t('AppImage, paquet .deb ou .rpm · trousseau de la session', 'AppImage, .deb or .rpm package · session keyring'), label: t('Télécharger pour Linux', 'Download for Linux'), doc: '/docs/applications/bureau-mobile' },
-    { key: 'android', icon: 'phone', name: 'Android', detail: t('APK · empreinte ou visage · remplissage automatique', 'APK · fingerprint or face · autofill'), label: t('Télécharger l’APK', 'Download the APK'), doc: '/docs/applications/bureau-mobile' },
-    { key: 'macos', icon: 'monitor', name: 'macOS', detail: t('Touch ID et trousseau macOS', 'Touch ID and macOS keychain'), label: t('Télécharger pour macOS', 'Download for macOS'), doc: '/docs/applications/apple' },
-    { key: 'ios', icon: 'phone', name: 'iOS · iPadOS', detail: t('Face ID et remplissage des mots de passe', 'Face ID and password autofill'), label: t('Télécharger pour iOS', 'Get it for iOS'), doc: '/docs/applications/apple' },
+    { key: 'windows', icon: 'monitor', name: 'Windows', detail: t('Windows 10 et 11 · déverrouillage par Windows Hello', 'Windows 10 and 11 · unlock with Windows Hello'), label: t('Télécharger pour Windows', 'Download for Windows'), doc: '/docs/apps/desktop-mobile' },
+    { key: 'linux', icon: 'monitor', name: 'Linux', detail: t('AppImage, paquet .deb ou .rpm · trousseau de la session', 'AppImage, .deb or .rpm package · session keyring'), label: t('Télécharger pour Linux', 'Download for Linux'), doc: '/docs/apps/desktop-mobile' },
+    { key: 'android', icon: 'phone', name: 'Android', detail: t('APK · empreinte ou visage · remplissage automatique', 'APK · fingerprint or face · autofill'), label: t('Télécharger l’APK', 'Download the APK'), doc: '/docs/apps/desktop-mobile' },
+    { key: 'macos', icon: 'monitor', name: 'macOS', detail: t('Touch ID et trousseau macOS', 'Touch ID and macOS keychain'), label: t('Télécharger pour macOS', 'Download for macOS'), doc: '/docs/apps/apple' },
+    { key: 'ios', icon: 'phone', name: 'iOS · iPadOS', detail: t('Face ID et remplissage des mots de passe', 'Face ID and password autofill'), label: t('Télécharger pour iOS', 'Get it for iOS'), doc: '/docs/apps/apple' },
     { key: 'extension', icon: 'globe', name: t('Extension de navigateur', 'Browser extension'), detail: t('Chrome, Edge, Firefox · remplissage des formulaires', 'Chrome, Edge, Firefox · form filling'), label: t('Ajouter au navigateur', 'Add to browser'), doc: '/docs/guide/extension' }
   ];
   const mo = (bytes: number) => bytes > 0 && bytes < 1024 ** 2 ? `${Math.max(1, Math.round(bytes / 1024))} ${t('Ko', 'KB')}` : bytes >= 1024 ** 2 ? `${(bytes / 1024 ** 2).toFixed(bytes >= 10 * 1024 ** 2 ? 0 : 1).replace('.', ctx.locale === 'fr' ? ',' : '.')} ${t('Mo', 'MB')}` : '';
@@ -615,7 +618,7 @@ export function renderDownloadsPage(ctx: LandingContext): string {
   </section>
 
   <section class="dl-more" data-reveal>
-    <div class="dl-mini">${tile('server', 'sm')}<div><strong>${t('Héberger son serveur', 'Host your own server')}</strong><span class="meta">${t('Image Docker, en quelques minutes', 'Docker image, in a few minutes')}</span></div><a class="btn small" href="/docs/deploiement/installation">${t('Guide', 'Guide')}</a></div>
+    <div class="dl-mini">${tile('server', 'sm')}<div><strong>${t('Héberger son serveur', 'Host your own server')}</strong><span class="meta">${t('Image Docker, en quelques minutes', 'Docker image, in a few minutes')}</span></div><a class="btn small" href="/docs/deployment/installation">${t('Guide', 'Guide')}</a></div>
     <div class="dl-mini">${tile('files', 'sm')}<div><strong>${t('Code source', 'Source code')}</strong><span class="meta">${t('Libre, sur GitHub', 'Open source, on GitHub')}</span></div><a class="btn small" href="${escapeHtml(links.github)}" rel="noopener">${ICONS.github}GitHub</a></div>
     <div class="dl-mini">${tile('export', 'sm')}<div><strong>${t('Toutes les versions', 'All releases')}</strong><span class="meta">${t('Notes de version et fichiers', 'Release notes and files')}</span></div><a class="btn small" href="${escapeHtml(links.github.replace(/\/+$/, ''))}/releases" rel="noopener">${t('Versions', 'Releases')}</a></div>
   </section>
@@ -632,7 +635,9 @@ export function renderDownloadsPage(ctx: LandingContext): string {
 .dl-card{display:flex;flex-direction:column;gap:12px;padding:22px;border-radius:9px;background:var(--card);border:1px solid var(--border);transition:border-color .2s,transform .2s,box-shadow .2s}
 .dl-card:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border));transform:translateY(-3px);box-shadow:0 18px 36px -24px var(--accent)}
 .dl-card.mine{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 20px 40px -26px var(--accent)}
-.dl-card.soon{opacity:.72}
+.dl-card.soon{border-style:dashed;background:color-mix(in srgb,var(--card) 70%,var(--bg))}
+.dl-card.soon .tile{filter:grayscale(1);opacity:.6}
+.dl-card.soon h2{color:var(--muted)}
 .dl-card.soon:hover{transform:none}
 .dl-head{display:flex;align-items:center;gap:14px}
 .dl-head>div{flex:1;min-width:0}

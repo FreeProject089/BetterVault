@@ -6,8 +6,8 @@
 | --- | --- |
 | `/` | Page d'accueil : ce que fait BetterVault, comment c'est chiffré, ce serveur |
 | `/app` | L'application ; `/auth` et `/connexion` y mènent |
-| `/telecharger` | L'application web à installer, les applications par plateforme, le code source |
-| `/serveurs` | Serveurs recommandés par l'hébergeur, par région |
+| `/download` | L'application web à installer, les applications par plateforme, le code source |
+| `/servers` | Serveurs recommandés par l'hébergeur, par région |
 | `/docs` | Cette documentation |
 | `/legal` | Documents légaux, s'ils sont activés |
 | `/admin` | Administration |
@@ -34,7 +34,7 @@ La documentation est servie directement par le serveur, depuis les fichiers Mark
 
 L'annuaire permet de recommander d'autres serveurs BetterVault — les vôtres dans d'autres régions, ou ceux de confiance. Il est **coupé par défaut**.
 
-Activé et rempli, il apparaît à trois endroits : la page **`/serveurs`** (regroupée par région, les serveurs officiels d'abord), un lien dans l'en-tête et le pied de la page d'accueil, et les propositions de l'application au moment de choisir un serveur.
+Activé et rempli, il apparaît à trois endroits : la page **`/servers`** (regroupée par région, les serveurs officiels d'abord), un lien dans l'en-tête et le pied de la page d'accueil, et les propositions de l'application au moment de choisir un serveur.
 
 Un serveur par ligne :
 
@@ -47,15 +47,15 @@ Nom, adresse `https`, région, puis le mot `officiel` si vous voulez le distingu
 L'application affiche ces serveurs sous le champ **Adresse du serveur**, au moment de créer un compte ou de se connecter : un clic remplit le champ.
 
 !!! warning "Un compte n'existe que sur son serveur"
-    L'annuaire ne partage aucune donnée entre serveurs : il ne fait que proposer des adresses. Pour déplacer un compte, voir [Changer de compte ou de serveur](../guide/changer-de-serveur.md).
+    L'annuaire ne partage aucune donnée entre serveurs : il ne fait que proposer des adresses. Pour déplacer un compte, voir [Changer de compte ou de serveur](../guide/switching-server.md).
 
 !!! tip "Version web hébergée"
     Quand l'application web est servie par un serveur, sa politique de sécurité ne l'autorise à contacter que ce serveur. Les serveurs proposés se choisissent donc depuis l'application de bureau, l'extension, ou une installation que vous hébergez.
 
 
-## Tarifs (`/tarifs`)
+## Tarifs (`/pricing`)
 
-Dès qu'une offre payante a un tarif créé dans Stripe, la page **`/tarifs`** apparaît, avec un lien dans la barre du haut et le pied de page. Elle montre le compte gratuit et ses limites, chaque offre avec l'espace qu'elle ajoute, et une bascule **par an / par mois** quand les offres proposent les deux. Voir [Espace payant](offres-stripe.md).
+Dès qu'une offre payante a un tarif créé dans Stripe, la page **`/pricing`** apparaît, avec un lien dans la barre du haut et le pied de page. Elle montre le compte gratuit et ses limites, chaque offre avec l'espace qu'elle ajoute, et une bascule **par an / par mois** quand les offres proposent les deux. Voir [Espace payant](stripe-plans.md).
 
 ## Langue des pages
 
@@ -97,7 +97,7 @@ Toutes les clés sont facultatives ; seules les adresses `https://` sont gardée
 
 ## Page Télécharger
 
-`/telecharger` (et `/download`, qui y renvoie) rassemble toutes les façons d'utiliser BetterVault :
+`/download` (et `/download`, qui y renvoie) rassemble toutes les façons d'utiliser BetterVault :
 
 - **L'application web**, installable depuis le navigateur. Le bouton **Installer l'application** apparaît quand le navigateur le permet (Chrome, Edge, Brave, Samsung Internet) ; sur iPhone et iPad, la page explique le passage par Safari → Partager → Sur l'écran d'accueil. L'application propose aussi l'installation une fois, par une notification.
 - **Les applications** : le serveur lit la dernière version publiée du dépôt GitHub des liens (`github`) et relie chaque bouton à son fichier : installeur `.exe` (ou `.msi`) pour Windows, AppImage (ou `.deb`, `.rpm`) pour Linux, `.dmg` Apple Silicon (ou Intel) pour macOS, APK pour Android, archive de l'extension. Version et taille s'affichent sous le bouton. Une plateforme sans fichier dans la version est marquée « Bientôt », avec un lien pour la construire soi-même. Une clé de `downloads` passe avant GitHub.

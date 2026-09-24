@@ -52,7 +52,7 @@ export function parseSiteLinks(raw: unknown): Partial<SiteLinks> {
     const url = safeUrl((raw as Record<string, unknown>)[key]);
     if (url) out[key] = url;
   }
-  // Liens de téléchargement par plateforme (facultatifs, page /telecharger)
+  // Liens de téléchargement par plateforme (facultatifs, page /download)
   const downloads = (raw as Record<string, unknown>).downloads;
   if (downloads && typeof downloads === 'object') {
     const found: NonNullable<SiteLinks['downloads']> = {};

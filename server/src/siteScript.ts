@@ -52,7 +52,8 @@ export const SITE_JS = `(() => {
         return { l: r.left - box.left, r: r.right - box.left, t: r.top - box.top, b: r.bottom - box.top, gauche: e.classList.contains('art-left'), c: getComputedStyle(e).getPropertyValue('--c').trim() };
       });
       if (!cartes.length) return;
-      const fin = bandeau ? bandeau.getBoundingClientRect().top - box.top + 14 : box.height + 60;
+      // Le ruban s'arrête avant le bandeau, en s'effaçant : il ne s'y enfonce plus
+      const fin = bandeau ? bandeau.getBoundingClientRect().top - box.top - 28 : box.height + 40;
       const M = 58, cx = W / 2;
       /*
        * Points de passage : pour chaque maquette, l'entrée par le haut, deux
@@ -91,20 +92,22 @@ export const SITE_JS = `(() => {
       large.setAttribute('preserveAspectRatio', 'xMinYMin meet');
       large.style.height = fin + 'px';
       /*
-       * Dégradé violet le long du ruban, qui s'éclaircit vers le blanc par
-       * endroits (comme un reflet qui glisse), puis fonce jusqu'au bandeau.
+       * Un seul ruban, dans l'accent de la page : il s'éclaircit en lavande à
+       * mi-parcours, revient à l'accent, puis s'efface sur ses derniers
+       * 170 px, juste au-dessus du bandeau.
        */
       const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7773e8';
-      const clair = 'color-mix(in srgb, ' + accent + ' 45%, #ffffff)';
-      let grad = large.querySelector('linearGradient');
+      const clair = 'color-mix(in srgb, ' + accent + ' 55%, #ffffff)';
+      const efface = Math.max(0.6, 1 - 170 / fin);
+      const grad = large.querySelector('linearGradient');
       grad.setAttribute('y2', String(fin));
-      grad.replaceChildren(...[[0, clair], [0.28, accent], [0.52, clair], [0.78, accent], [1, '#4a3ad1']].map(([offset, color]) => {
+      grad.replaceChildren(...[[0, clair, 1], [0.3, accent, 1], [0.55, clair, 1], [efface, accent, 1], [1, accent, 0]].map(([offset, color, opacity]) => {
         const stop = document.createElementNS(NS, 'stop');
         stop.setAttribute('offset', String(offset));
         stop.style.stopColor = color;
+        stop.style.stopOpacity = String(opacity);
         return stop;
       }));
-      // Le ruban et son reflet suivent le même tracé et se dessinent ensemble
       chemins = [...large.querySelectorAll('path')];
       chemins.forEach(c => { c.setAttribute('d', d); c.removeAttribute('vector-effect'); });
       chemin = chemins[0];
@@ -238,6 +241,25 @@ export const SITE_JS = `(() => {
   const plier = () => colonnes.forEach(c => { c.open = !etroit.matches; });
   plier();
   etroit.addEventListener('change', plier);
+
+  /*
+   * Bouton de thème : bascule sur place et retient le choix un an. Revenir au
+   * thème du système efface le choix, pour le suivre à nouveau s'il change.
+   */
+  const systemeClair = matchMedia('(prefers-color-scheme: light)');
+  document.querySelectorAll('[data-theme-toggle]').forEach(bouton => bouton.addEventListener('click', e => {
+    e.preventDefault();
+    const actuel = doc.dataset.theme || (systemeClair.matches ? 'light' : 'dark');
+    const suivant = actuel === 'light' ? 'dark' : 'light';
+    const systeme = systemeClair.matches ? 'light' : 'dark';
+    if (suivant === systeme) {
+      delete doc.dataset.theme;
+      document.cookie = 'bv_theme=; Path=/; Max-Age=0; SameSite=Lax';
+    } else {
+      doc.dataset.theme = suivant;
+      document.cookie = 'bv_theme=' + suivant + '; Path=/; Max-Age=31536000; SameSite=Lax';
+    }
+  }));
 
   /* Menus (langue, navigation) : fermés par un clic ailleurs ou par Échap */
   const menus = document.querySelectorAll('.site-menu, .lang-menu');

@@ -11,10 +11,10 @@ Ouvrez **Tâches** dans la barre latérale. Les tâches appartiennent au coffre 
 | Titre, description | Contenu de la tâche |
 | Priorité | Basse, moyenne, haute, urgente |
 | Échéance | Date limite |
-| Attribuée à | Un membre du coffre, dans un [coffre partagé](partage.md) |
+| Attribuée à | Un membre du coffre, dans un [coffre partagé](sharing.md) |
 | Récurrence | Quotidienne, hebdomadaire, mensuelle, annuelle, avec intervalle et date de fin |
 | Rappel | Date et heure d'une notification |
-| Tags | Voir [Coffres et tags](coffres-tags.md) |
+| Tags | Voir [Coffres et tags](vaults-tags.md) |
 | Dépend de | Tâches à terminer avant celle-ci |
 | Identifiant lié | Accès direct à l'identifiant concerné |
 

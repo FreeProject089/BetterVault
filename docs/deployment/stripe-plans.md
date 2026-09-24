@@ -43,7 +43,7 @@ Collez son identifiant `price_…` dans le champ du tarif : il est utilisé tel 
 Un prix Stripe ne change jamais de montant. Pour changer un tarif, ajoutez-en un nouveau et retirez l'ancien : les abonnements en cours gardent leur prix.
 :::
 
-Les offres apparaissent alors dans **Compte › Espace** dans les applications, et sur la page publique **`/tarifs`**.
+Les offres apparaissent alors dans **Compte › Espace** dans les applications, et sur la page publique **`/pricing`**.
 
 Le même réglage existe par variables d'environnement, pour un serveur sans administration :
 

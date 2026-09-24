@@ -19,7 +19,7 @@ export interface SiteLinks {
   community: string;
   discord?: string;
   status?: string;
-  /** Téléchargements publiés, par plateforme (page /telecharger) */
+  /** Téléchargements publiés, par plateforme (page /download) */
   downloads?: Partial<Record<'windows' | 'linux' | 'android' | 'macos' | 'ios' | 'extension', string>>;
 }
 
@@ -46,7 +46,20 @@ export interface ChromeContext {
   strings?: Record<string, string>;
   /** Langues proposées : français, anglais, puis les packs publiés */
   langs?: PageLang[];
+  /** Thème choisi par la personne (cookie bv_theme) ; absent, la page suit le système */
+  theme?: 'light' | 'dark';
 }
+
+/** Attribut à poser sur <html> pour imposer le thème choisi */
+export const themeAttr = (ctx: { theme?: 'light' | 'dark' }) => (ctx.theme ? ` data-theme="${ctx.theme}"` : '');
+
+/**
+ * Variables de couleur d'une page : sombres par défaut, claires quand le
+ * système le demande, et toujours celles que la personne a choisies avec le
+ * bouton de thème (data-theme sur <html>).
+ */
+export const themeVars = (dark: string, light: string) =>
+  `:root{${dark}}@media (prefers-color-scheme:light){:root:not([data-theme=dark]){${light}}}:root[data-theme=light]{${light}}`;
 
 export interface PageLang { code: string; label: string }
 
@@ -71,7 +84,18 @@ export function translator(ctx: Pick<ChromeContext, 'locale' | 'strings'>): (fr:
 export const pageLangCode = (ctx: Pick<ChromeContext, 'locale' | 'lang'>) => ctx.lang ?? ctx.locale;
 
 const logo = (size: number) =>
-  `<picture><source srcset="/admin/logo-on-light.svg" media="(prefers-color-scheme: light)"><img src="/admin/logo-on-dark.svg" alt="" width="${size}" height="${size}"></picture>`;
+  `<img class="logo-d" src="/admin/logo-on-dark.svg" alt="" width="${size}" height="${size}"><img class="logo-l" src="/admin/logo-on-light.svg" alt="" width="${size}" height="${size}">`;
+
+/**
+ * Bouton clair / sombre. Sans script, le lien passe par /theme, qui retient le
+ * choix et ramène à la page ; /site.js change le thème sur place.
+ */
+function themeToggle(ctx: ChromeContext): string {
+  const t = translator(ctx);
+  const next = ctx.theme === 'light' ? 'dark' : 'light';
+  const label = t('Changer de thème', 'Switch theme');
+  return `<a class="site-icon theme-toggle" href="/theme?set=${next}&amp;back=${encodeURIComponent(ctx.path ?? '/')}" rel="nofollow" data-theme-toggle title="${label}" aria-label="${label}">${ICONS.sun}${ICONS.moon}</a>`;
+}
 
 const svg = (body: string, size = 18, extra = '') =>
   `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true" ${extra}>${body}</svg>`;
@@ -84,6 +108,8 @@ export const ICONS = {
   status: svg('<path d="M3 12h4l2.5-6 4 12 2.5-6H21" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>'),
   globe: svg('<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.6 9h16.8M3.6 15h16.8M12 3c2.4 2.6 3.6 5.6 3.6 9s-1.2 6.4-3.6 9c-2.4-2.6-3.6-5.6-3.6-9S9.6 5.6 12 3Z" fill="none" stroke="currentColor" stroke-width="1.8"/>', 16),
   chevron: svg('<path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>', 14, 'class="chev"'),
+  sun: svg('<circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>', 18, 'class="i-sun"'),
+  moon: svg('<path d="M20.2 14.6A8.5 8.5 0 0 1 9.4 3.8a8.5 8.5 0 1 0 10.8 10.8Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>', 18, 'class="i-moon"'),
   arrow: svg('<path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>', 16)
 };
 
@@ -113,9 +139,9 @@ export function siteHeader(ctx: ChromeContext, current: SiteSection): string {
   const nav = `
       <a href="/#fonctions">${t('Fonctionnalités', 'Features')}</a>
       <a href="/#comment">${t('Comment ça marche', 'How it works')}</a>
-      <a href="/telecharger"${cur('download')}>${t('Télécharger', 'Download')}</a>
-      ${ctx.plansOn ? `<a href="/tarifs"${cur('plans')}>${t('Tarifs', 'Pricing')}</a>` : ''}
-      ${ctx.serversOn ? `<a href="/serveurs"${cur('servers')}>${t('Serveurs', 'Servers')}</a>` : ''}
+      <a href="/download"${cur('download')}>${t('Télécharger', 'Download')}</a>
+      ${ctx.plansOn ? `<a href="/pricing"${cur('plans')}>${t('Tarifs', 'Pricing')}</a>` : ''}
+      ${ctx.serversOn ? `<a href="/servers"${cur('servers')}>${t('Serveurs', 'Servers')}</a>` : ''}
       <a href="/docs"${cur('docs')}>${t('Documentation', 'Docs')}</a>`;
   return `<a class="skip" href="#contenu">${t('Aller au contenu', 'Skip to content')}</a>
 <header class="site-bar"><div class="site-bar-in">
@@ -123,6 +149,7 @@ export function siteHeader(ctx: ChromeContext, current: SiteSection): string {
   <nav class="site-links" aria-label="${t('Navigation principale', 'Main navigation')}">${nav}</nav>
   <div class="site-actions">
     ${langSwitch(ctx, 'bar')}
+    ${themeToggle(ctx)}
     <a class="site-icon" href="${escapeHtml(links.github)}" rel="noopener" title="${t('Code source sur GitHub', 'Source code on GitHub')}" aria-label="GitHub">${ICONS.github}</a>
     ${links.discord ? `<a class="site-icon" href="${escapeHtml(links.discord)}" rel="noopener" title="Discord" aria-label="Discord">${ICONS.discord}</a>` : ''}
     ${ctx.appAvailable ? `<a class="site-login" href="/app">${t('Se connecter', 'Sign in')}</a>
@@ -161,14 +188,14 @@ export function siteFooter(ctx: ChromeContext): string {
   ${col(t('Produit', 'Product'), `
     <a href="/#fonctions">${t('Fonctionnalités', 'Features')}</a>
     <a href="/#comment">${t('Comment ça marche', 'How it works')}</a>
-    <a href="/telecharger">${t('Télécharger', 'Download')}</a>
-    ${ctx.plansOn ? `<a href="/tarifs">${t('Tarifs', 'Pricing')}</a>` : ''}
-    ${ctx.serversOn ? `<a href="/serveurs">${t('Serveurs', 'Servers')}</a>` : ''}
+    <a href="/download">${t('Télécharger', 'Download')}</a>
+    ${ctx.plansOn ? `<a href="/pricing">${t('Tarifs', 'Pricing')}</a>` : ''}
+    ${ctx.serversOn ? `<a href="/servers">${t('Serveurs', 'Servers')}</a>` : ''}
     ${ctx.appAvailable ? `<a href="/app">${t('Ouvrir l’application', 'Open the app')}</a>` : ''}`)}
   ${col(t('Ressources', 'Resources'), `
     <a href="/docs">${t('Documentation', 'Documentation')}</a>
-    <a href="/docs/guide/premiers-pas">${t('Guide de démarrage', 'Getting started')}</a>
-    <a href="/docs/deploiement/installation">${t('Héberger son serveur', 'Host your own server')}</a>
+    <a href="/docs/guide/getting-started">${t('Guide de démarrage', 'Getting started')}</a>
+    <a href="/docs/deployment/installation">${t('Héberger son serveur', 'Host your own server')}</a>
     <a href="${escapeHtml(links.github)}" rel="noopener">${t('Code source', 'Source code')}</a>`)}
   ${col(t('Communauté', 'Community'), `
     <a href="${escapeHtml(links.community)}" rel="noopener">BetterCommunity</a>
@@ -193,7 +220,7 @@ export const CHROME_CSS = `
   background:color-mix(in srgb,var(--bg) 80%,transparent);backdrop-filter:saturate(1.5) blur(16px);-webkit-backdrop-filter:saturate(1.5) blur(16px)}
 .site-bar-in{max-width:1180px;margin:0 auto;padding:0 20px;height:64px;display:flex;align-items:center;gap:6px}
 .site-brand{display:inline-flex;align-items:center;gap:10px;color:var(--text);text-decoration:none;font-weight:750;font-size:16px;letter-spacing:-.01em}
-.site-brand picture{display:flex}.site-brand img{display:block}
+.site-brand picture{display:flex}.site-brand img{display:block}.site-brand img.logo-l{display:none}
 .site-bar .site-brand{margin-right:20px;padding:6px 8px 6px 4px;border-radius:8px;transition:background-color .15s}
 .site-bar .site-brand:hover{background:color-mix(in srgb,var(--muted) 10%,transparent)}
 .site-links{display:flex;align-items:center;gap:2px;margin-right:auto;min-width:0}
@@ -205,6 +232,10 @@ export const CHROME_CSS = `
 .site-actions{display:flex;align-items:center;gap:4px}
 .site-icon{display:grid;place-items:center;width:38px;height:38px;border-radius:8px;color:var(--muted);transition:color .15s,background-color .15s}
 .site-icon:hover{color:var(--text);background:color-mix(in srgb,var(--muted) 10%,transparent)}
+.theme-toggle .i-moon,.logo-l{display:none}
+.theme-toggle svg{transition:transform .35s cubic-bezier(.3,1.4,.5,1)}.theme-toggle:hover svg{transform:rotate(-18deg)}
+@media (prefers-color-scheme:light){:root:not([data-theme=dark]) .theme-toggle .i-sun,:root:not([data-theme=dark]) .site-brand img.logo-d{display:none}:root:not([data-theme=dark]) .theme-toggle .i-moon,:root:not([data-theme=dark]) .site-brand img.logo-l{display:block}}
+:root[data-theme=light] .theme-toggle .i-sun,:root[data-theme=light] .site-brand img.logo-d{display:none}:root[data-theme=light] .theme-toggle .i-moon,:root[data-theme=light] .site-brand img.logo-l{display:block}
 .site-login{display:inline-flex;align-items:center;min-height:38px;padding:0 12px;border-radius:8px;color:var(--text);text-decoration:none;font-size:14px;font-weight:600;transition:background-color .15s}
 .site-login:hover{background:color-mix(in srgb,var(--muted) 10%,transparent)}
 .site-cta{display:inline-flex;align-items:center;gap:10px;min-height:38px;padding:0 5px 0 14px;margin-left:4px;border-radius:8px;background:var(--accent);color:#fff;text-decoration:none;font-size:14px;font-weight:650;
@@ -238,7 +269,7 @@ export const CHROME_CSS = `
 @keyframes drop{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
 @media (max-width:1140px){.site-links a[href="/#comment"]{display:none}}
 @media (max-width:1000px){.site-links{display:none}.site-bar .site-brand{margin-right:auto}.site-menu{display:block}}
-@media (max-width:640px){.site-login,.site-bar .site-icon{display:none}}
+@media (max-width:640px){.site-login,.site-bar .site-icon:not(.theme-toggle){display:none}}
 @media (max-width:420px){.site-cta span{display:none}.site-cta{padding:0 5px}.site-bar .site-brand span{display:none}.lang-bar .lang-sep,.lang-bar .lang-sep+span{display:none}}
 
 .site-footer{border-top:1px solid var(--border);background:color-mix(in srgb,var(--card) 55%,var(--bg));font-size:14px}

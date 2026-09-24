@@ -2602,7 +2602,7 @@ if ('serviceWorker' in navigator && window.location.protocol.startsWith('http') 
 /*
  * Installer l'application web : quand le navigateur le permet, on le propose
  * une fois, discrètement. Refusé ou ignoré, on ne le repropose plus sur cet
- * appareil ; la page /telecharger garde son bouton.
+ * appareil ; la page /download garde son bouton.
  */
 const INSTALL_OFFERED_KEY = 'bettervault.install-offered';
 if (!isTauri()) {

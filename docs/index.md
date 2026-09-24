@@ -7,16 +7,16 @@ La même interface fonctionne aujourd'hui dans le **navigateur**, en application
 ## Par où commencer
 
 :::cards{cols=2}
-:::card[Utiliser BetterVault]{href=guide/premiers-pas.md}
+:::card[Utiliser BetterVault]{href=guide/getting-started.md}
 Créer un compte, ajouter ses premiers identifiants et codes 2FA.
 :::
-:::card[Héberger son serveur]{href=deploiement/installation.md}
+:::card[Héberger son serveur]{href=deployment/installation.md}
 Installer un serveur avec Docker en quelques minutes et y synchroniser ses appareils.
 :::
-:::card[Comprendre la sécurité]{href=securite.md}
+:::card[Comprendre la sécurité]{href=security.md}
 Ce qui est chiffré, avec quoi, et ce que le serveur voit réellement.
 :::
-:::card[Contribuer]{href=developpement/contribuer.md}
+:::card[Contribuer]{href=development/contributing.md}
 Lancer le projet en local, construire les paquets, proposer une modification.
 :::
 :::

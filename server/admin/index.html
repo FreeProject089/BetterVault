@@ -116,7 +116,7 @@
           </section>
           <section class="card">
             <h2 data-i18n="downloadTitle">Copie chiffrée de la base</h2>
-            <p class="hint"><span data-i18n="downloadHint">Base compressée puis chiffrée (AES-256-GCM). Les coffres restent illisibles sans les mots de passe.</span> <a class="aide" href="/docs/deploiement/sauvegardes" target="_blank" rel="noopener" data-i18n="learnMore">En savoir plus</a></p>
+            <p class="hint"><span data-i18n="downloadHint">Base compressée puis chiffrée (AES-256-GCM). Les coffres restent illisibles sans les mots de passe.</span> <a class="aide" href="/docs/deployment/backups" target="_blank" rel="noopener" data-i18n="learnMore">En savoir plus</a></p>
             <label for="download-passphrase" data-i18n="passphrase">Phrase de chiffrement (12 caractères minimum)</label>
             <input id="download-passphrase" type="password" autocomplete="new-password" minlength="12">
             <div class="row test"><button class="btn" type="button" id="download-backup" data-i18n="download">Télécharger</button></div>
@@ -150,7 +150,7 @@
             <label class="check"><input id="landingEnabled" type="checkbox"> <span data-i18n="landingEnabled">Page d’accueil publique (à la racine « / »)</span></label>
             <label for="linksUrl" data-i18n="linksUrl">Liens communautaires (fichier JSON, https)</label>
             <input id="linksUrl" type="url" placeholder="https://exemple.org/bettervault-links.json">
-            <p class="hint"><span data-i18n="linksUrlHint">Discord, page d’état… lus dans un fichier JSON hébergé ailleurs, relu chaque heure. GitHub et BetterCommunity s’affichent toujours.</span> <a class="aide" href="/docs/deploiement/page-publique#liens-communautaires" target="_blank" rel="noopener" data-i18n="learnMore">En savoir plus</a></p>
+            <p class="hint"><span data-i18n="linksUrlHint">Discord, page d’état… lus dans un fichier JSON hébergé ailleurs, relu chaque heure. GitHub et BetterCommunity s’affichent toujours.</span> <a class="aide" href="/docs/deployment/public-page#liens-communautaires" target="_blank" rel="noopener" data-i18n="learnMore">En savoir plus</a></p>
             <label for="landingTitle" data-i18n="landingTitle">Titre</label>
             <input id="landingTitle" maxlength="80" placeholder="BetterVault · Europe">
             <label for="landingDescription" data-i18n="landingDescription">Présentation</label>
@@ -199,7 +199,7 @@
 
           <section class="card wide">
             <h2 data-i18n="backups">Sauvegardes</h2>
-            <p class="hint"><span data-i18n="backupHint">Copie chiffrée de la base et des fichiers vers un stockage S3.</span> <a class="aide" href="/docs/deploiement/sauvegardes" target="_blank" rel="noopener" data-i18n="learnMore">En savoir plus</a></p>
+            <p class="hint"><span data-i18n="backupHint">Copie chiffrée de la base et des fichiers vers un stockage S3.</span> <a class="aide" href="/docs/deployment/backups" target="_blank" rel="noopener" data-i18n="learnMore">En savoir plus</a></p>
             <div class="row">
               <label class="check"><input id="backupEnabled" type="checkbox"> <span data-i18n="backupEnabled">Sauvegardes automatiques</span></label>
             </div>
@@ -215,7 +215,7 @@
           <section class="card wide">
             <div class="panel-head">
               <h2 data-i18n="billingTitle">Espace supplémentaire payant</h2>
-              <a class="aide" href="/docs/deploiement/offres-stripe" target="_blank" rel="noopener" data-i18n="learnMore">En savoir plus</a>
+              <a class="aide" href="/docs/deployment/stripe-plans" target="_blank" rel="noopener" data-i18n="learnMore">En savoir plus</a>
             </div>
             <p class="hint" data-i18n="billingHint2">Facultatif. Paiement sur Stripe Checkout : le serveur ne voit ni carte ni adresse, et n’envoie pas l’email du compte à Stripe.</p>
             <label class="check"><input id="billingEnabled" type="checkbox"> <span data-i18n="billingEnabled">Proposer les offres dans les applications</span></label>
@@ -248,7 +248,7 @@
         <div class="grid" data-panel="legal" hidden>
           <section class="card wide">
             <h2 data-i18n="legalTitle">Identité de l’hébergeur</h2>
-            <p class="hint"><span data-i18n="legalHint">Ces informations complètent les documents publiés sur /legal. Vous restez responsable de leur contenu.</span> <a class="aide" href="/docs/deploiement/documents-legaux" target="_blank" rel="noopener" data-i18n="learnMore">En savoir plus</a></p>
+            <p class="hint"><span data-i18n="legalHint">Ces informations complètent les documents publiés sur /legal. Vous restez responsable de leur contenu.</span> <a class="aide" href="/docs/deployment/legal-documents" target="_blank" rel="noopener" data-i18n="learnMore">En savoir plus</a></p>
             <label class="check"><input id="legalEnabled" type="checkbox"> <span data-i18n="legalEnabled">Publier des documents légaux sur ce serveur</span></label>
             <p class="hint" data-i18n="legalDisabledHint">Décoché, /legal répond 404 et l’application ne demande plus d’accepter de conditions. À réserver à un serveur personnel, sans autre utilisateur.</p>
             <div class="limits" id="legal-fields"></div>
@@ -341,7 +341,7 @@
         <a href="/" data-i18n="home">Accueil</a>
         <a href="/app" data-i18n="openApp">Application</a>
         <a href="/docs" data-i18n="docs">Documentation</a>
-        <a href="/docs/deploiement/administration" data-i18n="adminGuide">Guide de l’administration</a>
+        <a href="/docs/deployment/administration" data-i18n="adminGuide">Guide de l’administration</a>
       </nav>
     </footer>
   </main>

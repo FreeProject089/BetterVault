@@ -38,7 +38,7 @@ Onglet **Général** de **Compte et synchronisation**, à côté de l'adresse em
 
 L'image est réservée à votre compte : elle n'est servie à personne d'autre, y compris dans un coffre partagé. **Retirer** la supprime du serveur.
 
-Un serveur peut refuser l'une ou l'autre possibilité, ou les deux ; voir [`AVATAR_UPLOADS` et `AVATAR_URLS`](../deploiement/configuration.md#photo-de-profil). Sur un compte **Cet appareil**, la photo reste sur l'appareil.
+Un serveur peut refuser l'une ou l'autre possibilité, ou les deux ; voir [`AVATAR_UPLOADS` et `AVATAR_URLS`](../deployment/configuration.md#photo-de-profil). Sur un compte **Cet appareil**, la photo reste sur l'appareil.
 
 ## Changer le mot de passe principal
 

@@ -1304,7 +1304,7 @@ function renderClusterPanel(view) {
         <h2>${fr ? 'Ce serveur fonctionne seul' : 'This server runs on its own'}</h2>
         <p class="hint">${fr
           ? 'Plusieurs serveurs à vous, qui se répliquent par zone et prennent le relais l’un de l’autre.'
-          : 'Several servers of yours, replicating within a zone and taking over for each other.'} ${aide('deploiement/grappe')}</p>
+          : 'Several servers of yours, replicating within a zone and taking over for each other.'} ${aide('deployment/cluster')}</p>
         ${selfLine}
       </section>
       ${manage ? `
@@ -1661,7 +1661,7 @@ function renderBackups(view) {
       <h2>${fr ? 'Restaurer' : 'Restore'}</h2>
       <p class="hint">${fr
         ? 'Un aperçu montre ce que contient la copie. Rien ne change avant votre confirmation.'
-        : 'A preview shows what the copy holds. Nothing changes before you confirm.'} ${aide('deploiement/sauvegardes')}</p>
+        : 'A preview shows what the copy holds. Nothing changes before you confirm.'} ${aide('deployment/backups')}</p>
       ${view.destinations.every(d => d.status === 'revoked') ? `<p class="hint">${fr ? 'Ajoutez d’abord une destination.' : 'Add a destination first.'}</p>` : `<div class="grid-2">
         <div><label for="restore-dst">${fr ? 'Destination' : 'Destination'}</label>
           <select id="restore-dst">${view.destinations.filter(d => d.status !== 'revoked').map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.name)}</option>`).join('')}</select></div>

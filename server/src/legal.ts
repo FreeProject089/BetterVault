@@ -1,5 +1,5 @@
 import { SITE_JS_TAG } from './siteScript.ts';
-import { CHROME_CSS, siteFooter, siteHeader, type ChromeContext } from './siteChrome.ts';
+import { CHROME_CSS, siteFooter, siteHeader, themeAttr, themeVars, type ChromeContext } from './siteChrome.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -211,7 +211,7 @@ export function renderLegalPage(root: string, slug: string, context: LegalContex
     ? '<p class="meta"><strong>Template not completed:</strong> the operator of this server must fill in their details on the administration page.</p>'
     : '<p class="meta"><strong>Modèle non complété :</strong> l’hébergeur de ce serveur doit renseigner ses informations dans la page d’administration.</p>';
   return `<!DOCTYPE html>
-<html lang="${locale}">
+<html lang="${locale}"${chrome ? themeAttr(chrome) : ''}>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -219,8 +219,8 @@ export function renderLegalPage(root: string, slug: string, context: LegalContex
 <link rel="alternate" hreflang="fr" href="/legal/${slug}?lang=fr">
 <link rel="alternate" hreflang="en" href="/legal/${slug}?lang=en">
 <style>
-:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#7773e8;color-scheme:dark}
-@media (prefers-color-scheme:light){:root{--bg:#f6f8fa;--card:#fff;--border:#d0d7de;--text:#1f2328;--muted:#656d76;--accent:#5754c7;color-scheme:light}}
+${themeVars('--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#7773e8;color-scheme:dark',
+  '--bg:#f6f8fa;--card:#fff;--border:#d0d7de;--text:#1f2328;--muted:#656d76;--accent:#5754c7;color-scheme:light')}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
 ${CHROME_CSS}
 .legalbar{border-bottom:1px solid var(--border);background:var(--card)}.legalbar>div{max-width:860px;margin:0 auto;padding:14px 16px;display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center}

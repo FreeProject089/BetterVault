@@ -87,5 +87,5 @@ dossiers orphelins et les boucles de parents.
 
 ## Dossiers du dépôt
 
-Le tableau plus haut liste les dossiers de sources. Voir [Choix techniques](technique.md) pour le
+Le tableau plus haut liste les dossiers de sources. Voir [Choix techniques](technical.md) pour le
 raisonnement derrière ces découpages, et [Construire l'application](build.md) pour produire chaque paquet.

@@ -102,6 +102,9 @@ const api = createApp({
   backupFactory: getSettings => createBackupService({ db, filesDir, settings: getSettings, encryptionKey: backupKey, nodeId: () => (db.prepare("SELECT value FROM settings WHERE key = 'cluster_node'").get() as { value: string } | undefined)?.value ?? null })
 });
 
+/** Pages publiques rendues par le serveur, et leurs anciennes adresses françaises (renvoyées vers les nouvelles) */
+const PUBLIC_PAGES = new Set(['/servers', '/pricing', '/download', '/theme', '/serveurs', '/tarifs', '/telecharger']);
+
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -151,13 +154,13 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
      * Plan du site :
      *   /            page d'accueil (ou l'application si l'accueil est coupé)
      *   /app         l'application — /auth y mène
-     *   /serveurs    la liste des serveurs recommandés et leur carte
-     *   /tarifs      les offres payantes, quand il y en a ; /site.js le script des pages publiques
+     *   /servers    la liste des serveurs recommandés et leur carte
+     *   /pricing    les offres payantes, quand il y en a ; /site.js le script des pages publiques
      *   /docs, /legal, /admin
      * Les pages d'accueil, de serveurs, de doc et de documents légaux sont
      * rendues par le serveur ; l'application est un fichier statique.
      */
-    if (pathname === '/' || pathname === '/about' || pathname === '/serveurs' || pathname === '/tarifs' || pathname === '/telecharger' || pathname === '/download' || pathname === '/site.js' || pathname === '/docs' || pathname.startsWith('/docs/')
+    if (pathname === '/' || pathname === '/about' || PUBLIC_PAGES.has(pathname) || pathname === '/site.js' || pathname === '/docs' || pathname.startsWith('/docs/')
       || pathname === '/legal' || pathname.startsWith('/legal/')) {
       void api(req, res);
       return;
