@@ -45,7 +45,7 @@ describe('Liens communautaires lus à distance', () => {
 
 describe('Stripe', () => {
   it('ne relaie jamais la clé secrète dans un message d’erreur', async () => {
-    const key = 'STRIPE_TEST_SECRET_REMOVED';
+    const key = 'test_abcdefgh0123456789';
     const fetchImpl = (async () => new Response(JSON.stringify({ error: { message: `Invalid API Key provided: ${key} (rk_live_zzzzzzzzzz)` } }), { status: 401 })) as unknown as typeof fetch;
     const call = stripeClient({ settings: () => ({ billing: { stripeSecretKey: key } }) } as never, fetchImpl);
     const err = await call('GET', 'products').catch(e => e as Error);
