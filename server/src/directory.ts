@@ -591,7 +591,7 @@ export function renderDownloadsPage(ctx: LandingContext): string {
 <main id="contenu">
   <section class="center" data-reveal>
     <p class="eyebrow">${t('Télécharger', 'Download')}</p>
-    <h1>${t(`BetterVault, ${highlight('partout', 'yellow')}`, `BetterVault, ${highlight('everywhere', 'yellow')}`)}</h1>
+    <h1>${t(`BetterVault, ${highlight('partout', 'marker')}`, `BetterVault, ${highlight('everywhere', 'marker')}`)}</h1>
     <p class="lede" style="margin:0 auto">${t('Le même coffre chiffré dans le navigateur, sur ordinateur et sur téléphone. Tout se synchronise avec ce serveur.', 'The same encrypted vault in the browser, on desktop and on phone. Everything syncs with this server.')}</p>
   </section>
 

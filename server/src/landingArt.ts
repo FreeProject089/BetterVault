@@ -228,6 +228,9 @@ export const ART_CSS = `
 .hl-accent{--hl:color-mix(in srgb,var(--accent) 78%,transparent)}
 .hl-accent .hl-text{color:#fff}
 .hl-yellow{--hl:#ffc62e}.hl-yellow .hl-text{color:#1a1530}
+/* Trait de marqueur sous le bas des lettres : le texte garde la couleur du thème */
+.hl-marker{--hl:color-mix(in srgb,#ffc62e 88%,transparent)}.hl-marker .hl-text{color:var(--text)}
+.hl-marker .hl-brush{top:auto;bottom:-.02em;height:.42em;margin-top:0}
 .ul{position:relative;display:inline-block;white-space:nowrap}
 .ul-line{position:absolute;left:-2%;bottom:-.14em;width:104%;height:.3em;overflow:visible}
 .ul-line path{fill:var(--ul,#3aa0f0)}
