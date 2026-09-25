@@ -1,0 +1,6 @@
+# Fins de ligne Unix pour ce qui s'exécute sur Linux (VPS, conteneurs, CI),
+# même depuis un clone Windows : un « \r » casse un script shell ou un Caddyfile.
+*.sh            text eol=lf
+deploy/**       text eol=lf
+security/*.tsv  text eol=lf
+Dockerfile      text eol=lf
