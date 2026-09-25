@@ -1,0 +1,150 @@
+name: DAST
+
+# Analyse dynamique (Nuclei, ZAP) d'une instance BetterVault qui tourne.
+#
+#   target: local    → l'image est construite et lancée dans le job : rien n'est
+#                      scanné en dehors du runner (CI, demandes de fusion).
+#   target: staging  → l'instance de staging, et elle seule : l'adresse doit être
+#                      dans SECURITY_DAST_ALLOWED_HOSTS et ne jamais être celle de
+#                      la production (PRODUCTION_URL). Sinon le job s'arrête.
+#
+# Les deux scans sont non destructifs : ZAP en mode « baseline » (passif, GET),
+# Nuclei sans les modèles dos, fuzz, intrusive ni brute-force, à débit limité.
+on:
+  workflow_call:
+    inputs:
+      target:
+        type: string
+        default: local
+      url:
+        description: Adresse de base (target staging)
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Cible
+        type: choice
+        options: [local, staging]
+        default: local
+
+permissions:
+  contents: read
+
+env:
+  NUCLEI_IMAGE: projectdiscovery/nuclei:v3.11.1@sha256:582d5546902e67052097cb2d07296c642d50a1afc5e44623cb038845df9a32eb
+  ZAP_IMAGE: zaproxy/zap-stable:2.17.0@sha256:781a2bdaea47324e7bab583e2263f21d257b0aee61ed51521a5be45f5f5081ef
+  SECURITY_BLOCK_LEVEL: ${{ vars.SECURITY_BLOCK_LEVEL || 'high' }}
+  SECURITY_BLOCK_LEVEL_NUCLEI: ${{ vars.SECURITY_BLOCK_LEVEL_NUCLEI }}
+  SECURITY_BLOCK_LEVEL_ZAP: ${{ vars.SECURITY_BLOCK_LEVEL_ZAP }}
+
+jobs:
+  dast:
+    name: DAST (${{ inputs.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cible et périmètre autorisé
+        id: scope
+        env:
+          TARGET: ${{ inputs.target }}
+          INPUT_URL: ${{ inputs.url }}
+          STAGING_URL: ${{ vars.STAGING_URL }}
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+          ALLOWED: ${{ vars.SECURITY_DAST_ALLOWED_HOSTS }}
+        run: |
+          set -eu
+          host() { printf '%s' "$1" | sed -E 's#^[a-z]+://##; s#[/:].*$##' | tr 'A-Z' 'a-z'; }
+          if [ "$TARGET" = local ]; then
+            echo "base=http://127.0.0.1:8787" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$TARGET" != staging ]; then echo "::error::Cible inconnue : $TARGET"; exit 1; fi
+          url="${INPUT_URL:-$STAGING_URL}"
+          url="${url%/}"
+          if [ -z "$url" ]; then echo "::error::STAGING_URL n'est pas défini"; exit 1; fi
+          h=$(host "$url")
+          # Jamais la production, même par erreur de configuration
+          if [ -n "$PRODUCTION_URL" ] && [ "$h" = "$(host "$PRODUCTION_URL")" ]; then
+            echo "::error::Refusé : $h est l'adresse de production"; exit 1
+          fi
+          # Seulement un hôte explicitement autorisé
+          ok=false
+          for a in $(printf '%s' "$ALLOWED" | tr ',' ' '); do [ "$h" = "$(printf '%s' "$a" | tr 'A-Z' 'a-z')" ] && ok=true; done
+          if [ "$ok" != true ]; then
+            echo "::error::Refusé : $h n'est pas dans SECURITY_DAST_ALLOWED_HOSTS"; exit 1
+          fi
+          echo "base=$url" >> "$GITHUB_OUTPUT"
+          echo "Cible autorisée : $url"
+
+      # ── Instance locale, lancée dans le runner ──────────────────────────────
+      - if: inputs.target == 'local'
+        uses: docker/setup-buildx-action@v3
+      - if: inputs.target == 'local'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: bettervault:dast
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Démarrer l'instance locale
+        if: inputs.target == 'local'
+        run: |
+          docker run -d --name bv -p 127.0.0.1:8787:8787 \
+            -e BETTERVAULT_SECRET="$(openssl rand -base64 48)" \
+            -e ADMIN_TOKEN="$(openssl rand -hex 24)" \
+            -e PUBLIC_URL=http://127.0.0.1:8787 \
+            -e GEOIP_AUTO_UPDATE=false \
+            bettervault:dast
+          for i in $(seq 1 40); do curl -fs http://127.0.0.1:8787/api/v1/health >/dev/null && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8787/api/v1/health
+
+      - name: Liste des cibles
+        env:
+          BASE: ${{ steps.scope.outputs.base }}
+        run: |
+          mkdir -p reports && chmod 777 reports
+          grep -vE '^\s*(#|$)' security/dast-paths.txt | sed "s#^#${BASE}#" > reports/targets.txt
+          cat reports/targets.txt
+
+      # Nuclei : modèles d'exposition, de mauvaise configuration et CVE ; rien d'intrusif
+      - name: Nuclei
+        run: |
+          docker run --rm --network host -v "$PWD/reports:/reports" "$NUCLEI_IMAGE" \
+            -l /reports/targets.txt \
+            -tags exposure,misconfig,cve,tech,headers,ssl \
+            -exclude-tags dos,fuzz,intrusive,bruteforce,brute-force,rce,sqli \
+            -severity info,low,medium,high,critical \
+            -rate-limit 10 -concurrency 5 -timeout 10 \
+            -jsonl -o /reports/nuclei.jsonl -disable-update-check -no-color -stats
+          test -f reports/nuclei.jsonl || touch reports/nuclei.jsonl
+
+      # ZAP baseline : exploration et analyse passive, sans attaque
+      - name: OWASP ZAP (baseline)
+        env:
+          BASE: ${{ steps.scope.outputs.base }}
+        run: |
+          cp security/zap-rules.tsv reports/zap-rules.tsv
+          code=0
+          docker run --rm --network host -v "$PWD/reports:/zap/wrk:rw" "$ZAP_IMAGE" \
+            zap-baseline.py -t "$BASE" -c zap-rules.tsv -m 3 -I \
+              -J zap.json -r zap.html -w zap.md || code=$?
+          # 0 et 2 : analyse terminée (la porte décide) ; autre code : ZAP n'a pas pu analyser
+          if [ "$code" != 0 ] && [ "$code" != 2 ]; then echo "::error::ZAP a échoué (code $code)"; exit 1; fi
+
+      - name: Journaux de l'instance locale
+        if: always() && inputs.target == 'local'
+        run: docker logs bv > reports/instance.log 2>&1 || true
+
+      - name: Porte de sécurité
+        run: node scripts/security-gate.mjs reports nuclei zap
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rapports-dast-${{ inputs.target }}
+          path: reports/
+          retention-days: 30

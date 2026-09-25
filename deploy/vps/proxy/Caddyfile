@@ -1,0 +1,27 @@
+# Production : PROD_DOMAIN (ex. vault.exemple.fr) ; staging : dev.<PROD_DOMAIN>.
+# Les variables viennent du fichier proxy/.env (PROD_DOMAIN, STAGING_AUTH_USER, STAGING_AUTH_HASH).
+
+(commun) {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+}
+
+{$PROD_DOMAIN} {
+	import commun
+	reverse_proxy bettervault-production:8787
+}
+
+dev.{$PROD_DOMAIN} {
+	import commun
+	# Le staging ne doit pas être indexé
+	header X-Robots-Tag "noindex, nofollow"
+	# Accès restreint (facultatif) : décommenter et renseigner le mot de passe haché
+	# (docker run --rm caddy:2.10-alpine caddy hash-password) dans proxy/.env.
+	# basic_auth {
+	# 	{$STAGING_AUTH_USER} {$STAGING_AUTH_HASH}
+	# }
+	reverse_proxy bettervault-staging:8787
+}

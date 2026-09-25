@@ -1,0 +1,6 @@
+# Règles de l'analyse ZAP (zap-baseline.py -c). Format : identifiant<TAB>action<TAB>commentaire
+# action : IGNORE (retirer du rapport), INFO, WARN (défaut), FAIL.
+# La décision de bloquer revient à la porte de sécurité (scripts/security-gate.mjs),
+# d'après la sévérité : ne passer une règle en IGNORE qu'avec une raison écrite ici.
+#
+# 10096	IGNORE	(exemple) horodatage révélé : faux positif sur les numéros de version

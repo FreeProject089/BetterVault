@@ -1,0 +1,12 @@
+# Fichiers exclus de l'analyse Semgrep (SAST).
+# Code généré, dépendances et sorties de construction : rien à y corriger.
+node_modules/
+dist/
+dist-extension/
+site/
+src-tauri/target/
+src-tauri/gen/
+server/data/
+# Les tests contiennent volontairement des charges d'attaque (XSS, injections)
+# pour vérifier qu'elles sont neutralisées : les analyser ne produirait que du bruit.
+tests/

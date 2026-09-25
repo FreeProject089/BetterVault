@@ -102,6 +102,10 @@ uv run --no-project --with-requirements docs/requirements.txt mkdocs build --str
 Cette page couvre le développement au quotidien. Pour produire les paquets distribuables — bureau,
 Android, iOS, extension, image Docker — voir [Construire l'application](build.md).
 
+## Branches, CI et déploiement
+
+Le travail part de `dev` et y revient par une demande de fusion ; `dev` se déploie sur le staging, `main` en production. Chaque demande de fusion passe la CI et les tests de sécurité (secrets, code, dépendances, image, DAST). Voir [Intégration et déploiement continus](ci-cd.md).
+
 ## Conventions
 
 - TypeScript strict, sans framework d'interface.

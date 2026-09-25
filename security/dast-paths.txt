@@ -1,0 +1,20 @@
+# Chemins visés par Nuclei, ajoutés à l'adresse de base (conteneur local ou staging).
+# Une ligne par chemin ; # pour commenter. ZAP, lui, part de l'adresse de base et
+# suit les liens (analyse passive, requêtes GET seulement).
+#
+# Ne jamais y mettre de route qui modifie des données : les scans restent non
+# destructifs. Les routes d'administration sont volontairement absentes.
+/
+/app
+/docs
+/docs/security
+/download
+/legal
+/legal/privacy
+/manifest.json
+/sw.js
+/site.js
+/api/v1/health
+/api/v1/directory
+/api/v1/config
+/api/v1/legal

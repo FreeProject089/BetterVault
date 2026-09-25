@@ -1,9 +1,10 @@
 name: CI
 
+# Demandes de fusion ; les poussées sur main et dev passent par Deploy, qui appelle ce workflow
 on:
-  push:
-    branches: [main]
   pull_request:
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -1,0 +1,4 @@
+# Vulnérabilités acceptées (Trivy). Une ligne par identifiant, avec la raison et
+# une date de réexamen : une exception sans date devient permanente par oubli.
+#
+# CVE-0000-00000  # (exemple) paquet présent dans l'image mais jamais chargé ; revoir le 2026-12-31

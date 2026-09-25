@@ -1,0 +1,33 @@
+# Une instance BetterVault sur le VPS : production ou staging.
+# Copié par le workflow Deploy dans <DEPLOY_PATH>/<environnement>/ à chaque déploiement.
+# L'image (BV_IMAGE) est choisie par remote-deploy.sh ; les secrets restent dans le .env
+# du serveur, créé à la main une fois (modèle : env.example), jamais dans Git.
+name: bettervault-${BV_ENV:?}
+
+services:
+  app:
+    image: ${BV_IMAGE:?}
+    container_name: bettervault-${BV_ENV:?}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Derrière Caddy : l'adresse du client vient de X-Forwarded-For
+      TRUST_PROXY: "true"
+    volumes:
+      - data:/data
+    networks:
+      - web
+    # Aucun port publié : seul Caddy, sur le réseau « web », joint l'instance
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+
+volumes:
+  data:
+
+networks:
+  web:
+    name: bettervault-web
+    external: true

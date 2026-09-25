@@ -92,5 +92,6 @@ nav:
       - Construire pas à pas: development/build-guide.md
       - Construire l'application: development/build.md
       - Publier une version: development/releasing.md
+      - Intégration et déploiement continus: development/ci-cd.md
       - API du serveur: development/api.md
       - Contribuer: development/contributing.md

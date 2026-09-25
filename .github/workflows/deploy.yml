@@ -1,0 +1,146 @@
+name: Deploy
+
+# Déploiement continu sur le VPS :
+#   branche dev  → environnement « staging »    → https://dev.<domaine>
+#   branche main → environnement « production » → https://<domaine>
+#
+# Rien n'est déployé sans que la CI et la porte de sécurité passent. L'image est
+# construite une fois, publiée sur GHCR, puis le VPS la tire par son empreinte :
+# ce qui a été testé est exactement ce qui tourne. Après un déploiement sur le
+# staging, le DAST (Nuclei, ZAP) vise le staging — jamais la production.
+#
+# Tant que la variable DEPLOY_ENABLED n'est pas « true », seules la CI et la porte
+# de sécurité tournent. Mise en place : docs/development/ci-cd.md.
+on:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  security:
+    name: Sécurité
+    uses: ./.github/workflows/security.yml
+
+  image:
+    name: Image
+    needs: [ci, security]
+    # Seules main (production) et dev (staging) se déploient, même lancé à la main
+    if: vars.DEPLOY_ENABLED == 'true' && (github.ref_name == 'main' || github.ref_name == 'dev')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      ref: ${{ steps.ref.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: name
+        run: echo "image=ghcr.io/$(echo '${{ github.repository_owner }}' | tr 'A-Z' 'a-z')/bettervault" >> "$GITHUB_OUTPUT"
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.name.outputs.image }}:${{ github.ref_name == 'main' && 'production' || 'staging' }}
+            ${{ steps.name.outputs.image }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - id: ref
+        run: echo "ref=${{ steps.name.outputs.image }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Déploiement (${{ github.ref_name == 'main' && 'production' || 'staging' }})
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    # Les secrets SSH et l'adresse vivent dans l'environnement GitHub correspondant,
+    # qui peut exiger une approbation (conseillé pour la production)
+    environment:
+      name: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+      url: ${{ vars.APP_URL }}
+    env:
+      ENV_NAME: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+      IMAGE: ${{ needs.image.outputs.ref }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/bettervault' }}
+      SSH_PORT: ${{ vars.VPS_PORT || '22' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: deploy/vps
+      - name: Clé SSH et hôte de confiance
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -eu
+          if [ -z "$SSH_KEY" ] || [ -z "$KNOWN_HOSTS" ]; then echo "::error::VPS_SSH_KEY et VPS_KNOWN_HOSTS sont requis dans l'environnement $ENV_NAME"; exit 1; fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          # Empreinte de l'hôte fixée : jamais de StrictHostKeyChecking=no
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts
+      - name: Copie des fichiers de déploiement
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          ssh_() { ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o BatchMode=yes "$USER@$HOST" "$@"; }
+          ssh_ "mkdir -p '$DEPLOY_PATH/$ENV_NAME'"
+          scp -i ~/.ssh/id_deploy -P "$SSH_PORT" -o BatchMode=yes deploy/vps/compose.yaml deploy/vps/remote-deploy.sh "$USER@$HOST:$DEPLOY_PATH/$ENV_NAME/"
+      - name: Mise à jour de l'instance
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          USER: ${{ secrets.VPS_USER }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          set -eu
+          ssh_() { ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o BatchMode=yes "$USER@$HOST" "$@"; }
+          # Jeton GHCR à durée de vie limitée au job, passé par l'entrée standard et retiré ensuite
+          printf '%s' "$GHCR_TOKEN" | ssh_ "docker login ghcr.io -u '$GHCR_USER' --password-stdin >/dev/null"
+          code=0
+          ssh_ "sh '$DEPLOY_PATH/$ENV_NAME/remote-deploy.sh' '$ENV_NAME' '$IMAGE'" || code=$?
+          ssh_ "docker logout ghcr.io >/dev/null" || true
+          exit "$code"
+      - name: Contrôle depuis Internet
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          set -eu
+          if [ -z "$APP_URL" ]; then echo "::warning::APP_URL non défini : contrôle externe sauté"; exit 0; fi
+          for i in $(seq 1 20); do curl -fsS "${APP_URL%/}/api/v1/health" && exit 0; sleep 3; done
+          echo "::error::${APP_URL} ne répond pas"; exit 1
+      - name: Nettoyage
+        if: always()
+        run: rm -f ~/.ssh/id_deploy
+
+  dast-staging:
+    name: DAST (staging)
+    needs: deploy
+    if: github.ref_name == 'dev'
+    uses: ./.github/workflows/dast.yml
+    with:
+      target: staging

@@ -1,0 +1,3 @@
+# Faux positifs de Gitleaks, par empreinte (colonne « Fingerprint » du rapport).
+# N'y ajouter qu'un faux positif avéré. Un vrai secret se révoque d'abord ;
+# l'ignorer ensuite ne sert qu'à retirer une fuite ancienne, déjà neutralisée.

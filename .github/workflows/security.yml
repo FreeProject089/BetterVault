@@ -1,0 +1,166 @@
+name: Sécurité
+
+# Tests de sécurité automatisés, sans IA :
+#   secrets  Gitleaks  — commits de la branche ou de la demande de fusion, et fichiers actuels
+#   sast     Semgrep   — analyse du code TypeScript, JavaScript, Dockerfile et workflows
+#   deps     Trivy fs  — dépendances (package-lock.json, Cargo.lock) et configuration (Dockerfile)
+#   image    Trivy     — image Docker construite depuis ce commit
+#   dast     Nuclei et ZAP contre l'image lancée dans le runner (workflow dast.yml)
+# Chaque scanner dépose son rapport ; la porte (scripts/security-gate.mjs) décide
+# selon les seuils réglés par variables (voir docs/development/ci-cd.md).
+# Chaque lundi, tout l'historique Git est aussi passé à Gitleaks (rapport seul, non bloquant).
+on:
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+env:
+  GITLEAKS_IMAGE: zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+  SEMGREP_IMAGE: semgrep/semgrep:1.177.0@sha256:acaac22ffc7b7cc5926de0751b223bce0b2491c33d18422fa72f632c78d81198
+  TRIVY_IMAGE: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+  # Règles Semgrep du registre ; ajouter ou retirer un jeu ici
+  SEMGREP_RULES: p/javascript p/typescript p/nodejs p/owasp-top-ten p/dockerfile p/github-actions
+
+jobs:
+  secrets:
+    name: Secrets (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Commits à analyser
+        id: range
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # Demande de fusion : ses commits ; poussée : ceux de la poussée ; sinon le dernier commit
+          if [ "$EVENT" = pull_request ]; then echo "log=$BASE..$HEAD" >> "$GITHUB_OUTPUT"
+          elif [ -n "$BEFORE" ] && ! printf '%s' "$BEFORE" | grep -qE '^0+$' && git cat-file -e "$BEFORE" 2>/dev/null; then echo "log=$BEFORE..$HEAD" >> "$GITHUB_OUTPUT"
+          else echo "log=-1 $HEAD" >> "$GITHUB_OUTPUT"; fi
+      - name: Gitleaks
+        env:
+          LOG: ${{ steps.range.outputs.log }}
+          SCHEDULED: ${{ github.event_name == 'schedule' }}
+        run: |
+          mkdir -p reports && chmod 777 reports
+          # safe.directory : le dépôt monté appartient à l'utilisateur du runner, pas à celui du conteneur
+          run() { docker run --rm -v "$PWD:/repo" -w /repo -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' "$GITLEAKS_IMAGE" "$@"; }
+          # Les fichiers d'abord : le scan ne doit pas relire le rapport des commits
+          run dir --redact --no-banner --exit-code 0 --report-format json --report-path reports/gitleaks-dir.json /repo
+          run git --log-opts="$LOG" --redact --no-banner --exit-code 0 --report-format json --report-path reports/gitleaks-git.json /repo
+          if [ "$SCHEDULED" = true ]; then
+            run git --redact --no-banner --exit-code 0 --report-format json --report-path reports/gitleaks-history.json /repo
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rapport-secrets
+          path: reports/
+          retention-days: 30
+
+  sast:
+    name: Code (Semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Semgrep
+        run: |
+          mkdir -p reports && chmod 777 reports
+          configs=$(for r in $SEMGREP_RULES; do printf -- '--config %s ' "$r"; done)
+          # Code de retour 0 : analyse faite (même avec des constats, la porte décide)
+          docker run --rm -v "$PWD:/src" -w /src "$SEMGREP_IMAGE" \
+            semgrep scan $configs --metrics=off --disable-version-check \
+              --json --output reports/semgrep.json --sarif-output reports/semgrep.sarif
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rapport-sast
+          path: reports/
+          retention-days: 30
+
+  deps:
+    name: Dépendances (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy (fichiers)
+        run: |
+          mkdir -p reports && chmod 777 reports
+          docker run --rm -v "$PWD:/src" -w /src -v trivy-cache:/root/.cache "$TRIVY_IMAGE" \
+            fs --scanners vuln,misconfig --ignorefile .trivyignore \
+              --skip-dirs node_modules --skip-dirs src-tauri/target --skip-dirs dist \
+              --format json --output reports/trivy-fs.json --exit-code 0 .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rapport-deps
+          path: reports/
+          retention-days: 30
+
+  image:
+    name: Image Docker (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: bettervault:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Trivy (image)
+        run: |
+          mkdir -p reports && chmod 777 reports
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/src" -w /src -v trivy-cache:/root/.cache "$TRIVY_IMAGE" \
+            image --scanners vuln,secret --ignorefile .trivyignore \
+              --format json --output reports/trivy-image.json --exit-code 0 bettervault:scan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rapport-image
+          path: reports/
+          retention-days: 30
+
+  dast:
+    name: DAST (instance locale)
+    uses: ./.github/workflows/dast.yml
+    with:
+      target: local
+
+  gate:
+    name: Porte de sécurité
+    needs: [secrets, sast, deps, image]
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      SECURITY_BLOCK_LEVEL: ${{ vars.SECURITY_BLOCK_LEVEL || 'high' }}
+      SECURITY_BLOCK_LEVEL_SAST: ${{ vars.SECURITY_BLOCK_LEVEL_SAST }}
+      SECURITY_BLOCK_LEVEL_DEPS: ${{ vars.SECURITY_BLOCK_LEVEL_DEPS }}
+      SECURITY_BLOCK_LEVEL_IMAGE: ${{ vars.SECURITY_BLOCK_LEVEL_IMAGE }}
+      SECURITY_BLOCK_SECRETS: ${{ vars.SECURITY_BLOCK_SECRETS || 'true' }}
+      SECURITY_BLOCK_UNFIXED: ${{ vars.SECURITY_BLOCK_UNFIXED || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rapport-*
+          path: reports
+          merge-multiple: true
+      - name: Décision
+        env:
+          SCHEDULED: ${{ github.event_name == 'schedule' }}
+        run: |
+          tools="secrets sast deps image"
+          [ "$SCHEDULED" = true ] && tools="$tools secrets-history"
+          node scripts/security-gate.mjs reports $tools

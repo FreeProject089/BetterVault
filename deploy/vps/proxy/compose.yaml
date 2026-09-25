@@ -1,0 +1,30 @@
+# Proxy HTTPS partagé par la production et le staging (installé une fois sur le VPS).
+# Caddy obtient et renouvelle les certificats Let's Encrypt des deux domaines.
+#   docker network create bettervault-web
+#   docker compose -f proxy/compose.yaml up -d
+name: bettervault-proxy
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - web
+
+volumes:
+  caddy-data:
+  caddy-config:
+
+networks:
+  web:
+    name: bettervault-web
+    external: true
