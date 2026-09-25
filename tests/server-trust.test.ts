@@ -53,6 +53,7 @@ async function startServer(settings: Partial<ServerSettings> = {}) {
     db,
     serverSecret: SECRET,
     minKdfMemoryKib: 8,
+    decoyKdf: FAST_KDF,
     authRateLimit: { windowMs: 60_000, max: 1000 },
     settings: { ...settingsFromEnv({}), ...settings },
     adminTokenHash: createHash('sha256').update(ADMIN_TOKEN).digest('base64'),

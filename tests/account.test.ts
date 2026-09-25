@@ -172,6 +172,7 @@ describe('Serveur BetterVault + synchronisation multi-appareils', () => {
       db: openDatabase(':memory:'),
       serverSecret: 'secret-de-test-suffisamment-long-0123456789',
       minKdfMemoryKib: 8,
+      decoyKdf: FAST_KDF,
       authRateLimit: { windowMs: 60_000, max: 1000 }
     }));
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -343,6 +344,7 @@ describe('Serveur BetterVault + synchronisation multi-appareils', () => {
         db: openDatabase(':memory:'),
         serverSecret: 'secret-de-test-suffisamment-long-0123456789',
         minKdfMemoryKib: 8,
+        decoyKdf: FAST_KDF,
         authRateLimit: { windowMs: 60_000, max: 2 },
         trustProxy
       }));

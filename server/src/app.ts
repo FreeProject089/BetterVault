@@ -67,6 +67,8 @@ export interface AppOptions {
   corsOrigins?: string[] | '*';
   sessionTtlMs?: number;
   minKdfMemoryKib?: number;
+  /** Paramètres annoncés pour un compte inconnu ; les tests les abaissent pour ne pas dériver une clé Argon2id complète à chaque échec */
+  decoyKdf?: KdfParams;
   authRateLimit?: { windowMs: number; max: number };
   /** Derrière un reverse proxy : utiliser X-Forwarded-For pour identifier le client */
   trustProxy?: boolean;
@@ -132,6 +134,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
   const now = options.now ?? Date.now;
   const sessionTtl = options.sessionTtlMs ?? 30 * 24 * 60 * 60 * 1000;
   const minKdfMemory = options.minKdfMemoryKib ?? 19456;
+  const decoyKdf = options.decoyKdf ?? DEFAULT_KDF;
   const corsOrigins = options.corsOrigins ?? '*';
   const mailerFactory = options.mailerFactory ?? createSmtpMailer;
   const dummySalt = randomBytes(16);
@@ -549,7 +552,7 @@ export function createApp(options: AppOptions): ((req: IncomingMessage, res: Ser
       if (user) return { status: 200, body: { kdf: JSON.parse(user.kdf), salt: user.salt } };
       // Compte inconnu : réponse stable et crédible pour ne pas révéler l'existence des comptes
       const salt = createHmac('sha256', serverSecret).update(`prelogin:${email}`).digest().subarray(0, 16).toString('base64');
-      return { status: 200, body: { kdf: DEFAULT_KDF, salt } };
+      return { status: 200, body: { kdf: decoyKdf, salt } };
     },
 
     'POST /api/v1/accounts': async req => {

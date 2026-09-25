@@ -44,6 +44,7 @@ describe('Lien « ce n’était pas moi »', () => {
       db: openDatabase(':memory:'),
       serverSecret: 'secret-de-test-suffisamment-long-0123456789',
       minKdfMemoryKib: 8,
+      decoyKdf: FAST_KDF,
       authRateLimit: { windowMs: 60_000, max: 10_000 },
       settings: {
         ...base,
@@ -162,6 +163,7 @@ describe('Lien « ce n’était pas moi »', () => {
       db: openDatabase(':memory:'),
       serverSecret: 'secret-de-test-suffisamment-long-0123456789',
       minKdfMemoryKib: 8,
+      decoyKdf: FAST_KDF,
       settings: {
         ...base,
         publicUrl: '',

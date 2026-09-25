@@ -100,6 +100,7 @@ describe('Clé de sécurité (WebAuthn)', () => {
       db: openDatabase(':memory:'),
       serverSecret: 'secret-de-test-suffisamment-long-0123456789',
       minKdfMemoryKib: 8,
+      decoyKdf: FAST_KDF,
       authRateLimit: { windowMs: 60_000, max: 10_000 },
       settings: settingsFromEnv({})
     }));
