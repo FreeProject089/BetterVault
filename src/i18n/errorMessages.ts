@@ -116,7 +116,10 @@ const EXACT: Record<string, string> = {
   'Mot de passe principal incorrect': 'Incorrect master password',
   'Clé de secours invalide': 'Invalid recovery key',
   'Service Have I Been Pwned injoignable (hors ligne ou bloqué par le réseau)': 'Have I Been Pwned unreachable (offline or blocked by the network)',
-  'Export Passky chiffré : dans Passky, exportez en JSON non chiffré (Paramètres › Exporter)': 'Encrypted Passky export: in Passky, export as unencrypted JSON (Settings › Export)'
+  'Export Passky chiffré : dans Passky, exportez en JSON non chiffré (Paramètres › Exporter)': 'Encrypted Passky export: in Passky, export as unencrypted JSON (Settings › Export)',
+  'Sauvegarde Passky chiffrée : nom d’utilisateur et mot de passe Passky requis': 'Encrypted Passky backup: Passky username and password required',
+  'Sauvegarde Passky : nom d’utilisateur ou mot de passe incorrect': 'Passky backup: wrong username or password',
+  'Champ Passky trop court': 'Passky field too short'
 };
 
 const PATTERNS: Array<[RegExp, (m: RegExpMatchArray) => string]> = [

@@ -13,7 +13,7 @@ Glissez un fichier dans la zone ou cliquez pour le choisir. Le format est détec
 | Bitwarden | JSON, CSV | Passkeys et champs personnalisés inclus |
 | FIDO CXF | JSON | Identifiants, passkeys, 2FA, notes |
 | LastPass, Dashlane, Chrome, Firefox | CSV | |
-| Passky | JSON | Export non chiffré (Paramètres › Exporter) : site, identifiant, mot de passe et message |
+| Passky | JSON | Export non chiffré (Paramètres › Exporter), ou sauvegarde chiffrée (Paramètres › Sauvegarde) : votre nom d'utilisateur et votre mot de passe Passky sont alors demandés pour la déchiffrer, sur l'appareil. Site, identifiant, mot de passe et message |
 | BetterVault | JSON, JSON chiffré, CSV | |
 
 Pour un fichier protégé (KeePass, export chiffré), BetterVault demande le mot de passe avant de lire le contenu. Le nombre d'éléments trouvés s'affiche avant la confirmation.

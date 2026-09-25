@@ -73,7 +73,7 @@ export function openImportExportModal(app: ModalHost, { accountService, sharedVa
       { id: 'lastpass', name: 'LastPass', logo: brand('lastpass'), formats: 'CSV', accept: '.csv', steps: [tr('Options avancées, puis Exporter', 'Advanced options, then Export')] },
       { id: 'dashlane', name: 'Dashlane', logo: brand('dashlane'), formats: 'CSV', accept: '.csv', steps: [tr('Paramètres, Exporter les données, format CSV', 'Settings, Export data, CSV format')] },
       { id: 'apple', name: tr('Mots de passe Apple', 'Apple Passwords'), logo: brand('apple'), formats: 'CSV', accept: '.csv', steps: [tr('App Mots de passe : Fichier, puis Exporter', 'Passwords app: File, then Export')] },
-      { id: 'passky', name: 'Passky', logo: GENERIC_FILE_ICON, formats: 'JSON', accept: '.json', steps: [tr('Passky : Paramètres, puis Exporter', 'Passky: Settings, then Export'), tr('Choisissez l’export non chiffré (JSON)', 'Choose the unencrypted export (JSON)')] },
+      { id: 'passky', name: 'Passky', logo: GENERIC_FILE_ICON, formats: 'JSON', accept: '.json', steps: [tr('Passky : Paramètres, puis Sauvegarde ou Exporter', 'Passky: Settings, then Backup or Export'), tr('Sauvegarde chiffrée : votre nom d’utilisateur et mot de passe Passky seront demandés', 'Encrypted backup: your Passky username and password will be asked')] },
       { id: 'cxf', name: 'FIDO CXF', logo: brand('fidoalliance'), formats: 'JSON', accept: '.json', steps: [tr('Fichier Credential Exchange Format, passkeys comprises', 'Credential Exchange Format file, passkeys included')] },
       { id: 'twofactor', name: tr('Codes 2FA seuls', '2FA codes only'), logo: GEN_ICONS.qr, formats: 'otpauth:// · QR · JSON', accept: '.txt,.json,.png,.jpg,.jpeg,.webp', steps: [tr('Collez des URI otpauth://, ou déposez une capture de QR code', 'Paste otpauth:// URIs, or drop a screenshot of a QR code'), tr('Aegis, 2FAS, Bitwarden, KeePassXC exportent ce format', 'Aegis, 2FAS, Bitwarden and KeePassXC export this format')] },
       { id: 'other', name: tr('Autre fichier', 'Other file'), logo: GENERIC_FILE_ICON, formats: 'KDBX · 1PUX · JSON · CSV · XML', accept: '.json,.csv,.xml,.kdbx,.1pux', steps: [tr('Le format est reconnu automatiquement', 'The format is detected automatically')] }
@@ -136,6 +136,10 @@ export function openImportExportModal(app: ModalHost, { accountService, sharedVa
             </div>
             <input type="file" id="import-file-input" hidden>
             <div id="import-secret-panel" class="form-section" hidden>
+              <div class="form-field" id="import-username-row" hidden>
+                <label class="form-label" for="import-secret-username">${tr('Nom d’utilisateur Passky', 'Passky username')}</label>
+                <input class="form-input" id="import-secret-username" type="text" autocomplete="off" spellcheck="false">
+              </div>
               <div class="form-field">
                 <label class="form-label" for="import-secret-password" id="import-secret-label">${tr('Mot de passe', 'Password')}</label>
                 <input class="form-input" id="import-secret-password" type="password" autocomplete="off">
@@ -393,6 +397,8 @@ export function openImportExportModal(app: ModalHost, { accountService, sharedVa
     const secretLabel = $<HTMLElement>('#import-secret-label');
     const secretPwd = $<HTMLInputElement>('#import-secret-password');
     const keyFileRow = $<HTMLElement>('#import-keyfile-row');
+    const usernameRow = $<HTMLElement>('#import-username-row');
+    const secretUser = $<HTMLInputElement>('#import-secret-username');
     const keyFileInput = $<HTMLInputElement>('#import-keyfile');
     const unlockBtn = $<HTMLButtonElement>('#btn-import-unlock');
 
@@ -610,13 +616,17 @@ export function openImportExportModal(app: ModalHost, { accountService, sharedVa
         if (err instanceof PasswordRequiredError) {
           secretPanel.hidden = false;
           keyFileRow.hidden = err.kind !== 'kdbx';
+          // Sauvegarde Passky : la clé vient du compte, nom d'utilisateur compris
+          usernameRow.hidden = err.kind !== 'passky-encrypted';
           secretLabel.textContent = err.kind === 'kdbx'
             ? tr('Mot de passe de la base KeePass', 'KeePass database password')
             : err.kind === 'bitwarden-encrypted'
               ? tr('Mot de passe de l’export Bitwarden', 'Bitwarden export password')
-              : tr('Mot de passe de l’export chiffré', 'Encrypted export password');
-          setStatus(secrets ? `<div class="notice notice-danger">${app.escapeHtml(err.message)}</div>` : '');
-          secretPwd.focus();
+              : err.kind === 'passky-encrypted'
+                ? tr('Mot de passe principal Passky', 'Passky master password')
+                : tr('Mot de passe de l’export chiffré', 'Encrypted export password');
+          setStatus(secrets ? `<div class="notice notice-danger">${app.escapeHtml(accountErrorMessage(err))}</div>` : '');
+          (usernameRow.hidden || secretUser.value ? secretPwd : secretUser).focus();
           return;
         }
         setStatus(`<div class="notice notice-danger"><strong>${tr('Fichier illisible', 'Unreadable file')}</strong> · ${app.escapeHtml(accountErrorMessage(err))}</div>`);
@@ -660,6 +670,7 @@ ${uri}` : uri;
       try {
         await tryParse({
           password: secretPwd.value,
+          username: usernameRow.hidden ? undefined : secretUser.value,
           keyFile: keyFile && !keyFileRow.hidden ? new Uint8Array(await keyFile.arrayBuffer()) : undefined
         });
       } finally {
