@@ -30,6 +30,11 @@ jobs:
 
   security:
     name: Sécurité
+    # Envoi des SARIF à Code scanning ; commentaires de PR (sans effet sur une poussée)
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
     uses: ./.github/workflows/security.yml
 
   image:
@@ -141,6 +146,9 @@ jobs:
     name: DAST (staging)
     needs: deploy
     if: github.ref_name == 'dev'
+    permissions:
+      contents: read
+      pull-requests: write
     uses: ./.github/workflows/dast.yml
     with:
       target: staging

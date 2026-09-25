@@ -73,6 +73,9 @@ jobs:
   sast:
     name: Code (Semgrep)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
       - name: Semgrep
@@ -83,6 +86,13 @@ jobs:
           docker run --rm -v "$PWD:/src" -w /src "$SEMGREP_IMAGE" \
             semgrep scan $configs --metrics=off --disable-version-check \
               --json --output reports/semgrep.json --sarif-output reports/semgrep.sarif
+      # Onglet Security → Code scanning : chaque constat devient une alerte, annotée dans les PR
+      - name: Envoi à Code scanning
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: reports/semgrep.sarif
+          category: semgrep
       - uses: actions/upload-artifact@v4
         with:
           name: rapport-sast
@@ -92,6 +102,9 @@ jobs:
   deps:
     name: Dépendances (Trivy)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
       - name: Trivy (fichiers)
@@ -101,6 +114,15 @@ jobs:
             fs --scanners vuln,misconfig --ignorefile .trivyignore \
               --skip-dirs node_modules --skip-dirs src-tauri/target --skip-dirs dist \
               --format json --output reports/trivy-fs.json --exit-code 0 .
+          # Même rapport au format SARIF, sans relancer l'analyse
+          docker run --rm -v "$PWD:/src" -w /src "$TRIVY_IMAGE" \
+            convert --format sarif --output reports/trivy-fs.sarif reports/trivy-fs.json
+      - name: Envoi à Code scanning
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: reports/trivy-fs.sarif
+          category: trivy-fs
       - uses: actions/upload-artifact@v4
         with:
           name: rapport-deps
@@ -110,6 +132,9 @@ jobs:
   image:
     name: Image Docker (Trivy)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -126,6 +151,14 @@ jobs:
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/src" -w /src -v trivy-cache:/root/.cache "$TRIVY_IMAGE" \
             image --scanners vuln,secret --ignorefile .trivyignore \
               --format json --output reports/trivy-image.json --exit-code 0 bettervault:scan
+          docker run --rm -v "$PWD:/src" -w /src "$TRIVY_IMAGE" \
+            convert --format sarif --output reports/trivy-image.sarif reports/trivy-image.json
+      - name: Envoi à Code scanning
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: reports/trivy-image.sarif
+          category: trivy-image
       - uses: actions/upload-artifact@v4
         with:
           name: rapport-image
@@ -134,6 +167,9 @@ jobs:
 
   dast:
     name: DAST (instance locale)
+    permissions:
+      contents: read
+      pull-requests: write
     uses: ./.github/workflows/dast.yml
     with:
       target: local
@@ -143,6 +179,9 @@ jobs:
     needs: [secrets, sast, deps, image]
     if: always()
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     env:
       SECURITY_BLOCK_LEVEL: ${{ vars.SECURITY_BLOCK_LEVEL || 'high' }}
       SECURITY_BLOCK_LEVEL_SAST: ${{ vars.SECURITY_BLOCK_LEVEL_SAST }}
@@ -158,9 +197,24 @@ jobs:
           path: reports
           merge-multiple: true
       - name: Décision
+        id: gate
         env:
           SCHEDULED: ${{ github.event_name == 'schedule' }}
+          SECURITY_GATE_TITLE: Sécurité statique (secrets, code, dépendances, image)
+          SECURITY_GATE_REPORT: gate.md
         run: |
           tools="secrets sast deps image"
           [ "$SCHEDULED" = true ] && tools="$tools secrets-history"
-          node scripts/security-gate.mjs reports $tools
+          # Le verdict est appliqué à la fin : le commentaire part d'abord, même en cas d'échec
+          node scripts/security-gate.mjs reports $tools || echo "failed=true" >> "$GITHUB_OUTPUT"
+      - name: Commentaire sur la demande de fusion
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: bash scripts/pr-comment.sh gate.md security-gate-static
+      - name: Verdict
+        if: steps.gate.outputs.failed == 'true'
+        run: |
+          echo "::error::La porte de sécurité bloque : voir le résumé du run"
+          exit 1

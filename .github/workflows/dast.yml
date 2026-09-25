@@ -43,6 +43,9 @@ jobs:
     name: DAST (${{ inputs.target }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
 
@@ -140,7 +143,12 @@ jobs:
         run: docker logs bv > reports/instance.log 2>&1 || true
 
       - name: Porte de sécurité
-        run: node scripts/security-gate.mjs reports nuclei zap
+        id: gate
+        env:
+          SECURITY_GATE_TITLE: DAST (${{ inputs.target }}) — Nuclei et ZAP
+          SECURITY_GATE_REPORT: gate-dast.md
+        # Le verdict est appliqué à la fin : les rapports et le commentaire partent d'abord
+        run: node scripts/security-gate.mjs reports nuclei zap || echo "failed=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -148,3 +156,16 @@ jobs:
           name: rapports-dast-${{ inputs.target }}
           path: reports/
           retention-days: 30
+
+      - name: Commentaire sur la demande de fusion
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('gate-dast.md') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: bash scripts/pr-comment.sh gate-dast.md "security-gate-dast-${{ inputs.target }}"
+
+      - name: Verdict
+        if: steps.gate.outputs.failed == 'true'
+        run: |
+          echo "::error::La porte de sécurité (DAST) bloque : voir le résumé du run"
+          exit 1

@@ -74,6 +74,15 @@ describe('Rapports', () => {
     expect(result.rows[1].counts.low).toBe(1);
   });
 
+  it('détaille, repliés, les constats signalés sans bloquer (du plus grave au moins grave, sans INFO)', () => {
+    write('zap.json', zap(0, 1, 2));
+    const md = markdown(evaluate(dir, ['zap'], {}), 'DAST (local)');
+    expect(md).toContain('## DAST (local) : ✅ passée');
+    expect(md).toContain('<details><summary>2 constat(s) signalé(s), non bloquant(s)</summary>');
+    expect(md.indexOf('**MEDIUM**')).toBeLessThan(md.indexOf('**LOW**'));
+    expect(md).not.toContain('**INFO**');
+  });
+
   it('le résumé échappe les barres verticales des titres', () => {
     write('zap.json', { site: [{ '@name': 'x', alerts: [{ alert: 'a | b', riskcode: '3', count: '1' }] }] });
     expect(markdown(evaluate(dir, ['zap'], {}))).toContain('a \\| b');

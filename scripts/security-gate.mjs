@@ -17,7 +17,7 @@
  *                                correctif publié est signalée, pas bloquante
  * LOW et INFO ne bloquent jamais.
  */
-import { readFileSync, existsSync, readdirSync, appendFileSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, appendFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const LEVELS = ['info', 'low', 'medium', 'high', 'critical'];
@@ -146,9 +146,11 @@ export function evaluate(dir, tools, env = process.env) {
   return { failed, rows };
 }
 
-export function markdown({ failed, rows }) {
+const cell = text => String(text).replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
+
+export function markdown({ failed, rows }, title = 'Porte de sécurité') {
   const lines = [
-    `## Porte de sécurité : ${failed ? '❌ bloquée' : '✅ passée'}`,
+    `## ${title} : ${failed ? '❌ bloquée' : '✅ passée'}`,
     '',
     '| Outil | Seuil | Critique | Élevé | Moyen | Faible | Info | Bloquants |',
     '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |'
@@ -160,8 +162,19 @@ export function markdown({ failed, rows }) {
   }
   for (const r of rows.filter(x => x.blockers?.length)) {
     lines.push('', `### ${r.tool} : constats bloquants`, '');
-    for (const f of r.blockers.slice(0, 20)) lines.push(`- **${f.level.toUpperCase()}** ${f.title.replace(/\|/g, '\\|')} — \`${String(f.where).slice(0, 160)}\``);
+    for (const f of r.blockers.slice(0, 20)) lines.push(`- **${f.level.toUpperCase()}** ${cell(f.title)} — \`${cell(String(f.where).slice(0, 160))}\``);
     if (r.blockers.length > 20) lines.push(`- … et ${r.blockers.length - 20} autre(s), voir l’artefact des rapports`);
+  }
+  // Signalés sans bloquer : le détail, replié, du plus grave au moins grave (INFO omis)
+  const signales = rows.filter(r => r.findings).flatMap(r => r.findings
+    .filter(f => !r.blockers.includes(f) && rank(f.level) >= rank('low'))
+    .map(f => ({ ...f, tool: r.tool })))
+    .sort((a, b) => rank(b.level) - rank(a.level));
+  if (signales.length) {
+    lines.push('', `<details><summary>${signales.length} constat(s) signalé(s), non bloquant(s)</summary>`, '');
+    for (const f of signales.slice(0, 40)) lines.push(`- ${f.tool} · **${f.level.toUpperCase()}**${f.blocking === false ? ' (sans correctif ou non bloquant)' : ''} ${cell(f.title)} — \`${cell(String(f.where).slice(0, 160))}\``);
+    if (signales.length > 40) lines.push(`- … et ${signales.length - 40} autre(s), voir l’artefact des rapports`);
+    lines.push('', '</details>');
   }
   return lines.join('\n');
 }
@@ -174,8 +187,10 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
     process.exit(2);
   }
   const result = evaluate(dir, tools);
-  const md = markdown(result);
+  const md = markdown(result, process.env.SECURITY_GATE_TITLE || undefined);
   console.log(md);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${md}\n`);
+  // Copie pour le commentaire de la demande de fusion
+  if (process.env.SECURITY_GATE_REPORT) writeFileSync(process.env.SECURITY_GATE_REPORT, `${md}\n`);
   process.exit(result.failed ? 1 : 0);
 }

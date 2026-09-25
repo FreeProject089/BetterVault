@@ -70,7 +70,20 @@ Les seuils se règlent dans **GitHub → Settings → Secrets and variables → 
 - par outil, pour ajuster un seul scanner : `SECURITY_BLOCK_LEVEL_SAST`, `_DEPS`, `_IMAGE`, `_NUCLEI`, `_ZAP` ;
 - `SECURITY_BLOCK_SECRETS`, `SECURITY_BLOCK_UNFIXED` comme ci-dessus.
 
-Les rapports complets (JSON, SARIF, HTML de ZAP) sont dans les artefacts du workflow : `rapport-*` et `rapports-dast-*`, gardés 30 jours.
+### Où voir les résultats
+
+Un constat **signalé** apparaît partout, mais ne fait pas échouer le pipeline ; un constat **bloquant** fait en plus échouer le job.
+
+:::table{style="striped"}
+| Où | Ce qu'on y trouve |
+| --- | --- |
+| **Commentaire sur la PR** | Le tableau de chaque porte (statique, DAST), les constats bloquants, et les signalés dans une section repliable. Un seul commentaire par porte, mis à jour à chaque passage. |
+| **Security → Code scanning** | Les constats de Semgrep et Trivy (fichiers et image), en alertes suivies dans le temps (ouvertes, corrigées, écartées), annotées sur les lignes modifiées des PR |
+| **Résumé du run** (Actions → run → *Summary*) | Les mêmes tableaux que le commentaire, pour les poussées et les lancements planifiés |
+| **Artefacts** (`rapport-*`, `rapports-dast-*`) | Les rapports complets : JSON, SARIF, `zap.html` lisible dans un navigateur ; gardés 30 jours |
+:::
+
+Le commentaire et l'envoi à Code scanning sont faits pour les PR du dépôt lui-même ; pour une PR venue d'un fork, GitHub ne donne pas les droits d'écriture, et seuls le résumé et les artefacts restent. Une alerte de Code scanning se ferme d'elle-même quand le constat disparaît, ou s'écarte à la main (*Dismiss*) avec une raison.
 
 ### Accepter ou exclure un constat
 
