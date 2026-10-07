@@ -8,7 +8,7 @@ import { ACTION_ICONS, GEN_ICONS } from '../ui/icons';
 import { memberChipHtml } from '../ui/memberChip';
 import { accountService } from '../app/services';
 import { renderVersioning, wireVersioning } from '../ui/versionsPanel';
-import { itemTypeOf } from '../types/itemTypes';
+import { itemTypeOf, seedWords } from '../types/itemTypes';
 import { i18n } from '../i18n';
 import type { AppController } from '../main';
 
@@ -679,8 +679,17 @@ export function renderDetail(app: AppController, id: string | null): void {
     app.openCreateCredentialModal(cred.id);
   });
 
-  // Champs des types carte, identité et clé : affichage et copie
-  document.getElementById('detail-container')?.addEventListener('click', async event => {
+  /*
+   * Champs des types carte, identité et clé : affichage et copie. Le conteneur
+   * survit aux rendus : l'écouteur n'y est posé qu'une fois, sinon chaque fiche
+   * ouverte en ajoutait un, et deux bascules d'affilée laissaient le champ masqué.
+   */
+  const detailContainer = document.getElementById('detail-container');
+  if (detailContainer && !detailContainer.dataset.secretFieldsWired) {
+    detailContainer.dataset.secretFieldsWired = 'true';
+    detailContainer.addEventListener('click', onSecretFieldClick);
+  }
+  async function onSecretFieldClick(event: MouseEvent) {
     const target = event.target as HTMLElement;
     const box = target.closest('.field-box');
     const value = box?.querySelector<HTMLElement>('[data-secret-view]');
@@ -691,7 +700,19 @@ export function renderDetail(app: AppController, id: string | null): void {
       const button = target.closest('[data-secret-toggle]') as HTMLButtonElement;
       const shown = value.dataset.secretShown === 'true';
       value.dataset.secretShown = String(!shown);
-      value.textContent = shown ? '•'.repeat(Math.min(secret.length, 20)) : secret;
+      if (!shown && value.dataset.secretWords !== undefined) {
+        // Phrase de récupération : une grille numérotée, lue et recopiée sans se tromper de rang
+        const grid = document.createElement('ol');
+        grid.className = 'seed-grid';
+        for (const word of seedWords(secret)) {
+          const item = document.createElement('li');
+          item.textContent = word;
+          grid.append(item);
+        }
+        value.replaceChildren(grid);
+      } else {
+        value.textContent = shown ? '•'.repeat(Math.min(secret.length, 20)) : secret;
+      }
       button.title = shown ? app.tr('Afficher', 'Show') : app.tr('Masquer', 'Hide');
       return;
     }
@@ -700,7 +721,7 @@ export function renderDetail(app: AppController, id: string | null): void {
       const sensitive = (target.closest('[data-secret-copy]') as HTMLElement).dataset.sensitive === 'true';
       await app.copyToClipboardWithAutoClear(secret, app.tr('Copié', 'Copied'), sensitive);
     }
-  });
+  }
 
   document.getElementById('btn-renew-cred')?.addEventListener('click', () => {
     app.openCreateCredentialModal(cred.id, { renew: true });

@@ -5,12 +5,12 @@ import type { TabIconName } from '../ui/tabIcons';
  * type enregistré en est un, ce qui rend la migration des anciens coffres inutile.
  *
  * Chaque type range ses champs propres dans sa propre clé de l'élément (`card`,
- * `identity`, `sshKey`) ; les champs communs (nom, notes, tags, pièces jointes,
+ * `identity`, `sshKey`, `seedPhrase`, `apiKey`) ; les champs communs (nom, notes, tags, pièces jointes,
  * champs personnalisés) restent partagés par tous.
  */
-export type ItemType = 'login' | 'note' | 'card' | 'identity' | 'sshKey' | 'file' | 'folder';
+export type ItemType = 'login' | 'note' | 'card' | 'identity' | 'sshKey' | 'seedPhrase' | 'apiKey' | 'file' | 'folder';
 
-export const ITEM_TYPES: ItemType[] = ['login', 'note', 'card', 'identity', 'sshKey', 'file', 'folder'];
+export const ITEM_TYPES: ItemType[] = ['login', 'note', 'card', 'identity', 'sshKey', 'seedPhrase', 'apiKey', 'file', 'folder'];
 
 export const DEFAULT_ITEM_TYPE: ItemType = 'login';
 
@@ -49,12 +49,36 @@ export interface SshKeyData {
   fingerprint?: string;
 }
 
+/** Phrase de récupération d'un portefeuille (BIP39 et assimilés) */
+export interface SeedPhraseData {
+  /** Les mots, séparés par une espace, dans l'ordre */
+  phrase: string;
+  /** Phrase de passe facultative (« 25e mot ») */
+  passphrase: string;
+  /** Portefeuille ou application : Ledger, MetaMask, Electrum… */
+  wallet: string;
+  /** Adresse publique de référence, pour reconnaître le bon portefeuille */
+  address: string;
+}
+
+/** Clé d'API, jeton d'accès ou paire identifiant / secret d'un service */
+export interface ApiKeyData {
+  /** Clé ou identifiant (souvent public : « AKIA… », « client_id ») */
+  key: string;
+  /** Secret ou jeton (« sk_… », « ghp_… ») */
+  secret: string;
+  /** Service, hôte ou point d'accès */
+  endpoint: string;
+}
+
 export const EMPTY_CARD: CardData = { number: '', holder: '', expMonth: '', expYear: '', cvv: '', pin: '' };
 export const EMPTY_IDENTITY: IdentityData = {
   firstName: '', lastName: '', birthDate: '', email: '', phone: '',
   address: '', postalCode: '', city: '', country: '', docNumber: ''
 };
 export const EMPTY_SSH_KEY: SshKeyData = { privateKey: '', publicKey: '', passphrase: '' };
+export const EMPTY_SEED_PHRASE: SeedPhraseData = { phrase: '', passphrase: '', wallet: '', address: '' };
+export const EMPTY_API_KEY: ApiKeyData = { key: '', secret: '', endpoint: '' };
 
 export interface ItemTypeInfo {
   icon: TabIconName;
@@ -90,6 +114,16 @@ export const ITEM_TYPE_INFO: Record<ItemType, ItemTypeInfo> = {
     icon: 'typeSshKey', fr: 'Clé SSH', en: 'SSH key',
     hintFr: 'Clé privée, clé publique et phrase de passe',
     hintEn: 'Private key, public key and passphrase'
+  },
+  seedPhrase: {
+    icon: 'typeSeedPhrase', fr: 'Phrase de récupération', en: 'Recovery phrase',
+    hintFr: 'Les 12 ou 24 mots d’un portefeuille crypto',
+    hintEn: 'The 12 or 24 words of a crypto wallet'
+  },
+  apiKey: {
+    icon: 'typeApiKey', fr: 'Clé d’API', en: 'API key',
+    hintFr: 'Clé, secret ou jeton d’accès d’un service',
+    hintEn: 'Key, secret or access token for a service'
   },
   file: {
     icon: 'typeFile', fr: 'Fichier', en: 'File',
@@ -163,3 +197,23 @@ const SSH_KEY_HEAD = /-----BEGIN ([A-Z0-9 ]*)PRIVATE KEY-----/;
 export function looksLikePrivateKey(value: string): boolean {
   return SSH_KEY_HEAD.test(value.trim());
 }
+
+/**
+ * Mots d'une phrase de récupération, tels qu'on les colle : numérotés (« 1. abandon »),
+ * en colonnes, sur plusieurs lignes ou en majuscules. Les numéros sont retirés.
+ */
+export function seedWords(phrase: string): string[] {
+  return phrase
+    .toLowerCase()
+    .split(/[\s,;]+/)
+    .map(word => word.replace(/^\d+[.)\]:-]?/, ''))
+    .filter(Boolean);
+}
+
+/** Phrase rangée : mots en minuscules séparés par une espace */
+export const normalizeSeedPhrase = (phrase: string): string => seedWords(phrase).join(' ');
+
+/** Longueurs prévues par BIP39 ; 25 pour Monero */
+export const SEED_LENGTHS = [12, 15, 18, 21, 24, 25];
+
+export const isUsualSeedLength = (count: number): boolean => SEED_LENGTHS.includes(count);

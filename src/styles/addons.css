@@ -2640,7 +2640,7 @@ input[type="datetime-local"].form-input {
 /* ── Import / export ──────────────────────────────────────────────────── */
 .ie-sources {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
   gap: 8px;
 }
 
@@ -3715,6 +3715,37 @@ button.shortcut-key:hover { border-color: var(--accent); }
 }
 
 .field-hint-warn { color: var(--accent-red, #f85149); }
+
+/* Phrase de récupération affichée : mots numérotés, en colonnes, dans l'ordre de lecture */
+.seed-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 6px 14px;
+  margin: 2px 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: seed;
+  white-space: normal;
+}
+.field-val[data-secret-words][data-secret-shown="true"] { display: block; flex: 1; min-width: 0; }
+.seed-grid li {
+  counter-increment: seed;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+.seed-grid li::before {
+  content: counter(seed);
+  min-width: 2ch;
+  text-align: right;
+  color: var(--text-tertiary, var(--text-secondary));
+  font-size: 11px;
+}
+
+.seed-count { font-variant-numeric: tabular-nums; }
+.key-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.key-editor-short { min-height: 76px; white-space: pre-wrap; word-break: break-word; }
 
 /* Icone de type dans une ligne de liste ou en tete de fiche : elle occupe la place du logo */
 .record-icon .tab-icon, .detail-main-icon .tab-icon { opacity: 1; color: var(--text-secondary); }

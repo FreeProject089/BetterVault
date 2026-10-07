@@ -1,6 +1,7 @@
 import type { CredentialItem } from '../types/vault';
 import { calculatePasswordEntropy } from '../crypto/vaultCrypto';
 import { EXPIRY_SOON_DAYS } from '../ui/expiry';
+import { itemTypeOf } from '../types/itemTypes';
 
 export type CredentialFilter = 'favorites' | 'totp' | 'passkeys' | 'expiring' | 'expired' | 'weak' | 'reused' | 'noPassword';
 export type CredentialSort = 'name' | 'recent' | 'updated' | 'expiry';
@@ -32,9 +33,14 @@ export function matchesFilter(c: CredentialItem, filter: CredentialFilter, reuse
     case 'expiring': return !!c.expiresAt && c.expiresAt >= now && c.expiresAt - now <= EXPIRY_SOON_DAYS * DAY_MS;
     case 'weak': return !!c.password && calculatePasswordEntropy(c.password).score <= 2;
     case 'reused': return !!c.password && reused.has(c.password);
-    case 'noPassword': return !c.password;
+    // Seul un identifiant est censé avoir un mot de passe : une note ou une clé n'en manque pas
+    case 'noPassword': return itemTypeOf(c.type) === 'login' && !c.password;
   }
 }
+
+/** Champs propres au type que la recherche lit : jamais un secret (phrase, clé privée, jeton) */
+const searchableTypeFields = (c: CredentialItem): string[] =>
+  [c.apiKey?.endpoint, c.seedPhrase?.wallet, c.seedPhrase?.address].filter((v): v is string => !!v);
 
 /** Filtres cumulés (ET), recherche plein texte et tri */
 export function queryCredentials(credentials: CredentialItem[], query: CredentialQuery, now = Date.now()): CredentialItem[] {
@@ -45,7 +51,7 @@ export function queryCredentials(credentials: CredentialItem[], query: Credentia
 
   const result = credentials.filter(c =>
     (!tag || c.tags.some(t => t.toLowerCase() === tag))
-    && (!search || [c.title, c.username, c.website, c.notes ?? '', ...c.tags].some(v => v.toLowerCase().includes(search)))
+    && (!search || [c.title, c.username, c.website, c.notes ?? '', ...c.tags, ...searchableTypeFields(c)].some(v => v.toLowerCase().includes(search)))
     && [...filters].every(filter => matchesFilter(c, filter, reused, now))
   );
 

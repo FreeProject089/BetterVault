@@ -1,6 +1,6 @@
 import type { ItemVersion, ItemConflict } from '../store/versions';
 import type { ItemIcon } from '../icons/iconLibrary';
-import type { CardData, IdentityData, ItemType, SshKeyData } from './itemTypes';
+import type { ApiKeyData, CardData, IdentityData, ItemType, SeedPhraseData, SshKeyData } from './itemTypes';
 import type { AttachmentMeta } from '../account/attachmentCrypto';
 import type { SharedRole } from '../account/cloudClient';
 
@@ -99,6 +99,8 @@ export interface CredentialItem {
   card?: CardData;
   identity?: IdentityData;
   sshKey?: SshKeyData;
+  seedPhrase?: SeedPhraseData;
+  apiKey?: ApiKeyData;
   tags: string[];
   expiresAt?: number; // Timestamp d'expiration ou de rappel de renouvellement
   createdAt: number;

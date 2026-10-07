@@ -19,7 +19,7 @@ export interface VersionsContext {
   toast: (message: string, kind?: 'success' | 'info' | 'error') => void;
 }
 
-const SENSITIVE = new Set(['password', 'totpSecret', 'card', 'sshKey', 'passkeys', 'fields', 'notes']);
+const SENSITIVE = new Set(['password', 'totpSecret', 'card', 'sshKey', 'seedPhrase', 'apiKey', 'passkeys', 'fields', 'notes']);
 
 function fieldLabel(field: string, tr: VersionsContext['tr']): string {
   const labels: Record<string, [string, string]> = {
@@ -27,6 +27,7 @@ function fieldLabel(field: string, tr: VersionsContext['tr']): string {
     website: ['Site', 'Website'], notes: ['Notes', 'Notes'], totpSecret: ['Code 2FA', '2FA code'],
     tags: ['Tags', 'Tags'], fields: ['Champs', 'Fields'], attachments: ['Fichiers', 'Files'],
     card: ['Carte', 'Card'], identity: ['Identité', 'Identity'], sshKey: ['Clé SSH', 'SSH key'],
+    seedPhrase: ['Phrase de récupération', 'Recovery phrase'], apiKey: ['Clé d’API', 'API key'],
     vaultId: ['Coffre', 'Vault'], icon: ['Icône', 'Icon'],
     description: ['Description', 'Description'], status: ['Statut', 'Status'], priority: ['Priorité', 'Priority'],
     dueDate: ['Échéance', 'Due date'], subtasks: ['Sous-tâches', 'Subtasks'], passkeys: ['Passkeys', 'Passkeys'],

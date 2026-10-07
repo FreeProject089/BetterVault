@@ -52,12 +52,12 @@ Ce découpage explique pourquoi la synchronisation supporte les conflits : en ca
 
 ## Types d'éléments
 
-Un élément porte un `type` : identifiant, note sécurisée, carte bancaire, identité, clé SSH, fichier ou dossier de fichiers.
+Un élément porte un `type` : identifiant, note sécurisée, carte bancaire, identité, clé SSH, phrase de récupération, clé d'API, fichier ou dossier de fichiers.
 
 Deux décisions de conception :
 
 - **Un élément sans type enregistré est un identifiant.** Les coffres d'avant les types se lisent tels quels : il n'y a aucune migration à jouer, donc aucun risque d'en rater une sur un appareil resté hors ligne.
-- **Les champs d'un type vivent dans leur propre clé** (`card`, `identity`, `sshKey`), et `payloadForType` ne garde que ceux du type courant. Changer le type d'un élément ne laisse donc pas traîner les données de l'ancien, et un import ne peut pas glisser un champ inconnu dans le coffre.
+- **Les champs d'un type vivent dans leur propre clé** (`card`, `identity`, `sshKey`, `seedPhrase`, `apiKey`), et `payloadForType` ne garde que ceux du type courant. Changer le type d'un élément ne laisse donc pas traîner les données de l'ancien, et un import ne peut pas glisser un champ inconnu dans le coffre.
 
 ## Pièces jointes : deux rangements, une seule interface
 

@@ -75,6 +75,20 @@ const typeFieldLines = (c: CredentialItem): string[] => {
     ].filter(Boolean);
   }
 
+  if (c.seedPhrase) {
+    const s = c.seedPhrase;
+    const labels: [string, string][] = [
+      ['Phrase de récupération', s.phrase], ['Phrase de passe', s.passphrase], ['Portefeuille', s.wallet], ['Adresse', s.address]
+    ];
+    return labels.filter(([, value]) => value).map(([label, value]) => `${label}: ${value}`);
+  }
+
+  if (c.apiKey) {
+    const a = c.apiKey;
+    const labels: [string, string][] = [['Clé', a.key], ['Secret', a.secret], ['Service', a.endpoint]];
+    return labels.filter(([, value]) => value).map(([label, value]) => `${label}: ${value}`);
+  }
+
   return [];
 };
 

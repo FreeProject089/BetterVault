@@ -101,8 +101,8 @@ interface UnlockedVaultData {
 }
 ```
 
-Chaque `CredentialItem` porte un `type` (`login`, `note`, `card`, `identity`, `sshKey`, `file`, `folder`)
-et range les champs propres à ce type dans sa propre clé (`card`, `identity`, `sshKey`). Un élément
+Chaque `CredentialItem` porte un `type` (`login`, `note`, `card`, `identity`, `sshKey`, `seedPhrase`, `apiKey`, `file`, `folder`)
+et range les champs propres à ce type dans sa propre clé (`card`, `identity`, `sshKey`, `seedPhrase`, `apiKey`). Un élément
 **sans type enregistré est un identifiant** : les coffres créés avant les types se lisent tels quels.
 
 Les `FolderDef` rangent les éléments en arborescence à l'intérieur d'un coffre : un dossier a un

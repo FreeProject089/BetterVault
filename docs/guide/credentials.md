@@ -10,13 +10,15 @@ Le bouton **Nouveau** demande d'abord **ce que vous voulez ranger**, puis n'affi
 | **Note sécurisée** | Du texte libre : codes de secours, procédure, combinaison |
 | **Carte bancaire** | Numéro, titulaire, date d'expiration, cryptogramme, code |
 | **Identité** | État civil, coordonnées, numéro de pièce d'identité |
-| **Clé SSH** | Clé privée, clé publique, phrase de passe |
+| **Clé SSH** | Clé privée, clé publique, phrase de passe, empreinte |
+| **Phrase de récupération** | Les 12 ou 24 mots d'un portefeuille crypto, phrase de passe (« 25e mot »), portefeuille, adresse |
+| **Clé d'API** | Service, clé ou identifiant, secret ou jeton |
 | **Fichier** | Un document chiffré, gardé tel quel |
 | **Dossier de fichiers** | Plusieurs fichiers réunis dans un même élément |
 
 Tous les types partagent le nom, l'icône, les notes, les tags, les champs personnalisés et les pièces jointes. Seul l'identifiant a une étape **2FA**.
 
-Les champs sensibles — numéro de carte, cryptogramme, code, numéro de pièce, clé privée — sont **masqués** dans la fiche jusqu'à ce que vous demandiez à les voir, et leur copie s'efface du presse-papiers comme un mot de passe.
+Les champs sensibles — numéro de carte, cryptogramme, code, numéro de pièce, clé privée, phrase de récupération, secret d'API — sont **masqués** dans la fiche jusqu'à ce que vous demandiez à les voir, et leur copie s'efface du presse-papiers comme un mot de passe.
 
 !!! note "Changer le type d'un élément"
     Modifier un élément permet de changer son type. Les champs de l'ancien type ne sont pas conservés : une carte transformée en note perd son numéro.
@@ -24,6 +26,26 @@ Les champs sensibles — numéro de carte, cryptogramme, code, numéro de pièce
 Les types **Fichier** et **Dossier de fichiers** rangent leur contenu en [pièces jointes](attachments.md), qui fonctionnent aussi bien sur un coffre synchronisé que sur un coffre gardé sur l'appareil — seule la taille permise change.
 
 Le numéro d'une carte est vérifié par le contrôle de Luhn : une faute de frappe est signalée avant l'enregistrement.
+
+## Clés SSH
+
+Collez une clé existante (`-----BEGIN OPENSSH PRIVATE KEY-----`) et sa clé publique : l'**empreinte** `SHA256:…` est calculée aussitôt, la même que `ssh-keygen -l`, pour reconnaître la clé sur un serveur ou dans GitHub.
+
+**Créer une clé Ed25519** en fabrique une sur l'appareil, au format d'OpenSSH. Elle n'a pas de phrase de passe : le coffre la chiffre déjà. Copiez la clé publique dans `~/.ssh/authorized_keys` ou dans les réglages de votre forge. Pour l'utiliser depuis un fichier, enregistrez la clé privée puis protégez-la :
+
+```bash
+chmod 600 ~/.ssh/id_ed25519
+ssh-keygen -p -f ~/.ssh/id_ed25519
+```
+
+## Phrases de récupération
+
+Une phrase de récupération (BIP39 : 12, 18 ou 24 mots) redonne l'accès à tout un portefeuille. Collez-la telle quelle, même numérotée ou sur plusieurs lignes : les numéros sont retirés et les mots rangés en minuscules. Un nombre de mots inhabituel est signalé, au cas où il en manquerait un.
+
+Dans la fiche, la phrase reste masquée ; **Afficher** la présente en grille numérotée, pour la recopier sans erreur de rang. La liste ne montre que le portefeuille et le nombre de mots, jamais un mot.
+
+!!! warning "Une copie hors ligne reste utile"
+    Le coffre protège la phrase, mais si vous perdez l'accès au coffre, vous perdez aussi le portefeuille. Gardez une copie papier ou métal en lieu sûr.
 
 ## Types personnalisés
 

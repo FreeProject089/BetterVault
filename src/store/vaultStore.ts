@@ -3,7 +3,7 @@ import type { ItemTemplate, TemplateField } from '../types/vault';
 import type { CredentialItem, Task, TagDef, TrashEntry, UnlockedVaultData, VaultMetadata, VaultTypeDef } from '../types/vault';
 import { capHistory, restoreVersion, resolveConflict, stampVersion, MAX_CONFLICTS, type ItemConflict, type ItemVersion } from './versions';
 import { MAX_TRASH, TRASH_DAYS } from '../account/merge';
-import { cardBrand, EMPTY_CARD, EMPTY_IDENTITY, EMPTY_SSH_KEY, itemTypeOf, type CardData, type IdentityData, type ItemType, type SshKeyData } from '../types/itemTypes';
+import { cardBrand, EMPTY_API_KEY, EMPTY_CARD, EMPTY_IDENTITY, EMPTY_SEED_PHRASE, EMPTY_SSH_KEY, itemTypeOf, normalizeSeedPhrase, type ApiKeyData, type CardData, type IdentityData, type ItemType, type SeedPhraseData, type SshKeyData } from '../types/itemTypes';
 import { normalizeItemIcon, type ItemIcon } from '../icons/iconLibrary';
 import { normalizeAttachments } from '../account/attachmentCrypto';
 
@@ -93,11 +93,33 @@ function normalizeSshKey(input: unknown): SshKeyData | undefined {
   return key;
 }
 
+/** La phrase est rangée (mots en minuscules, sans numéros) : la comparer ou la recopier reste fiable */
+function normalizeSeed(input: unknown): SeedPhraseData | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const raw = input as Record<string, unknown>;
+  return {
+    phrase: normalizeSeedPhrase(textOf(raw.phrase)),
+    passphrase: textOf(raw.passphrase),
+    wallet: textOf(raw.wallet),
+    address: textOf(raw.address)
+  };
+}
+
+function normalizeApiKey(input: unknown): ApiKeyData | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const raw = input as Record<string, unknown>;
+  return { key: textOf(raw.key), secret: textOf(raw.secret), endpoint: textOf(raw.endpoint) };
+}
+
+type TypePayload = Pick<CredentialItem, 'card' | 'identity' | 'sshKey' | 'seedPhrase' | 'apiKey'>;
+
 /** Les champs d'un type ne sont gardés que pour ce type : changer de type ne traîne pas d'anciennes données */
-export function payloadForType(type: ItemType, source: Partial<CredentialItem>): Pick<CredentialItem, 'card' | 'identity' | 'sshKey'> {
+export function payloadForType(type: ItemType, source: Partial<CredentialItem>): TypePayload {
   if (type === 'card') return { card: normalizeCard(source.card) ?? { ...EMPTY_CARD } };
   if (type === 'identity') return { identity: normalizeIdentity(source.identity) ?? { ...EMPTY_IDENTITY } };
   if (type === 'sshKey') return { sshKey: normalizeSshKey(source.sshKey) ?? { ...EMPTY_SSH_KEY } };
+  if (type === 'seedPhrase') return { seedPhrase: normalizeSeed(source.seedPhrase) ?? { ...EMPTY_SEED_PHRASE } };
+  if (type === 'apiKey') return { apiKey: normalizeApiKey(source.apiKey) ?? { ...EMPTY_API_KEY } };
   return {};
 }
 
@@ -161,7 +183,7 @@ export function normalizeVaultData(input: Partial<UnlockedVaultData> | null | un
     activeVaultId: source.activeVaultId ?? '',
     // Les icônes viennent aussi d'imports et d'autres appareils : leur SVG est toujours re-nettoyé
     credentials: (Array.isArray(source.credentials) ? source.credentials : []).map(c => {
-      const { icon, attachments, card, identity, sshKey, type, rev: _rev, history: _history, conflicts: _conflicts, ...rest } = c;
+      const { icon, attachments, card, identity, sshKey, seedPhrase, apiKey, type, rev: _rev, history: _history, conflicts: _conflicts, ...rest } = c;
       const clean = normalizeItemIcon(icon);
       const files = normalizeAttachments(attachments);
       const itemType = itemTypeOf(type);
@@ -169,7 +191,7 @@ export function normalizeVaultData(input: Partial<UnlockedVaultData> | null | un
         ...rest,
         ...normalizeVersioning(c as unknown as Record<string, unknown>),
         type: itemType,
-        ...payloadForType(itemType, { card, identity, sshKey }),
+        ...payloadForType(itemType, { card, identity, sshKey, seedPhrase, apiKey }),
         ...(clean ? { icon: clean } : {}),
         ...(files ? { attachments: files } : {}),
         tags: Array.isArray(c.tags) ? c.tags : []

@@ -35,7 +35,7 @@ import { TRASH_DAYS } from './account/merge';
 import type { TrashEntry } from './types/vault';
 import { profileRowsHtml, wireProfileRows, type ProfileActions } from './ui/accountSwitcher';
 import { ACCOUNT_STORAGE_KEYS } from './account/accountService';
-import { formatCardNumber, itemTypeOf, ITEM_TYPE_INFO, type ItemType } from './types/itemTypes';
+import { formatCardNumber, itemTypeOf, ITEM_TYPE_INFO, seedWords, type ItemType } from './types/itemTypes';
 import { bindingFromEvent, isPlainKey, loadShortcuts, SHORTCUT_ORDER, type ShortcutAction, type ShortcutBindings } from './ui/shortcuts';
 import { CREDENTIAL_FILTERS, countByFilter, type CredentialFilter, type CredentialSort } from './store/credentialFilters';
 import { activeTabHost, extensionSessionStore, extensionSurface, fillActiveTab, matchesSite, openFullTab, openSidePanel } from './extension/surface';
@@ -2329,7 +2329,7 @@ export class AppController {
    * ce qu'on demande à la voir, et la copie passe par l'effacement automatique
    * du presse-papiers comme pour un mot de passe.
    */
-  private detailField(label: string, value: string, options: { secret?: boolean; mono?: boolean; multiline?: boolean } = {}): string {
+  private detailField(label: string, value: string, options: { secret?: boolean; mono?: boolean; multiline?: boolean; words?: boolean } = {}): string {
     if (!value) return '';
     const shown = options.secret ? '•'.repeat(Math.min(value.length, 20)) : this.escapeHtml(value);
     const style = options.mono ? 'font-family:var(--font-mono);letter-spacing:0.04em;' : '';
@@ -2338,7 +2338,7 @@ export class AppController {
         <div class="field-label">${this.escapeHtml(label)}</div>
         <div class="field-box">
           <span class="field-val${options.multiline ? ' field-val-multiline' : ''}" style="${style}"
-            data-secret-view data-secret-shown="${options.secret ? 'false' : 'true'}"
+            data-secret-view data-secret-shown="${options.secret ? 'false' : 'true'}"${options.words ? ' data-secret-words' : ''}
             data-secret-value="${this.escapeHtml(value)}">${shown}</span>
           <div class="field-actions">
             ${options.secret ? `<button class="icon-btn" data-secret-toggle title="${this.tr('Afficher', 'Show')}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>` : ''}
@@ -2390,7 +2390,28 @@ export class AppController {
       return [
         this.detailField(tr('Clé privée', 'Private key'), key.privateKey, { secret: true, mono: true, multiline: true }),
         this.detailField(tr('Phrase de passe de la clé', 'Key passphrase'), key.passphrase, { secret: true }),
-        this.detailField(tr('Clé publique', 'Public key'), key.publicKey, { mono: true, multiline: true })
+        this.detailField(tr('Clé publique', 'Public key'), key.publicKey, { mono: true, multiline: true }),
+        this.detailField(tr('Empreinte', 'Fingerprint'), key.fingerprint ?? '', { mono: true })
+      ].join('');
+    }
+
+    if (type === 'seedPhrase' && cred.seedPhrase) {
+      const seed = cred.seedPhrase;
+      const count = seedWords(seed.phrase).length;
+      return [
+        this.detailField(tr(`Phrase de récupération (${count} mots)`, `Recovery phrase (${count} words)`), seed.phrase, { secret: true, mono: true, words: true }),
+        this.detailField(tr('Phrase de passe (25e mot)', 'Passphrase (25th word)'), seed.passphrase, { secret: true }),
+        this.detailField(tr('Portefeuille', 'Wallet'), seed.wallet),
+        this.detailField(tr('Adresse', 'Address'), seed.address, { mono: true })
+      ].join('');
+    }
+
+    if (type === 'apiKey' && cred.apiKey) {
+      const api = cred.apiKey;
+      return [
+        this.detailField(tr('Service', 'Service'), api.endpoint),
+        this.detailField(tr('Clé ou identifiant', 'Key or ID'), api.key, { mono: true }),
+        this.detailField(tr('Secret ou jeton', 'Secret or token'), api.secret, { secret: true, mono: true })
       ].join('');
     }
 
@@ -2428,6 +2449,14 @@ export class AppController {
       }
       case 'sshKey':
         return cred.sshKey?.publicKey?.split(' ')[0] || fallback;
+      case 'seedPhrase': {
+        // Jamais un mot de la phrase dans la liste : le portefeuille et le nombre de mots suffisent
+        const count = seedWords(cred.seedPhrase?.phrase ?? '').length;
+        const words = count ? this.tr(`${count} mots`, `${count} words`) : '';
+        return [cred.seedPhrase?.wallet, words].filter(Boolean).join(' · ') || fallback;
+      }
+      case 'apiKey':
+        return cred.apiKey?.endpoint || fallback;
       case 'file':
       case 'folder': {
         const count = cred.attachments?.length ?? 0;

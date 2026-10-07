@@ -17,7 +17,8 @@ import { mountStepper, type StepDef } from '../ui/stepper';
 import { ACTION_ICONS, GEN_ICONS } from '../ui/icons';
 import { readTemplateValues, templateCardsHtml, templateFieldsHtml } from '../ui/itemTemplatesUi';
 import { checkTemplateValues, mergeTemplateFields } from '../store/itemTemplates';
-import { cardBrand, formatCardNumber, isLuhnValid, isFileType, itemTypeOf, looksLikePrivateKey, ITEM_TYPES, ITEM_TYPE_INFO, type ItemType } from '../types/itemTypes';
+import { cardBrand, formatCardNumber, isLuhnValid, isFileType, isUsualSeedLength, itemTypeOf, looksLikePrivateKey, normalizeSeedPhrase, seedWords, ITEM_TYPES, ITEM_TYPE_INFO, type ItemType } from '../types/itemTypes';
+import { generateEd25519Key, sshFingerprint, supportsEd25519 } from '../crypto/sshKeys';
 import { checkCredential, remainingCapacity } from '../account/limits';
 import type { AppController } from '../main';
 
@@ -216,7 +217,52 @@ export function openCreateCredentialModal(app: AppController, existingCredId?: s
           </div>
           <div class="form-field">
             <label class="form-label" for="field-ssh-public">${tr('Clé publique', 'Public key')}</label>
-            <textarea class="key-editor" id="field-ssh-public" spellcheck="false" autocomplete="off" placeholder="ssh-ed25519 AAAA…">${attr(existing?.sshKey?.publicKey)}</textarea>
+            <textarea class="key-editor key-editor-short" id="field-ssh-public" spellcheck="false" autocomplete="off" placeholder="ssh-ed25519 AAAA…">${attr(existing?.sshKey?.publicKey)}</textarea>
+            <span class="field-hint mono-field" id="ssh-fingerprint"></span>
+          </div>
+          <div class="key-actions">
+            <button class="btn-primary btn-ghost" id="btn-ssh-generate" type="button">${tr('Créer une clé Ed25519', 'Create an Ed25519 key')}</button>
+          </div>
+          <p class="field-hint">${tr('Créée sur cet appareil, sans phrase de passe : le coffre la chiffre déjà. Sur disque, « ssh-keygen -p -f fichier » lui en ajoute une.',
+            'Created on this device, without a passphrase: the vault already encrypts it. On disk, “ssh-keygen -p -f file” adds one.')}</p>
+        </section>
+
+        <section class="form-section" id="section-seed" hidden>
+          <div class="form-section-title">${SECTION.shield}${tr('Phrase', 'Phrase')}</div>
+          <div class="form-field">
+            <label class="form-label" for="field-seed-phrase">${tr('Mots de la phrase, dans l’ordre', 'Words of the phrase, in order')}</label>
+            <textarea class="key-editor key-editor-short" id="field-seed-phrase" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="${tr('mot1 mot2 mot3 …', 'word1 word2 word3 …')}">${attr(existing?.seedPhrase?.phrase)}</textarea>
+            <span class="field-hint seed-count" id="seed-hint"></span>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="field-seed-passphrase">${tr('Phrase de passe (25e mot), si vous en avez une', 'Passphrase (25th word), if you have one')}</label>
+            <input class="form-input" id="field-seed-passphrase" type="password" autocomplete="off" spellcheck="false" value="${attr(existing?.seedPhrase?.passphrase)}">
+          </div>
+          <div class="form-row">
+            <div class="form-field">
+              <label class="form-label" for="field-seed-wallet">${tr('Portefeuille', 'Wallet')}</label>
+              <input class="form-input" id="field-seed-wallet" type="text" maxlength="100" autocomplete="off" placeholder="Ledger, MetaMask, Electrum…" value="${attr(existing?.seedPhrase?.wallet)}">
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="field-seed-address">${tr('Adresse publique (facultatif)', 'Public address (optional)')}</label>
+              <input class="form-input mono-field" id="field-seed-address" type="text" maxlength="200" autocomplete="off" spellcheck="false" value="${attr(existing?.seedPhrase?.address)}">
+            </div>
+          </div>
+        </section>
+
+        <section class="form-section" id="section-api" hidden>
+          <div class="form-section-title">${SECTION.shield}${tr('Accès', 'Access')}</div>
+          <div class="form-field">
+            <label class="form-label" for="field-api-endpoint">${tr('Service ou adresse', 'Service or address')}</label>
+            <input class="form-input" id="field-api-endpoint" type="text" maxlength="300" autocomplete="off" spellcheck="false" placeholder="api.stripe.com, AWS eu-west-3…" value="${attr(existing?.apiKey?.endpoint)}">
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="field-api-key">${tr('Clé ou identifiant', 'Key or ID')}</label>
+            <input class="form-input mono-field" id="field-api-key" type="text" autocomplete="off" spellcheck="false" placeholder="AKIA…, client_id…" value="${attr(existing?.apiKey?.key)}">
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="field-api-secret">${tr('Secret ou jeton', 'Secret or token')}</label>
+            <input class="form-input mono-field" id="field-api-secret" type="password" autocomplete="off" spellcheck="false" value="${attr(existing?.apiKey?.secret)}">
           </div>
         </section>
 
@@ -675,6 +721,67 @@ export function openCreateCredentialModal(app: AppController, existingCredId?: s
       : tr('Ce texte ne ressemble pas à une clé privée', 'This does not look like a private key');
   });
 
+  /*
+   * Empreinte de la clé publique, recalculée à chaque saisie. Le calcul est
+   * asynchrone : seul le dernier résultat compte, un ancien arrivé en retard est ignoré.
+   */
+  const sshPublic = $<HTMLTextAreaElement>('#field-ssh-public');
+  const sshFingerprintHint = $<HTMLElement>('#ssh-fingerprint');
+  let sshFingerprintValue = existing?.sshKey?.fingerprint ?? '';
+  let fingerprintRun = 0;
+  const refreshFingerprint = async () => {
+    const run = ++fingerprintRun;
+    const value = sshPublic.value.trim();
+    const fingerprint = value ? await sshFingerprint(value) : null;
+    if (run !== fingerprintRun) return;
+    sshFingerprintValue = fingerprint ?? '';
+    sshFingerprintHint.textContent = fingerprint ?? (value ? tr('Ce texte ne ressemble pas à une clé publique SSH', 'This does not look like an SSH public key') : '');
+    sshFingerprintHint.classList.toggle('field-hint-warn', !fingerprint && !!value);
+  };
+  sshPublic.addEventListener('input', () => void refreshFingerprint());
+  void refreshFingerprint();
+
+  $<HTMLButtonElement>('#btn-ssh-generate').addEventListener('click', async event => {
+    const button = event.currentTarget as HTMLButtonElement;
+    if (sshPrivate.value.trim() && !await app.confirmDialog({
+      title: tr('Remplacer la clé ?', 'Replace the key?'),
+      message: tr('La clé déjà saisie sera remplacée par une nouvelle.', 'The key already entered will be replaced by a new one.'),
+      confirmLabel: tr('Remplacer', 'Replace'),
+      danger: true
+    })) return;
+    button.disabled = true;
+    try {
+      if (!await supportsEd25519()) {
+        fail(tr('Ce navigateur ne sait pas créer de clé Ed25519 : mettez-le à jour, ou collez une clé créée avec ssh-keygen.', 'This browser cannot create Ed25519 keys: update it, or paste a key made with ssh-keygen.'));
+        return;
+      }
+      const key = await generateEd25519Key(titleInput.value.trim());
+      sshPrivate.value = key.privateKey;
+      sshPublic.value = key.publicKey;
+      $<HTMLInputElement>('#field-ssh-passphrase').value = '';
+      sshKeyHint.textContent = '';
+      await refreshFingerprint();
+      app.showToast(tr('Clé créée : copiez la clé publique sur le serveur', 'Key created: copy the public key to the server'), 'success');
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  /* Phrase de récupération : nombre de mots, et alerte sur une longueur inhabituelle */
+  const seedInput = $<HTMLTextAreaElement>('#field-seed-phrase');
+  const seedHint = $<HTMLElement>('#seed-hint');
+  const updateSeedHint = () => {
+    const count = seedWords(seedInput.value).length;
+    const unusual = count > 0 && !isUsualSeedLength(count);
+    seedHint.textContent = !count ? ''
+      : unusual ? tr(`${count} mots : une phrase en compte d’ordinaire 12, 18 ou 24. Vérifiez qu’il n’en manque pas.`,
+        `${count} words: a phrase usually has 12, 18 or 24. Check that none is missing.`)
+      : tr(`${count} mots`, `${count} words`);
+    seedHint.classList.toggle('field-hint-warn', unusual);
+  };
+  seedInput.addEventListener('input', updateSeedHint);
+  updateSeedHint();
+
   /** Montre les sections du type choisi et déplace ce qui change de place */
   const applyType = () => {
     $<HTMLElement>('#section-login').hidden = itemType !== 'login';
@@ -684,6 +791,8 @@ export function openCreateCredentialModal(app: AppController, existingCredId?: s
     $<HTMLElement>('#section-card').hidden = itemType !== 'card';
     $<HTMLElement>('#section-identity').hidden = itemType !== 'identity';
     $<HTMLElement>('#section-ssh').hidden = itemType !== 'sshKey';
+    $<HTMLElement>('#section-seed').hidden = itemType !== 'seedPhrase';
+    $<HTMLElement>('#section-api').hidden = itemType !== 'apiKey';
     $<HTMLElement>('#section-files').hidden = !isFileType(itemType);
 
     // Une note et un fichier ont leur contenu comme sujet principal : il remonte à la première étape
@@ -701,6 +810,8 @@ export function openCreateCredentialModal(app: AppController, existingCredId?: s
     titleInput.placeholder = itemType === 'card' ? tr('Carte bleue, carte de fidélité…', 'Debit card, loyalty card…')
       : itemType === 'identity' ? tr('Passeport, carte d’identité…', 'Passport, ID card…')
       : itemType === 'sshKey' ? tr('Serveur de production, dépôt Git…', 'Production server, Git repo…')
+      : itemType === 'seedPhrase' ? tr('Portefeuille Bitcoin, Ledger…', 'Bitcoin wallet, Ledger…')
+      : itemType === 'apiKey' ? tr('Stripe production, jeton GitHub…', 'Stripe production, GitHub token…')
       : itemType === 'note' ? tr('Codes de secours, procédure…', 'Backup codes, procedure…')
       : isFileType(itemType) ? tr('Contrat, scan de document…', 'Contract, scanned document…')
       : 'GitHub, Netflix, Banque…';
@@ -763,6 +874,10 @@ export function openCreateCredentialModal(app: AppController, existingCredId?: s
         $<HTMLInputElement>('#field-card-exp-month').focus();
         return tr('Le mois d’expiration doit être compris entre 01 et 12', 'The expiry month must be between 01 and 12');
       }
+    }
+    if (itemType === 'seedPhrase' && !seedWords(seedInput.value).length) {
+      seedInput.focus();
+      return tr('Saisissez les mots de la phrase', 'Enter the words of the phrase');
     }
     if (template) {
       const { error } = checkTemplateValues(template, readTemplateValues($<HTMLElement>('#section-template')), tr);
@@ -829,7 +944,27 @@ export function openCreateCredentialModal(app: AppController, existingCredId?: s
         sshKey: {
           privateKey: sshPrivate.value,
           publicKey: $<HTMLTextAreaElement>('#field-ssh-public').value.trim(),
-          passphrase: $<HTMLInputElement>('#field-ssh-passphrase').value
+          passphrase: $<HTMLInputElement>('#field-ssh-passphrase').value,
+          ...(sshFingerprintValue ? { fingerprint: sshFingerprintValue } : {})
+        }
+      };
+    }
+    if (itemType === 'seedPhrase') {
+      return {
+        seedPhrase: {
+          phrase: normalizeSeedPhrase(seedInput.value),
+          passphrase: $<HTMLInputElement>('#field-seed-passphrase').value,
+          wallet: $<HTMLInputElement>('#field-seed-wallet').value.trim(),
+          address: $<HTMLInputElement>('#field-seed-address').value.trim()
+        }
+      };
+    }
+    if (itemType === 'apiKey') {
+      return {
+        apiKey: {
+          endpoint: $<HTMLInputElement>('#field-api-endpoint').value.trim(),
+          key: $<HTMLInputElement>('#field-api-key').value.trim(),
+          secret: $<HTMLInputElement>('#field-api-secret').value.trim()
         }
       };
     }
@@ -865,6 +1000,8 @@ export function openCreateCredentialModal(app: AppController, existingCredId?: s
       card: undefined,
       identity: undefined,
       sshKey: undefined,
+      seedPhrase: undefined,
+      apiKey: undefined,
       ...payloadForItemType(),
       templateId: template?.id,
       ...(template ? { fields: mergeTemplateFields(template, readTemplateValues($<HTMLElement>('#section-template')), existing?.fields) } : {})
