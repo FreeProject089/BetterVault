@@ -96,17 +96,29 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci --no-audit --no-fund
-      - uses: tauri-apps/tauri-action@v0
-        id: tauri
+      # Signature facultative : définir ces secrets pour des installateurs signés.
+      # Un secret absent vaut "" ; passé tel quel, Tauri tente d'importer un
+      # certificat vide et échoue. On ne transmet donc que les secrets définis.
+      - name: Signature Apple (si les secrets existent)
+        if: runner.os == 'macOS'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Signature facultative : définir ces secrets pour des installateurs signés
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -n "${!name}" ]; then
+              delimiter="EOF_$(openssl rand -hex 8)"
+              { echo "$name<<$delimiter"; echo "${!name}"; echo "$delimiter"; } >> "$GITHUB_ENV"
+            fi
+          done
+      - uses: tauri-apps/tauri-action@v0
+        id: tauri
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           # Vide en mode essai : tauri-action construit alors sans créer de release
           tagName: ${{ (github.event_name == 'push' || inputs.publier) && github.ref_name || '' }}
@@ -141,9 +153,13 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
-      - name: NDK
-        run: sdkmanager "ndk;27.1.12297006"
+      # SDK préinstallé sur le runner (ANDROID_HOME). android-actions/setup-android
+      # s'arrêtait sur une licence à accepter avec le sdkmanager 16 du runner.
+      - name: SDK et NDK Android
+        run: |
+          sdkmanager=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" "ndk;27.1.12297006"
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
