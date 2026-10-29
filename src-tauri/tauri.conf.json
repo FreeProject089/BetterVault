@@ -47,13 +47,14 @@
       }
     },
     "macOS": {
-      "minimumSystemVersion": "10.15"
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": "-"
     },
     "iOS": {
       "minimumSystemVersion": "14.0"
     },
     "android": {
-      "minSdkVersion": 24
+      "minSdkVersion": 26
     }
   }
 }
