@@ -43,3 +43,12 @@ src-tauri/target/
 build/splice.mjs
 
 .Prompt/
+# Paquets produits par packaging/ (Linux, iOS)
+/release/
+# Application iOS (xtool) : recopies et produits de construction
+/ios/Web/
+/ios/Resources/
+/ios/Info.plist
+/ios/.build/
+/ios/.bsp/
+/ios/xtool/

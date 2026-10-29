@@ -103,8 +103,19 @@ npx tauri build
 
     Produit un `.deb`, un `.rpm` et un `AppImage`.
 
-!!! warning "Pas de compilation croisée"
-    Chaque système construit son propre paquet : on ne produit pas un paquet macOS depuis Windows. C'est pour cela que le workflow de release utilise trois machines différentes.
+=== "Linux, depuis Docker"
+
+    Sans rien installer sur la machine (depuis Windows, ou sans droits `sudo`) :
+
+    ```bash
+    docker build -t bettervault-linux packaging/linux
+    docker run --rm -v "$PWD:/src:ro" -v "$PWD/release/linux:/out" bettervault-linux
+    ```
+
+    Le conteneur part d'Ubuntu 22.04, comme la CI : les paquets s'installent aussi sur des distributions plus anciennes. Ils arrivent dans `release/linux/`.
+
+!!! warning "Pas de compilation croisée vers macOS"
+    Chaque système construit son propre paquet : on ne produit pas un paquet macOS depuis Windows. Sans Mac, le workflow **Apple** (`gh workflow run apple.yml`) construit le `.dmg` universel sur un Mac de GitHub. Linux, lui, se construit depuis n'importe quelle machine grâce à Docker.
 
 ### Ce que la partie Rust apporte
 
@@ -157,7 +168,53 @@ Le déverrouillage biométrique passe par le Keystore Android (`BetterVaultPlugi
 
 ## Application iOS
 
-L'application iOS demande **un Mac avec Xcode** et n'est pas construite automatiquement.
+Deux chemins mènent à l'application iOS.
+
+| Chemin | Machine | Ce qu'il produit |
+| --- | --- | --- |
+| **xtool** (`ios/`) | Linux, Windows (Docker ou WSL) ou macOS, sans Xcode | Une webview native qui embarque l'application web et répond aux commandes natives (trousseau, Face ID, stockage, liens) |
+| **Tauri** (`src-tauri/`) | Un Mac avec Xcode | Le projet Xcode de Tauri, avec la partie Rust |
+
+### Avec xtool, sans Mac
+
+[xtool](https://github.com/xtool-org/xtool) construit une application iOS à partir d'un paquet SwiftPM. Le dossier `ios/` en est un : `Sources/BetterVault/` contient la webview (`WebAppSchemeHandler.swift` sert l'application à l'adresse `tauri://localhost`, la même que Tauri) et le pont natif (`NativeBridge.swift`), qui reprend une à une les commandes de `src-tauri/src/lib.rs`. La page ne voit pas la différence : elle trouve `window.__TAURI_INTERNALS__` comme dans Tauri.
+
+Il faut le **SDK iOS**, qu'Apple ne distribue que dans Xcode. Téléchargez une fois `Xcode.xip` sur [developer.apple.com](https://developer.apple.com/download/all/?q=Xcode), connecté avec votre identifiant Apple : xtool en extrait le SDK, sans installer Xcode. Construire ne demande pas de compte ; signer et installer sur un iPhone, si.
+
+=== "Docker (Windows, Linux)"
+
+    ```bash
+    docker build -t bettervault-ios packaging/ios
+    docker run --rm -it \
+      -v "$PWD:/src:ro" -v "$PWD/release/ios:/out" \
+      -v bettervault-xtool:/root \
+      -v "$HOME/Downloads/Xcode_27.1.xip:/Xcode.xip:ro" \
+      bettervault-ios
+    ```
+
+    Le volume `bettervault-xtool` garde le SDK : aux constructions suivantes, la ligne `Xcode.xip` est inutile. L'`.ipa` arrive dans `release/ios/`.
+
+=== "Linux ou WSL, xtool installé"
+
+    ```bash
+    xtool sdk install ~/Downloads/Xcode_27.1.xip   # une seule fois
+    bash scripts/build-ios.sh                       # .ipa non signé
+    bash scripts/build-ios.sh --device              # signé et installé sur l'iPhone branché
+    ```
+
+=== "GitHub (macOS)"
+
+    Le workflow **Apple** (`.github/workflows/apple.yml`, lancé à la main) construit l'`.ipa` sur un Mac de GitHub, où Xcode est déjà là : aucun `Xcode.xip` à télécharger.
+
+    ```bash
+    gh workflow run apple.yml
+    ```
+
+L'`.ipa` n'est pas signé : iOS refuse de l'installer tel quel. Sideloadly, AltStore ou `xtool dev` (connexion Apple) le signent pour votre appareil ; un compte gratuit donne une signature valable 7 jours, le programme développeur payant un an.
+
+Ce que la version xtool n'a pas encore : l'extension de remplissage automatique (elle demande un groupe d'applications, donc une signature avec profil), et l'Argon2id natif — la page utilise alors son implémentation JavaScript, plus lente au déverrouillage.
+
+### Avec Tauri, sur un Mac
 
 ```bash
 rustup target add aarch64-apple-ios

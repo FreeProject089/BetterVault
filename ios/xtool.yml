@@ -1,0 +1,10 @@
+version: 1
+# Même identifiant que l'application Tauri : le trousseau et l'App Store la reconnaissent
+bundleID: app.bettervault
+product: BetterVault
+# Info.plist et Resources/AppIcon.png sont produits par scripts/build-ios.sh
+infoPath: Info.plist
+iconPath: Resources/AppIcon.png
+resources:
+  # Application web construite (npm run build), servie par WebAppSchemeHandler
+  - Web

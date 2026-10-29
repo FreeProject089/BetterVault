@@ -1,0 +1,61 @@
+name: Apple (macOS et iOS)
+
+# Construit l'application macOS et l'application iOS sur un Mac de GitHub, sans
+# rien publier : les fichiers sont des artefacts de l'exécution (14 jours).
+#   gh workflow run apple.yml
+# iOS passe par xtool (ios/), comme sur Linux : sur macOS il prend le SDK d'Xcode,
+# déjà installé sur la machine, et aucun Xcode.xip n'est nécessaire.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS (universel, Intel et Apple Silicon)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci --no-audit --no-fund
+      # Sans certificat Developer ID : signature ad hoc, Gatekeeper demande une confirmation à l'ouverture
+      - run: npx tauri build --target universal-apple-darwin --bundles app,dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+  ios:
+    name: iOS (xtool, .ipa à signer)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: brew install xtool-org/tap/xtool
+      - run: bash scripts/build-ios.sh
+      - name: Nom du fichier
+        run: |
+          version=$(node -p "require('./package.json').version")
+          cp "$(find ios -name '*.ipa' | head -1)" "BetterVault_${version}_ios-unsigned.ipa"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: BetterVault_*_ios-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
