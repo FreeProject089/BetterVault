@@ -106,7 +106,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
             reply(attempt { try Keychain.delete(account); return NSNull() })
         case "keychain_get_secret_verified":
             guard let account = text("account") else { return reply(.failure(BridgeError("Arguments manquants"))) }
-            Biometry.verify(reason: text("reason") ?? "Déverrouiller BetterVault", allowPasscode: false) { error in
+            Biometry.verify(reason: text("reason") ?? "Déverrouiller BetterVault", allowPasscode: false) { [self] error in
                 if let error { return reply(.failure(BridgeError(error))) }
                 reply(attempt { try Keychain.get(account) })
             }
